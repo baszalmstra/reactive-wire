@@ -1,0 +1,8 @@
+node_modules/
+.pixi/
+.pi/
+dist/
+*.log
+.env
+.design-bundle/
+storybook-static/

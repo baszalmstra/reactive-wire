@@ -1,0 +1,59 @@
+[workspace]
+name = "reactive-wire"
+version = "0.1.0"
+description = "Node-based reactive automation system for Home Assistant"
+channels = ["conda-forge"]
+platforms = ["win-64", "linux-64"]
+
+[dependencies]
+nodejs = ">=21,<23"
+
+# ── Core (engine + server) ───────────────────────────────────────────────────
+[tasks]
+test = "npm run test"
+typecheck = "npm run typecheck"
+dev = "npm run dev"
+start = "npm start"
+
+# Installs are cached: they only re-run when the manifest or lockfile changes.
+[tasks.install]
+cmd = "npm install"
+inputs = ["package.json", "package-lock.json"]
+outputs = ["node_modules/.package-lock.json"]
+
+# ── Editor frontend (runs in ./frontend with the same Node toolchain) ─────────
+[tasks.fe-install]
+cmd = "npm install"
+cwd = "frontend"
+inputs = ["frontend/package.json", "frontend/package-lock.json"]
+outputs = ["frontend/node_modules/.package-lock.json"]
+
+[tasks.storybook]
+cmd = "npm run storybook"
+cwd = "frontend"
+depends-on = ["fe-install"]
+
+[tasks.build-storybook]
+cmd = "npm run build-storybook"
+cwd = "frontend"
+depends-on = ["fe-install"]
+
+[tasks.fe-typecheck]
+cmd = "npm run typecheck"
+cwd = "frontend"
+
+[tasks.fe-dev]
+cmd = "npm run dev"
+cwd = "frontend"
+
+[tasks.fe-build]
+cmd = "npm run build"
+cwd = "frontend"
+depends-on = ["fe-install"]
+
+# ── Aggregates ────────────────────────────────────────────────────────────────
+[tasks.install-all]
+depends-on = ["install", "fe-install"]
+
+[tasks.check]
+depends-on = ["typecheck", "test", "fe-typecheck"]
