@@ -14,6 +14,7 @@ import {
   type DocErrorMessage,
   type DocStateMessage,
   type DocUpdateMessage,
+  type EditorDocumentSnapshot,
 } from "../../shared/collab.js";
 import { type EntityFeed } from "../ha/client.js";
 
@@ -42,6 +43,7 @@ export interface EditorDocSyncStore {
   maxStateBytes?: number;
   encodeState: () => Uint8Array;
   applyUpdate: (update: Uint8Array) => Uint8Array | void;
+  snapshot?: () => EditorDocumentSnapshot;
 }
 
 export interface FeedHandlers {
@@ -49,6 +51,8 @@ export interface FeedHandlers {
   onDeploy?: (graph: DeployRequest) => { ok: boolean; unsupported: string[]; error?: string };
   /** Optional collaborative editor document store. When present, docState/docUpdate frames are enabled. */
   documentStore?: EditorDocSyncStore;
+  /** Called after a collaborative document update is accepted. Return a deploy result to broadcast. */
+  onDocumentChange?: (snapshot: EditorDocumentSnapshot) => { ok: boolean; unsupported?: string[]; error?: string } | void;
 }
 
 type RawRecord = Record<string, unknown>;
@@ -309,9 +313,18 @@ export function validateConnection(req: IncomingMessage, options: FeedOptions): 
   return null;
 }
 
+function deployResultFrame(result: { ok: boolean; unsupported?: string[]; error?: string }): string {
+  return JSON.stringify({ type: "deployResult", unsupported: [], ...result });
+}
+
 function sendDeployResult(ws: WebSocket, result: { ok: boolean; unsupported?: string[]; error?: string }): void {
   if (ws.readyState !== WebSocket.OPEN) return;
-  ws.send(JSON.stringify({ type: "deployResult", unsupported: [], ...result }));
+  ws.send(deployResultFrame(result));
+}
+
+function broadcastDeployResult(wss: WebSocketServer, result: { ok: boolean; unsupported?: string[]; error?: string }): void {
+  const frame = deployResultFrame(result);
+  for (const client of wss.clients) if (client.readyState === WebSocket.OPEN) client.send(frame);
 }
 
 function sendDocError(ws: WebSocket, error: string): void {
@@ -394,6 +407,10 @@ export function startFeed(ha: EntityFeed, portOrOptions: number | FeedOptions, h
             }
             client.send(encodedFrame);
           }
+          if (handlers.onDocumentChange && handlers.documentStore.snapshot) {
+            const result = handlers.onDocumentChange(handlers.documentStore.snapshot());
+            if (result) broadcastDeployResult(wss, result);
+          }
         } catch (err) {
           sendDocError(ws, err instanceof Error ? err.message : String(err));
         }
@@ -415,10 +432,10 @@ export function startFeed(ha: EntityFeed, portOrOptions: number | FeedOptions, h
         return;
       }
       try {
-        sendDeployResult(ws, handlers.onDeploy(validated.graph));
+        broadcastDeployResult(wss, handlers.onDeploy(validated.graph));
       } catch (err) {
         const error = err instanceof Error ? err.message : String(err);
-        sendDeployResult(ws, { ok: false, error });
+        broadcastDeployResult(wss, { ok: false, error });
       }
     });
   });

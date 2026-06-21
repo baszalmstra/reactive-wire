@@ -31,7 +31,7 @@ test.describe.serial("Reactive Wire editor with mock server", () => {
     await page.getByRole("button", { name: /^Entity \+$/ }).click();
     await expect(page.getByText("Choose entity", { exact: true })).toBeVisible();
 
-    await page.locator("select").last().selectOption("binary_sensor.room_presence");
+    await page.getByRole("option", { name: /binary_sensor\.room_presence/ }).click();
     await page.getByRole("button", { name: "Add" }).click();
 
     await expect(page.getByText("Choose entity", { exact: true })).toHaveCount(0);
@@ -43,5 +43,19 @@ test.describe.serial("Reactive Wire editor with mock server", () => {
     await page.getByRole("button", { name: /sun\.sun \+/ }).click();
 
     await expect(page.locator(".react-flow__node", { hasText: "sun.sun" }).last()).toBeVisible();
+  });
+
+  test("syncs the server-owned auto-deploy setting between clients", async ({ page, context }) => {
+    const autoDeploy = page.locator(".rw-autodeploy input");
+    await page.locator(".rw-autodeploy").click();
+    await expect(autoDeploy).toBeChecked();
+
+    const second = await context.newPage();
+    await second.goto("/");
+    const secondAutoDeploy = second.locator(".rw-autodeploy input");
+    await expect(secondAutoDeploy).toBeChecked();
+
+    await second.locator(".rw-autodeploy").click();
+    await expect(autoDeploy).not.toBeChecked();
   });
 });

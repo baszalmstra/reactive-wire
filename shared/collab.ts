@@ -29,11 +29,19 @@ export interface CollabFlow {
   edges: CollabEdge[];
 }
 
+export interface EditorDocumentSettings {
+  /** Server-owned actuation policy. When true, the server deploys the configured flow after document edits. */
+  autoDeploy: boolean;
+  /** Flow the server should auto-deploy. This is intentionally separate from each client's active tab. */
+  deployFlowId?: string;
+}
+
 export interface EditorDocumentSnapshot {
   version: 1;
   activeFlowId?: string;
   flows: CollabFlow[];
   macros: MacroMap;
+  settings: EditorDocumentSettings;
 }
 
 export type DocStateMessage = { type: "docState"; update: string };
@@ -140,7 +148,13 @@ function sanitizeMacroMap(raw: unknown): MacroMap {
 }
 
 export function emptyEditorDocumentSnapshot(flowId = DEFAULT_FLOW_ID): EditorDocumentSnapshot {
-  return { version: VERSION, activeFlowId: flowId, flows: [{ id: flowId, name: "Flow 1", nodes: [], edges: [] }], macros: {} };
+  return {
+    version: VERSION,
+    activeFlowId: flowId,
+    flows: [{ id: flowId, name: "Flow 1", nodes: [], edges: [] }],
+    macros: {},
+    settings: { autoDeploy: false, deployFlowId: flowId },
+  };
 }
 
 export function sanitizeEditorDocumentSnapshot(raw: unknown): EditorDocumentSnapshot {
@@ -163,7 +177,18 @@ export function sanitizeEditorDocumentSnapshot(raw: unknown): EditorDocumentSnap
   }
   if (flows.length === 0) flows.push(emptyEditorDocumentSnapshot().flows[0]!);
   const activeFlowId = safeString(record.activeFlowId, flows[0]!.id).trim();
-  return { version: VERSION, activeFlowId: flows.some((f) => f.id === activeFlowId) ? activeFlowId : flows[0]!.id, flows, macros: sanitizeMacroMap(record.macros) };
+  const settingsRecord = asRecord(record.settings);
+  const deployFlowId = safeString(settingsRecord?.deployFlowId, activeFlowId || flows[0]!.id).trim();
+  return {
+    version: VERSION,
+    activeFlowId: flows.some((f) => f.id === activeFlowId) ? activeFlowId : flows[0]!.id,
+    flows,
+    macros: sanitizeMacroMap(record.macros),
+    settings: {
+      autoDeploy: settingsRecord?.autoDeploy === true,
+      deployFlowId: flows.some((f) => f.id === deployFlowId) ? deployFlowId : flows[0]!.id,
+    },
+  };
 }
 
 function rootMaps(doc: Y.Doc): { meta: Y.Map<unknown>; flows: Y.Map<Y.Map<unknown>>; flowOrder: Y.Array<string>; macros: Y.Map<unknown> } {
@@ -302,6 +327,8 @@ export function applyEditorSnapshot(doc: Y.Doc, rawSnapshot: unknown, origin?: u
     const { meta, flows, flowOrder, macros } = rootMaps(doc);
     setMapValueIfChanged(meta, "version", VERSION);
     setMapValueIfChanged(meta, "activeFlowId", snapshot.activeFlowId ?? snapshot.flows[0]?.id ?? DEFAULT_FLOW_ID);
+    setMapValueIfChanged(meta, "autoDeploy", snapshot.settings.autoDeploy);
+    setMapValueIfChanged(meta, "deployFlowId", snapshot.settings.deployFlowId ?? snapshot.activeFlowId ?? snapshot.flows[0]?.id ?? DEFAULT_FLOW_ID);
     for (const id of Array.from(flows.keys())) flows.delete(id);
     replaceArray(flowOrder, snapshot.flows.map((f) => f.id));
     for (const flow of snapshot.flows) {
@@ -329,6 +356,8 @@ export function applyEditorSnapshotDiff(doc: Y.Doc, previousRaw: unknown, nextRa
     const { meta, flows, flowOrder, macros } = rootMaps(doc);
     setMapValueIfChanged(meta, "version", VERSION);
     setMapValueIfChanged(meta, "activeFlowId", next.activeFlowId ?? next.flows[0]?.id ?? DEFAULT_FLOW_ID);
+    setMapValueIfChanged(meta, "autoDeploy", next.settings.autoDeploy);
+    setMapValueIfChanged(meta, "deployFlowId", next.settings.deployFlowId ?? next.activeFlowId ?? next.flows[0]?.id ?? DEFAULT_FLOW_ID);
 
     const prevFlows = new Map(previous.flows.map((f) => [f.id, f]));
     const nextFlows = new Map(next.flows.map((f) => [f.id, f]));
@@ -403,7 +432,18 @@ export function snapshotFromEditorDoc(doc: Y.Doc): EditorDocumentSnapshot {
   }
   const fallback = outFlows[0]?.id ?? DEFAULT_FLOW_ID;
   const activeFlowId = safeString(meta.get("activeFlowId"), fallback);
-  return { version: VERSION, activeFlowId: outFlows.some((f) => f.id === activeFlowId) ? activeFlowId : fallback, flows: outFlows.length ? outFlows : emptyEditorDocumentSnapshot().flows, macros: macroObj };
+  const deployFlowId = safeString(meta.get("deployFlowId"), activeFlowId || fallback);
+  const snapshotFlows = outFlows.length ? outFlows : emptyEditorDocumentSnapshot().flows;
+  return {
+    version: VERSION,
+    activeFlowId: snapshotFlows.some((f) => f.id === activeFlowId) ? activeFlowId : fallback,
+    flows: snapshotFlows,
+    macros: macroObj,
+    settings: {
+      autoDeploy: meta.get("autoDeploy") === true,
+      deployFlowId: snapshotFlows.some((f) => f.id === deployFlowId) ? deployFlowId : snapshotFlows[0]?.id ?? DEFAULT_FLOW_ID,
+    },
+  };
 }
 
 export function encodeUpdateBase64(update: Uint8Array): string {

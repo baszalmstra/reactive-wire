@@ -118,9 +118,10 @@ In the editor you can drag pins to **connect** (invalid types and cycles are ref
 including pointing an entity node at any of your real `entity_id`s. Edits update the live
 preview immediately.
 
-Press **Deploy** (or tick **auto-deploy**) to send the graph to the server and run it **live**
-against Home Assistant; sinks show as live in the editor. Editing returns the graph to a draft
-(sinks dry-run) until the next deploy.
+Press **Deploy** to send the graph to the server and run it **live** against Home Assistant;
+sinks show as live in the editor. **Auto-deploy** is a server-owned, synced document setting:
+when enabled, the server deploys the configured flow after collaborative graph edits from any
+client. With auto-deploy off, edits remain a draft until the next explicit Deploy.
 
 ## Layout
 

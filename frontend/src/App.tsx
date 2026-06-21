@@ -317,14 +317,18 @@ export function App() {
     if (snapshotFlows.length === 0) snapshotFlows.push(emptyEditorDocumentSnapshot().flows[0]!);
     // The active tab is local UI state. Persist a stable fallback only so old/new clients have a
     // valid active flow if their current tab disappears, but don't make collaborators fight over it.
-    return { version: 1, activeFlowId: snapshotFlows[0]?.id, flows: snapshotFlows, macros: macroLib.macros };
-  }, [activeFlowId, flows, macroLib.macros]);
-
-  const suppressNextAutoDeploy = useRef(false);
+    const deployFlowId = snapshotFlows.some((flow) => flow.id === activeFlowId) ? activeFlowId : snapshotFlows[0]?.id;
+    return {
+      version: 1,
+      activeFlowId: snapshotFlows[0]?.id,
+      flows: snapshotFlows,
+      macros: macroLib.macros,
+      settings: { autoDeploy, deployFlowId },
+    };
+  }, [activeFlowId, autoDeploy, flows, macroLib.macros]);
 
   const applyRemoteDocumentSnapshot = useCallback((snapshot: EditorDocumentSnapshot) => {
     applyingCollab.current = true;
-    suppressNextAutoDeploy.current = true;
     const nextFlows = snapshot.flows.map((flow) => ({
       id: flow.id,
       name: flow.name,
@@ -340,6 +344,7 @@ export function App() {
       setEdges(active.edges);
     }
     macroLib.replace(snapshot.macros);
+    setAutoDeploy(snapshot.settings.autoDeploy);
     setSelected((id) => (id && active?.nodes.some((node) => node.id === id) ? id : null));
     setSelectedIds((ids) => ids.filter((id) => active?.nodes.some((node) => node.id === id)));
     setPast([]);
@@ -569,21 +574,9 @@ export function App() {
     if (!server.lastResult.ok) showToast(server.lastResult.error ? `Deploy failed: ${server.lastResult.error}` : "Deploy failed", "error");
   }, [deployPending, server.lastResult, showToast]);
 
-  // The Deploy button opens a guard first; auto-deploy bypasses it (the user already opted in).
+  // The Deploy button opens a guard first. Auto-deploy is a synced server-side document setting;
+  // when enabled, the server deploys the configured flow after collaborative document updates.
   const requestDeploy = useCallback(() => setDeployOpen(true), []);
-
-  // Auto-deploy: redeploy (debounced) when the deployable graph changes locally. Remote
-  // collaborator updates become a draft in this browser; they must not actuate HA through a
-  // different user's auto-deploy setting.
-  useEffect(() => {
-    if (suppressNextAutoDeploy.current) {
-      suppressNextAutoDeploy.current = false;
-      return;
-    }
-    if (!autoDeploy || !server.connected) return;
-    const t = setTimeout(deployNow, 400);
-    return () => clearTimeout(t);
-  }, [autoDeploy, server.connected, graphSig, deployNow]);
 
   // Editing returns the graph to a draft (sinks dry-run) until the next deploy.
   useEffect(() => {
@@ -1036,33 +1029,32 @@ export function App() {
           </button>
         </div>
 
-        <div className="rw-tb-center">
-          <StatusPill {...status} />
+        <div className="rw-tb-center" aria-label="Deployment and live state">
+          <div className="rw-tb-group rw-deploy-group">
+            <StatusPill {...status} />
+            <label className="rw-autodeploy rw-hide-mobile" title="Server auto-deploys this flow after graph edits">
+              <input type="checkbox" checked={autoDeploy} onChange={(e) => setAutoDeploy(e.target.checked)} />
+              <span className="rw-checkbox" />
+              auto-deploy
+            </label>
+            <button
+              onClick={requestDeploy}
+              disabled={!server.connected || deployPending}
+              title={server.connected ? "Deploy this graph to the server" : "Editor feed disconnected; live server state is unknown"}
+              className="rw-deploy"
+            >
+              Deploy
+              {server.lastResult && (!server.lastResult.ok || server.lastResult.unsupported.length > 0) && (
+                <span className={cn("rw-deploy-badge", server.lastResult.ok && "warn")}>
+                  {server.lastResult.ok ? server.lastResult.unsupported.length : "!"}
+                </span>
+              )}
+            </button>
+            {deployNote && <span className={cn("rw-deploy-note rw-hide-mobile", server.lastResult && (server.lastResult.ok ? "ok" : "error"))}>{deployNote}</span>}
+          </div>
         </div>
 
         <div className="rw-tb-spacer" />
-
-        <div className="rw-tb-group rw-deploy-group">
-          <label className="rw-autodeploy rw-hide-mobile" title="Deploy automatically after graph edits">
-            <input type="checkbox" checked={autoDeploy} onChange={(e) => setAutoDeploy(e.target.checked)} />
-            <span className="rw-checkbox" />
-            auto-deploy
-          </label>
-          <button
-            onClick={requestDeploy}
-            disabled={!server.connected || deployPending}
-            title={server.connected ? "Deploy this graph to the server" : "Editor feed disconnected; live server state is unknown"}
-            className="rw-deploy"
-          >
-            Deploy
-            {server.lastResult && (!server.lastResult.ok || server.lastResult.unsupported.length > 0) && (
-              <span className={cn("rw-deploy-badge", server.lastResult.ok && "warn")}>
-                {server.lastResult.ok ? server.lastResult.unsupported.length : "!"}
-              </span>
-            )}
-          </button>
-          {deployNote && <span className={cn("rw-deploy-note rw-hide-mobile", server.lastResult && (server.lastResult.ok ? "ok" : "error"))}>{deployNote}</span>}
-        </div>
 
         <button
           onClick={() => setProblemsOpen((o) => !o)}
