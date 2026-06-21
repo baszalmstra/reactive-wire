@@ -45,6 +45,16 @@ test.describe.serial("Reactive Wire editor with mock server", () => {
     await expect(page.locator(".react-flow__node", { hasText: "sun.sun" }).last()).toBeVisible();
   });
 
+  test("shows unavailable entity output warnings in the Problems panel", async ({ page }) => {
+    await page.getByRole("button", { name: /^Entity \+$/ }).click();
+    await page.locator('input[placeholder="domain.entity"]').last().fill("binary_sensor.definitely_missing");
+    await page.getByRole("button", { name: "Add" }).click();
+
+    await expect(page.getByRole("button", { name: /△\s*[12]/ })).toBeVisible();
+    await page.locator(".rw-problems").click();
+    await expect(page.getByRole("button", { name: /Output 'state' is unavailable\./ })).toBeVisible();
+  });
+
   test("syncs the server-owned auto-deploy setting between clients", async ({ page, context }) => {
     const autoDeploy = page.locator(".rw-autodeploy input");
     await page.locator(".rw-autodeploy").click();

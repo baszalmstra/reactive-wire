@@ -45,7 +45,25 @@ export function deriveProblems(
           scope: "runtime",
           node: n.id,
           title: n.title,
-          message: v.msg ? `Output '${p.label}' is in an error state: ${v.msg}` : `Output '${p.label}' is in an error state.`,
+          message: v.msg ? `Output '${p.label || p.id}' is in an error state: ${v.msg}` : `Output '${p.label || p.id}' is in an error state.`,
+        });
+      } else if (v && v.status === "unavailable") {
+        out.push({
+          id: `uo-${n.id}-${p.id}`,
+          severity: "warn",
+          scope: "runtime",
+          node: n.id,
+          title: n.title,
+          message: `Output '${p.label || p.id}' is unavailable.`,
+        });
+      } else if (v && v.status === "stale") {
+        out.push({
+          id: `so-${n.id}-${p.id}`,
+          severity: "warn",
+          scope: "runtime",
+          node: n.id,
+          title: n.title,
+          message: `Output '${p.label || p.id}' is stale; showing the last known value.`,
         });
       }
     }
@@ -71,16 +89,64 @@ export function deriveProblems(
   for (const n of nodes) {
     for (const p of n.inputs) {
       const v = results.inputs[`${n.id}:${p.id}`];
-      if (v && v.status === "unavailable") {
+      if (v && v.status === "error") {
         out.push({
-          id: `u-${n.id}-${p.id}`,
+          id: `ei-${n.id}-${p.id}`,
+          severity: "error",
+          scope: "runtime",
+          node: n.id,
+          title: n.title,
+          message: v.msg ? `Input '${p.label || p.id}' is in an error state: ${v.msg}` : `Input '${p.label || p.id}' is in an error state.`,
+        });
+      } else if (v && v.status === "unavailable") {
+        out.push({
+          id: `ui-${n.id}-${p.id}`,
           severity: "warn",
           scope: "runtime",
           node: n.id,
           title: n.title,
           message: `Input '${p.label || p.id}' is unavailable.`,
         });
+      } else if (v && v.status === "stale") {
+        out.push({
+          id: `si-${n.id}-${p.id}`,
+          severity: "warn",
+          scope: "runtime",
+          node: n.id,
+          title: n.title,
+          message: `Input '${p.label || p.id}' is stale; showing the last known value.`,
+        });
       }
+    }
+
+    const action = results.actions[n.id];
+    if (action?.status === "error") {
+      out.push({
+        id: `act-e-${n.id}`,
+        severity: "error",
+        scope: "runtime",
+        node: n.id,
+        title: n.title,
+        message: action.note ? `Sink action is blocked: ${action.note}.` : "Sink action is blocked by an error.",
+      });
+    } else if (action?.status === "unavailable") {
+      out.push({
+        id: `act-u-${n.id}`,
+        severity: "warn",
+        scope: "runtime",
+        node: n.id,
+        title: n.title,
+        message: action.note ? `Sink action is holding: ${action.note}.` : "Sink action is holding because a required value is unavailable.",
+      });
+    } else if (action?.status === "stale") {
+      out.push({
+        id: `act-s-${n.id}`,
+        severity: "warn",
+        scope: "runtime",
+        node: n.id,
+        title: n.title,
+        message: action.note ? `Sink action is stale: ${action.note}.` : "Sink action is based on stale values.",
+      });
     }
   }
 
@@ -89,7 +155,7 @@ export function deriveProblems(
       id: "ha",
       severity: "warn",
       scope: "runtime",
-      node: nodes[0].id,
+      node: nodes[0]!.id,
       title: "Home Assistant",
       message: "Editor feed disconnected — live server state is unknown; a previously deployed graph may still be running.",
     });

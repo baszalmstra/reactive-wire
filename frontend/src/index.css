@@ -166,6 +166,13 @@
 .rw-insp-card { display: flex; flex-direction: column; gap: 9px; border: 1px solid var(--rw-line-soft); background: var(--rw-panel2); border-radius: 9px; padding: 10px; }
 .rw-insp-card-row { display: flex; align-items: center; gap: 8px; }
 .rw-insp-card-title { font-family: var(--font-mono); font-size: 12px; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rw-diag-list { display: flex; flex-direction: column; gap: 7px; }
+.rw-diag { display: flex; align-items: flex-start; gap: 8px; padding: 8px 9px; border-radius: 8px; font-size: 11.5px; line-height: 1.4; border: 1px solid var(--rw-line-soft); }
+.rw-diag.warn { color: var(--rw-h-warn); background: color-mix(in oklab, var(--rw-h-warn) 8%, transparent); }
+.rw-diag.error { color: var(--rw-h-error); background: color-mix(in oklab, var(--rw-h-error) 8%, transparent); }
+.rw-diag-icon { width: 16px; height: 16px; border-radius: 5px; flex: none; display: inline-flex; align-items: center; justify-content: center; color: #fff; font-size: 10px; font-weight: 800; line-height: 1; }
+.rw-diag.warn .rw-diag-icon { background: var(--rw-h-warn); }
+.rw-diag.error .rw-diag-icon { background: var(--rw-h-error); }
 .rw-insp-values { display: flex; flex-direction: column; gap: 12px; }
 .rw-insp-val { display: flex; flex-direction: column; gap: 4px; }
 .rw-insp-val-label { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--rw-dim); font-size: 11px; }

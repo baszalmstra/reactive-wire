@@ -34,6 +34,32 @@ function TypeChip({ type }: { type: NodeData["outputs"][number]["type"] }) {
   );
 }
 
+type Diagnostic = { severity: "error" | "warn"; text: string };
+
+function diagnosticsFor(node: NodeData, results: EvalResults): Diagnostic[] {
+  const out: Diagnostic[] = [];
+  for (const p of node.outputs) {
+    const label = p.label || p.id;
+    const v = results.outputs[`${node.id}:${p.id}`];
+    if (p.ghost) out.push({ severity: "error", text: `Output '${label}' is a missing entity attribute.` });
+    else if (v?.status === "error") out.push({ severity: "error", text: v.msg ? `Output '${label}' error: ${v.msg}` : `Output '${label}' is in an error state.` });
+    else if (v?.status === "unavailable") out.push({ severity: "warn", text: `Output '${label}' is unavailable.` });
+    else if (v?.status === "stale") out.push({ severity: "warn", text: `Output '${label}' is stale; showing the last known value.` });
+  }
+  for (const p of node.inputs) {
+    const label = p.label || p.id;
+    const v = results.inputs[`${node.id}:${p.id}`];
+    if (v?.status === "error") out.push({ severity: "error", text: v.msg ? `Input '${label}' error: ${v.msg}` : `Input '${label}' is in an error state.` });
+    else if (v?.status === "unavailable") out.push({ severity: "warn", text: `Input '${label}' is unavailable.` });
+    else if (v?.status === "stale") out.push({ severity: "warn", text: `Input '${label}' is stale; showing the last known value.` });
+  }
+  const action = results.actions[node.id];
+  if (action?.status === "error") out.push({ severity: "error", text: action.note ? `Sink action is blocked: ${action.note}.` : "Sink action is blocked by an error." });
+  else if (action?.status === "unavailable") out.push({ severity: "warn", text: action.note ? `Sink action is holding: ${action.note}.` : "Sink action is holding because a required value is unavailable." });
+  else if (action?.status === "stale") out.push({ severity: "warn", text: action.note ? `Sink action is stale: ${action.note}.` : "Sink action is based on stale values." });
+  return out;
+}
+
 function BigValue({ value, unit, deviceClass }: { value: RWValue | undefined; unit?: string; deviceClass?: unknown }) {
   const f = formatValue(value);
   const typeColor = value && (value.status === "ok" || value.status === "stale") ? TYPE_VAR[value.type] : undefined;
@@ -120,6 +146,7 @@ export function Inspector({
   // An entity node's state value carries a device-class symbol drawn from the live feed.
   const deviceClass = node.type === "entity" ? entities[String(cfg.entity_id ?? "")]?.attributes?.device_class : undefined;
   const healthLabel = health === "ok" ? "healthy" : health === "warn" ? "warning" : "error";
+  const diagnostics = diagnosticsFor(node, results);
 
   return (
     <aside className="rw-inspector">
@@ -140,6 +167,20 @@ export function Inspector({
         </div>
 
         {description && <p className="rw-insp-desc">{description}</p>}
+
+        {diagnostics.length > 0 && (
+          <>
+            <div className="rw-insp-sect">Diagnostics</div>
+            <div className="rw-diag-list">
+              {diagnostics.map((d, i) => (
+                <div key={i} className={cn("rw-diag", d.severity)}>
+                  <span className="rw-diag-icon">{d.severity === "error" ? "!" : "△"}</span>
+                  <span>{d.text}</span>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
 
         {isMacro && (
           <>
