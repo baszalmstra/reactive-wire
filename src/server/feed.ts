@@ -6,6 +6,15 @@ import type { ViewEdge } from "../../shared/engine/evaluate.js";
 import type { MacroDef, MacroMap } from "../../shared/macros.js";
 import type { NodeData, PinDef } from "../../shared/node-types.js";
 import type { ValueType } from "../../shared/theme.js";
+import {
+  DEFAULT_MAX_DOC_STATE_BYTES,
+  DEFAULT_MAX_DOC_UPDATE_BYTES,
+  decodeUpdateBase64,
+  encodeUpdateBase64,
+  type DocErrorMessage,
+  type DocStateMessage,
+  type DocUpdateMessage,
+} from "../../shared/collab.js";
 import { type EntityFeed } from "../ha/client.js";
 
 export interface DeployRequest {
@@ -28,9 +37,18 @@ export interface FeedOptions {
   deployToken?: string;
 }
 
+export interface EditorDocSyncStore {
+  maxUpdateBytes?: number;
+  maxStateBytes?: number;
+  encodeState: () => Uint8Array;
+  applyUpdate: (update: Uint8Array) => Uint8Array | void;
+}
+
 export interface FeedHandlers {
   /** Called when an editor deploys a graph; returns a result to send back. */
   onDeploy?: (graph: DeployRequest) => { ok: boolean; unsupported: string[]; error?: string };
+  /** Optional collaborative editor document store. When present, docState/docUpdate frames are enabled. */
+  documentStore?: EditorDocSyncStore;
 }
 
 type RawRecord = Record<string, unknown>;
@@ -281,6 +299,10 @@ function tokenMatches(provided: string | null | undefined, expected: string | un
 }
 
 export function validateConnection(req: IncomingMessage, options: FeedOptions): { status: number; message: string } | null {
+  const bindHost = normalizeAllowedHost(options.host ?? "127.0.0.1");
+  if (!options.deployToken && !isLoopbackHost(bindHost)) {
+    return { status: 401, message: "RW_DEPLOY_TOKEN is required when binding outside loopback" };
+  }
   if (!isAllowedHost(req, options)) return { status: 403, message: "WebSocket Host is not allowed" };
   if (!isAllowedOrigin(req, options)) return { status: 403, message: "WebSocket Origin is not allowed" };
   if (!tokenMatches(requestToken(req), options.deployToken)) return { status: 401, message: "Invalid deploy token" };
@@ -290,6 +312,12 @@ export function validateConnection(req: IncomingMessage, options: FeedOptions): 
 function sendDeployResult(ws: WebSocket, result: { ok: boolean; unsupported?: string[]; error?: string }): void {
   if (ws.readyState !== WebSocket.OPEN) return;
   ws.send(JSON.stringify({ type: "deployResult", unsupported: [], ...result }));
+}
+
+function sendDocError(ws: WebSocket, error: string): void {
+  if (ws.readyState !== WebSocket.OPEN) return;
+  const frame: DocErrorMessage = { type: "docError", error };
+  ws.send(JSON.stringify(frame));
 }
 
 function normalizeOptions(portOrOptions: number | FeedOptions): FeedOptions {
@@ -303,9 +331,13 @@ function normalizeOptions(portOrOptions: number | FeedOptions): FeedOptions {
  */
 export function startFeed(ha: EntityFeed, portOrOptions: number | FeedOptions, handlers: FeedHandlers = {}): () => void {
   const options = normalizeOptions(portOrOptions);
+  const maxDocUpdateBytes = handlers.documentStore?.maxUpdateBytes ?? DEFAULT_MAX_DOC_UPDATE_BYTES;
+  const maxDocStateBytes = handlers.documentStore?.maxStateBytes ?? DEFAULT_MAX_DOC_STATE_BYTES;
+  const maxPayload = Math.max(8_000_000, Math.ceil(Math.max(maxDocUpdateBytes, maxDocStateBytes) * 1.5) + 2_048);
   const wss = new WebSocketServer({
     port: options.port,
     host: options.host,
+    maxPayload,
     verifyClient: (info, done) => {
       const rejected = validateConnection(info.req, options);
       if (rejected) done(false, rejected.status, rejected.message);
@@ -316,6 +348,14 @@ export function startFeed(ha: EntityFeed, portOrOptions: number | FeedOptions, h
   wss.on("connection", (ws, req) => {
     const connectionTokenOk = tokenMatches(requestToken(req), options.deployToken);
     ws.send(JSON.stringify({ type: "entities", entities: ha.entitiesSnapshot() }));
+    if (handlers.documentStore) {
+      try {
+        const frame: DocStateMessage = { type: "docState", update: encodeUpdateBase64(handlers.documentStore.encodeState()) };
+        ws.send(JSON.stringify(frame));
+      } catch (err) {
+        sendDocError(ws, err instanceof Error ? err.message : String(err));
+      }
+    }
     ws.on("message", (raw) => {
       let msg: unknown;
       try {
@@ -324,13 +364,48 @@ export function startFeed(ha: EntityFeed, portOrOptions: number | FeedOptions, h
         sendDeployResult(ws, { ok: false, error: "Malformed JSON message" });
         return;
       }
-      if (!isRecord(msg) || msg.type !== "deploy") return;
+      if (!isRecord(msg)) return;
+      const messageToken = typeof msg.token === "string" ? msg.token : null;
+      const tokenOk = connectionTokenOk || tokenMatches(messageToken, options.deployToken);
+
+      if (msg.type === "docUpdate") {
+        if (!handlers.documentStore) {
+          sendDocError(ws, "Collaborative document sync is not enabled on this server");
+          return;
+        }
+        if (!tokenOk) {
+          sendDocError(ws, "Invalid deploy token");
+          return;
+        }
+        if (typeof msg.update !== "string") {
+          sendDocError(ws, "Document update must be a base64 string");
+          return;
+        }
+        try {
+          const update = decodeUpdateBase64(msg.update, maxDocUpdateBytes);
+          const applied = handlers.documentStore.applyUpdate(update) ?? update;
+          const frame: DocUpdateMessage = { type: "docUpdate", update: encodeUpdateBase64(applied) };
+          const encodedFrame = JSON.stringify(frame);
+          for (const client of wss.clients) {
+            if (client === ws || client.readyState !== WebSocket.OPEN) continue;
+            if (client.bufferedAmount > maxPayload) {
+              client.close(1009, "client is too far behind");
+              continue;
+            }
+            client.send(encodedFrame);
+          }
+        } catch (err) {
+          sendDocError(ws, err instanceof Error ? err.message : String(err));
+        }
+        return;
+      }
+
+      if (msg.type !== "deploy") return;
       if (!handlers.onDeploy) {
         sendDeployResult(ws, { ok: false, error: "Deploy is not enabled on this server" });
         return;
       }
-      const messageToken = typeof msg.token === "string" ? msg.token : null;
-      if (!connectionTokenOk && !tokenMatches(messageToken, options.deployToken)) {
+      if (!tokenOk) {
         sendDeployResult(ws, { ok: false, error: "Invalid deploy token" });
         return;
       }
@@ -355,7 +430,12 @@ export function startFeed(ha: EntityFeed, portOrOptions: number | FeedOptions, h
       pending = null;
       const msg = JSON.stringify({ type: "entities", entities: ha.entitiesSnapshot() });
       for (const client of wss.clients) {
-        if (client.readyState === WebSocket.OPEN) client.send(msg);
+        if (client.readyState !== WebSocket.OPEN) continue;
+        if (client.bufferedAmount > maxPayload) {
+          client.close(1009, "client is too far behind");
+          continue;
+        }
+        client.send(msg);
       }
     }, 150);
   });

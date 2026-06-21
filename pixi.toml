@@ -14,6 +14,7 @@ test = "npm run test"
 typecheck = "npm run typecheck"
 dev = "npm run dev"
 start = "npm start"
+e2e = "npm run e2e"
 
 # Installs are cached: they only re-run when the manifest or lockfile changes.
 [tasks.install]

@@ -4,5 +4,9 @@ node_modules/
 dist/
 *.log
 .env
+.rw-data/
+.rw-data-e2e/
 .design-bundle/
 storybook-static/
+test-results/
+playwright-report/

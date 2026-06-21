@@ -2,7 +2,7 @@ import type { ValueType } from "./theme.js";
 
 export type IconName =
   | "sun" | "motion" | "bulb" | "and" | "cmp" | "const"
-  | "mem" | "sel" | "io-in" | "io-out" | "macro" | "menu"
+  | "mem" | "sel" | "io-in" | "io-out" | "macro" | "menu" | "ha"
   // Device-class glyphs shown next to an entity's value.
   | "occupancy" | "door" | "window" | "temperature" | "humidity"
   | "power" | "energy" | "battery" | "timestamp" | "duration"

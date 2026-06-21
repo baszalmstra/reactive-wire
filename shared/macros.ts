@@ -64,10 +64,11 @@ export function macroHasMemory(def: MacroDef, macros: MacroMap, seen: Set<string
 }
 
 let macroSeq = 0;
-/** A fresh macro id, unique within a session. */
+/** A fresh macro id, unique enough across concurrent browser sessions. */
 export function newMacroId(): string {
   macroSeq += 1;
-  return `macro_${Date.now().toString(36)}_${macroSeq}`;
+  const rand = globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2, 10);
+  return `macro_${Date.now().toString(36)}_${rand}_${macroSeq}`;
 }
 
 /**

@@ -5,6 +5,7 @@ import { type EntityFeed, type HAClient } from "../ha/client.js";
 import { startFeed } from "./feed.js";
 import { startSimulator } from "./sim.js";
 import { Deployer } from "./runtime.js";
+import { EditorDocumentStore } from "./doc-store.js";
 import type { NodeData } from "../../shared/node-types.js";
 import type { ViewEdge } from "../../shared/engine/evaluate.js";
 import type { MacroMap } from "../../shared/macros.js";
@@ -22,13 +23,28 @@ const listEnv = (name: string): string[] | undefined => {
 };
 const allowedHosts = listEnv("RW_ALLOWED_HOSTS");
 const allowedOrigins = listEnv("RW_ALLOWED_ORIGINS");
+const dataDir = process.env.RW_DATA_DIR?.trim() || ".rw-data";
 
 let ha: HAClient & EntityFeed;
 let stopSim = () => {};
 
+function describeHaConnectError(err: unknown): string {
+  if (err === 1) return "cannot connect to Home Assistant; check HA_URL is reachable from this process";
+  if (err === 2) return "invalid Home Assistant token";
+  if (err === 4) return "HA_URL is required";
+  if (err === 5) return "browser HTTPS to Home Assistant HTTP is not allowed by the HA websocket client";
+  return err instanceof Error ? err.message : String(err);
+}
+
 if (url && token) {
-  ha = await RealHA.connect(url, token);
-  console.log(`Connected to Home Assistant at ${url}.`);
+  try {
+    ha = await RealHA.connect(url, token);
+    console.log(`Connected to Home Assistant at ${url}.`);
+  } catch (err) {
+    console.error(`Failed to connect to Home Assistant at ${url}: ${describeHaConnectError(err)}.`);
+    console.error("Unset HA_URL/HA_TOKEN to run in mock mode, or fix the Home Assistant URL/token and network route.");
+    process.exit(1);
+  }
 } else {
   const mock = new MockHA();
   stopSim = startSimulator(mock);
@@ -40,16 +56,19 @@ if (url && token) {
 // so just launching the server can't change anything. Async data-source nodes fetch over HTTP
 // using the platform fetch, driven by the deployer's poller after a graph is deployed.
 const deployer = new Deployer(ha, 1000, (url) => fetch(url));
+const documentStore = new EditorDocumentStore({ dataDir });
 
 const stopFeed = startFeed(ha, { port, host, allowedHosts, allowedOrigins, deployToken }, {
   onDeploy: (req) => {
     deployer.deploy(req.nodes as unknown as NodeData[], req.edges as unknown as ViewEdge[], true, (req.macros ?? {}) as unknown as MacroMap);
     return { ok: true, unsupported: [] };
   },
+  documentStore,
 });
 
 console.log(`Reactive Wire running: live entity feed on ws://${host}:${port}.`);
 if (deployToken) console.log("Deploy/control WebSocket requires RW_DEPLOY_TOKEN.");
+console.log(`Collaborative editor document persistence: ${documentStore.filePath}.`);
 console.log("No graph deployed yet. Build one in the editor and Deploy to actuate Home Assistant.");
 
 const shutdown = () => {

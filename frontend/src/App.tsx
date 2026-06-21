@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent } from "react";
+import * as Y from "yjs";
 import {
   ReactFlow,
   Background,
@@ -60,9 +61,19 @@ import { Icon } from "./components/Icon.js";
 import { emptyFlow, type EditorNode, type Flow } from "./canvas/flows.js";
 import { useValueHistory } from "./canvas/use-value-history.js";
 import type { EvalResults } from "../../shared/results.js";
+import {
+  DEFAULT_MAX_DOC_STATE_BYTES,
+  applyEditorSnapshotDiff,
+  decodeUpdateBase64,
+  emptyEditorDocumentSnapshot,
+  snapshotFromEditorDoc,
+  type CollabEdge,
+  type CollabNode,
+  type EditorDocumentSnapshot,
+} from "../../shared/collab.js";
 
 const nodeTypes = { rw: RWNode, comment: CommentNode };
-const DEFAULT_AESTHETIC: Aesthetic = "warm";
+const DEFAULT_AESTHETIC: Aesthetic = "ide";
 
 const isRWNode = (n: EditorNode): n is RWNodeType => n.type === "rw";
 const isCommentNode = (n: EditorNode): n is CommentNodeType => n.type === "comment";
@@ -84,6 +95,55 @@ function staleResults(r: EvalResults): EvalResults {
 }
 
 const emptyResults = (): EvalResults => ({ outputs: {}, inputs: {}, health: {}, actions: {}, connected: {}, sinks: {} });
+const collabServerOrigin = { source: "server" };
+const collabLocalOrigin = { source: "local" };
+
+function nodesForCollab(nodes: EditorNode[]): CollabNode[] {
+  return nodes.map((node) => {
+    const { selected: _selected, ...rest } = node as EditorNode & { selected?: boolean };
+    return rest as unknown as CollabNode;
+  });
+}
+
+function edgesForCollab(edges: Edge[]): CollabEdge[] {
+  return edges.map((edge) => ({ ...edge }) as unknown as CollabEdge);
+}
+
+function withInitialSize(node: EditorNode): EditorNode {
+  if (node.type === "rw") {
+    const def = (node as RWNodeType).data.def;
+    const g = nodeGeom(def);
+    return { ...node, initialWidth: g.w, initialHeight: g.h } as EditorNode;
+  }
+  if (node.type === "comment") {
+    const data = (node as CommentNodeType).data;
+    return { ...node, initialWidth: data.w, initialHeight: data.h } as EditorNode;
+  }
+  return node;
+}
+
+function rwEditorNode(id: string, def: NodeData, position: { x: number; y: number }, zIndex = 1): EditorNode {
+  return withInitialSize({ id, type: "rw", position, dragHandle: ".rw-drag", zIndex, data: { def } } as EditorNode);
+}
+
+function collabNodeToEditor(node: CollabNode): EditorNode {
+  return withInitialSize({ ...node, selected: false } as unknown as EditorNode);
+}
+
+function collabEdgeToEditor(edge: CollabEdge): Edge {
+  return { ...edge } as unknown as Edge;
+}
+
+function snapshotEqual(a: EditorDocumentSnapshot | null, b: EditorDocumentSnapshot): boolean {
+  return !!a && JSON.stringify(a) === JSON.stringify(b);
+}
+
+function entityIcon(entityId: string): NodeData["icon"] {
+  if (entityId.startsWith("sun.")) return "sun";
+  if (entityId.startsWith("binary_sensor.")) return "motion";
+  if (entityId.startsWith("light.")) return "bulb";
+  return "ha";
+}
 
 export function App() {
   const aesthetic = DEFAULT_AESTHETIC;
@@ -134,12 +194,42 @@ export function App() {
   }, []);
 
   const server = useServer();
+  const collabDoc = useRef(new Y.Doc());
+  const collabReady = useRef(false);
+  const applyingCollab = useRef(false);
+  const lastCollabSnapshot = useRef<EditorDocumentSnapshot | null>(null);
+  const appliedDocStateNonce = useRef<number | null>(null);
+  const appliedDocUpdateNonce = useRef<number | null>(null);
+  const clientId = useRef(globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2, 10));
   // Stateful-node memory is kept per flow so identical node ids in different flows never share state.
   // It is advanced from a committed effect, not during React render, so StrictMode/aborted
   // renders cannot consume edge pulses or toggle transitions.
   const memories = useRef<Record<string, Memory>>({});
   const hasSeenServer = server.connected || lastSync !== null;
   const entities = server.connected ? server.entities : hasSeenServer ? server.entities : simEntities;
+  const entityTemplates = useMemo<NodeTemplate[]>(() => {
+    const base = PALETTE.find((t) => t.type === "entity");
+    if (!base) return [];
+    return Object.keys(entities).sort().slice(0, 80).map((entityId) => ({
+      type: `entity:${entityId}`,
+      category: "Entities",
+      label: entityId,
+      icon: entityIcon(entityId),
+      make: (id) => {
+        const e = entities[entityId];
+        const icon = entityIcon(entityId);
+        const def = base.make(id);
+        return {
+          ...def,
+          title: entityId,
+          icon,
+          config: { ...def.config, entity_id: entityId },
+          outputs: def.outputs.map((p) => (p.id === "state" ? { ...p, type: entityStateType(entityId, e?.state ?? "", e?.attributes ?? {}) } : p)),
+        };
+      },
+    }));
+  }, [entities]);
+  const paletteTemplates = useMemo(() => [...PALETTE, ...entityTemplates], [entityTemplates]);
 
   // A transient message bottom-right; the latest one replaces any earlier one.
   const toastTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -211,6 +301,132 @@ export function App() {
   const edgesRef = useRef(edges);
   edgesRef.current = edges;
   const deploy = server.deploy;
+
+  const localDocumentSnapshot = useCallback((): EditorDocumentSnapshot => {
+    const stashedFlows = flows.map((flow) =>
+      flow.id === activeFlowId
+        ? { ...flow, nodes: nodesRef.current, edges: edgesRef.current }
+        : flow,
+    );
+    const snapshotFlows = stashedFlows.map((flow) => ({
+      id: flow.id,
+      name: flow.name,
+      nodes: nodesForCollab(flow.nodes),
+      edges: edgesForCollab(flow.edges),
+    }));
+    if (snapshotFlows.length === 0) snapshotFlows.push(emptyEditorDocumentSnapshot().flows[0]!);
+    // The active tab is local UI state. Persist a stable fallback only so old/new clients have a
+    // valid active flow if their current tab disappears, but don't make collaborators fight over it.
+    return { version: 1, activeFlowId: snapshotFlows[0]?.id, flows: snapshotFlows, macros: macroLib.macros };
+  }, [activeFlowId, flows, macroLib.macros]);
+
+  const suppressNextAutoDeploy = useRef(false);
+
+  const applyRemoteDocumentSnapshot = useCallback((snapshot: EditorDocumentSnapshot) => {
+    applyingCollab.current = true;
+    suppressNextAutoDeploy.current = true;
+    const nextFlows = snapshot.flows.map((flow) => ({
+      id: flow.id,
+      name: flow.name,
+      nodes: flow.nodes.map(collabNodeToEditor),
+      edges: flow.edges.map(collabEdgeToEditor),
+    }));
+    const nextActive = nextFlows.find((flow) => flow.id === activeFlowId)?.id ?? snapshot.activeFlowId ?? nextFlows[0]?.id;
+    setFlows(nextFlows);
+    const active = nextFlows.find((flow) => flow.id === nextActive) ?? nextFlows[0];
+    if (active) {
+      setActiveFlowId(active.id);
+      setNodes(active.nodes);
+      setEdges(active.edges);
+    }
+    macroLib.replace(snapshot.macros);
+    setSelected((id) => (id && active?.nodes.some((node) => node.id === id) ? id : null));
+    setSelectedIds((ids) => ids.filter((id) => active?.nodes.some((node) => node.id === id)));
+    setPast([]);
+    setFuture([]);
+    queueMicrotask(() => {
+      applyingCollab.current = false;
+    });
+  }, [activeFlowId, macroLib.replace, setEdges, setNodes]);
+
+  const localSnapshotHasUserContent = (snapshot: EditorDocumentSnapshot): boolean =>
+    snapshot.flows.length > 1 ||
+    snapshot.flows.some((flow) => flow.nodes.length > 0 || flow.edges.length > 0 || flow.name !== "Flow 1") ||
+    Object.keys(snapshot.macros).length > 0;
+
+  const flushLocalDocumentToCollab = useCallback((allowBeforeReady = false) => {
+    if ((!allowBeforeReady && !collabReady.current) || applyingCollab.current) return;
+    const next = localDocumentSnapshot();
+    if (allowBeforeReady && !collabReady.current && !localSnapshotHasUserContent(next)) return;
+    if (snapshotEqual(lastCollabSnapshot.current, next)) return;
+    const previous = lastCollabSnapshot.current ?? snapshotFromEditorDoc(collabDoc.current);
+    applyEditorSnapshotDiff(collabDoc.current, previous, next, collabLocalOrigin);
+    lastCollabSnapshot.current = snapshotFromEditorDoc(collabDoc.current);
+  }, [localDocumentSnapshot]);
+
+  const sendLocalUpdatesMissingFromServerState = useCallback((serverState: Uint8Array) => {
+    const serverDoc = new Y.Doc();
+    Y.applyUpdate(serverDoc, serverState);
+    const missing = Y.encodeStateAsUpdate(collabDoc.current, Y.encodeStateVector(serverDoc));
+    // Yjs encodes an empty diff as [0, 0]. Anything larger contains local/offline edits the
+    // server has not seen yet, so upload it after reconnecting instead of silently diverging.
+    if (missing.length > 2) server.sendDocUpdate(missing);
+    serverDoc.destroy();
+  }, [server.sendDocUpdate]);
+
+  useEffect(() => {
+    const doc = collabDoc.current;
+    const onUpdate = (update: Uint8Array, origin: unknown) => {
+      if (origin === collabServerOrigin || !collabReady.current) return;
+      server.sendDocUpdate(update);
+    };
+    doc.on("update", onUpdate);
+    return () => doc.off("update", onUpdate);
+  }, [server.sendDocUpdate]);
+
+  useEffect(() => {
+    if (!server.docState || appliedDocStateNonce.current === server.docState.nonce) return;
+    appliedDocStateNonce.current = server.docState.nonce;
+    try {
+      flushLocalDocumentToCollab(true);
+      const update = decodeUpdateBase64(server.docState.update, DEFAULT_MAX_DOC_STATE_BYTES);
+      Y.applyUpdate(collabDoc.current, update, collabServerOrigin);
+      sendLocalUpdatesMissingFromServerState(update);
+      const snapshot = snapshotFromEditorDoc(collabDoc.current);
+      lastCollabSnapshot.current = snapshot;
+      collabReady.current = true;
+      applyRemoteDocumentSnapshot(snapshot);
+    } catch (err) {
+      showToast(`Document sync failed: ${err instanceof Error ? err.message : String(err)}`, "error");
+    }
+  }, [server.docState, applyRemoteDocumentSnapshot, flushLocalDocumentToCollab, sendLocalUpdatesMissingFromServerState, showToast]);
+
+  useEffect(() => {
+    if (!server.docUpdate || appliedDocUpdateNonce.current === server.docUpdate.nonce) return;
+    appliedDocUpdateNonce.current = server.docUpdate.nonce;
+    try {
+      // Preserve any local edit waiting in the debounce window before rendering the remote update;
+      // otherwise a remote packet can replace unsent local React state and cause data loss.
+      flushLocalDocumentToCollab();
+      Y.applyUpdate(collabDoc.current, decodeUpdateBase64(server.docUpdate.update), collabServerOrigin);
+      const snapshot = snapshotFromEditorDoc(collabDoc.current);
+      lastCollabSnapshot.current = snapshot;
+      applyRemoteDocumentSnapshot(snapshot);
+    } catch (err) {
+      showToast(`Document sync failed: ${err instanceof Error ? err.message : String(err)}`, "error");
+    }
+  }, [server.docUpdate, applyRemoteDocumentSnapshot, flushLocalDocumentToCollab, showToast]);
+
+  useEffect(() => {
+    if (!server.docError) return;
+    showToast(`Document sync failed: ${server.docError}`, "error");
+  }, [server.docError, showToast]);
+
+  useEffect(() => {
+    if (!collabReady.current || applyingCollab.current) return;
+    const timer = setTimeout(() => flushLocalDocumentToCollab(), 180);
+    return () => clearTimeout(timer);
+  }, [nodes, edges, flows, activeFlowId, macroLib.macros, flushLocalDocumentToCollab]);
 
   // Record a checkpoint of the current canvas before a mutation, clearing the redo branch.
   const pushHistory = useCallback(() => {
@@ -356,8 +572,14 @@ export function App() {
   // The Deploy button opens a guard first; auto-deploy bypasses it (the user already opted in).
   const requestDeploy = useCallback(() => setDeployOpen(true), []);
 
-  // Auto-deploy: redeploy (debounced) when the deployable graph changes.
+  // Auto-deploy: redeploy (debounced) when the deployable graph changes locally. Remote
+  // collaborator updates become a draft in this browser; they must not actuate HA through a
+  // different user's auto-deploy setting.
   useEffect(() => {
+    if (suppressNextAutoDeploy.current) {
+      suppressNextAutoDeploy.current = false;
+      return;
+    }
     if (!autoDeploy || !server.connected) return;
     const t = setTimeout(deployNow, 400);
     return () => clearTimeout(t);
@@ -426,8 +648,11 @@ export function App() {
           // When an entity node points at a new entity, re-type its state pin from that entity's
           // metadata so the handle color and connection rules match the value the engine resolves.
           if (def.type === "entity" && "entity_id" in patch) {
-            const e = entities[String(patch.entity_id ?? "")];
-            const stateType = entityStateType(String(patch.entity_id ?? ""), e?.state ?? "", e?.attributes ?? {});
+            const entityId = String(patch.entity_id ?? "");
+            const e = entities[entityId];
+            const stateType = entityStateType(entityId, e?.state ?? "", e?.attributes ?? {});
+            def.title = entityId || "entity";
+            def.icon = entityIcon(entityId);
             def.outputs = def.outputs.map((p) => (p.id === "state" ? { ...p, type: stateType } : p));
           }
           return { ...n, data: { def } };
@@ -455,8 +680,9 @@ export function App() {
     (t: NodeTemplate, position: { x: number; y: number }) => {
       pushHistory();
       idc.current += 1;
-      const id = `${t.type}-${idc.current}`;
-      setNodes((ns) => ns.concat({ id, type: "rw", position, dragHandle: ".rw-drag", zIndex: 1, data: { def: t.make(id) } }));
+      const id = `${t.type}-${clientId.current}-${idc.current}`;
+      const def = t.make(id);
+      setNodes((ns) => ns.concat(rwEditorNode(id, def, position)));
       setSelected(id);
       if (t.requires) setPending({ nodeId: id, requires: t.requires });
     },
@@ -474,9 +700,9 @@ export function App() {
     (def: MacroDef, position: { x: number; y: number }) => {
       pushHistory();
       idc.current += 1;
-      const id = `macro-${def.id}-${idc.current}`;
+      const id = `macro-${def.id}-${clientId.current}-${idc.current}`;
       const inst = makeMacroInstance(def, id, position.x, position.y);
-      setNodes((ns) => ns.concat({ id, type: "rw", position, dragHandle: ".rw-drag", zIndex: 1, data: { def: inst } }));
+      setNodes((ns) => ns.concat(rwEditorNode(id, inst, position)));
       setSelected(id);
     },
     [setNodes, pushHistory],
@@ -502,10 +728,10 @@ export function App() {
         return;
       }
       const type = e.dataTransfer.getData("application/reactflow");
-      const t = PALETTE.find((x) => x.type === type);
+      const t = paletteTemplates.find((x) => x.type === type);
       if (t) addNodeAt(t, pos);
     },
-    [addNodeAt, placeMacroAt, macroLib.macros],
+    [addNodeAt, placeMacroAt, macroLib.macros, paletteTemplates],
   );
 
   // Group the current multi-selection into a macro: build the definition, register it, and replace
@@ -521,7 +747,7 @@ export function App() {
     macroLib.put(r.def);
     const removed = new Set(r.removedNodeIds);
     const removedE = new Set(r.removedEdgeIds);
-    setNodes((ns) => ns.filter((n) => !removed.has(n.id)).concat({ id: r.instance.id, type: "rw", position: center, dragHandle: ".rw-drag", zIndex: 1, data: { def: r.instance } }));
+    setNodes((ns) => ns.filter((n) => !removed.has(n.id)).concat(rwEditorNode(r.instance.id, r.instance, center)));
     setEdges((es) =>
       es
         .filter((e) => !removedE.has(e.id))
@@ -653,7 +879,7 @@ export function App() {
   const addComment = useCallback(() => {
     pushHistory();
     cmtc.current += 1;
-    const id = `comment-${cmtc.current}`;
+    const id = `comment-${clientId.current}-${cmtc.current}`;
     const sel = nodesRef.current.find((n) => n.id === selected && isRWNode(n)) as RWNodeType | undefined;
     let position: { x: number; y: number };
     let data: CommentData;
@@ -669,7 +895,7 @@ export function App() {
       data = { title: "Comment", color, w: 340, h: 220 };
     }
     // A low z-index keeps the frame behind the graph nodes it groups.
-    setNodes((ns) => ns.concat({ id, type: "comment", position, dragHandle: ".rw-drag", zIndex: 0, data }));
+    setNodes((ns) => ns.concat(withInitialSize({ id, type: "comment", position, dragHandle: ".rw-drag", zIndex: 0, data } as EditorNode)));
     setSelected(id);
     setNodes((ns) => ns.map((n) => ({ ...n, selected: n.id === id })));
     showToast("Comment added — drag its bar to move the group", "info");
@@ -855,9 +1081,10 @@ export function App() {
 
         <div
           className={cn("rw-ha-badge rw-hide-mobile", server.connected ? "online" : "offline")}
-          title={server.connected ? "Editor feed connected to the Reactive Wire server" : "Editor feed disconnected; live server state is unknown"}
+          title={server.connected ? "Home Assistant feed connected" : "Home Assistant feed disconnected; live server state is unknown"}
+          aria-label={server.connected ? "Home Assistant connected" : "Home Assistant disconnected"}
         >
-          HA
+          <Icon name="ha" size={16} />
         </div>
         <button className="rw-icon-btn" onClick={() => setMode((m) => (m === "dark" ? "light" : "dark"))} title="Toggle light / dark" aria-label="Toggle light / dark">
           {mode === "dark" ? "☾" : "☀"}
@@ -877,7 +1104,7 @@ export function App() {
 
       <div className="relative flex-1 min-h-0 flex">
         <div className="rw-sidebar-wrap flex min-h-0">
-          <Palette onAdd={addNode}>
+          <Palette onAdd={addNode} extra={entityTemplates}>
             <MacroList
               macros={macroLib.macros}
               onPlace={placeMacro}
@@ -925,9 +1152,9 @@ export function App() {
                 deleteKeyCode={["Backspace", "Delete"]}
                 elevateNodesOnSelect={false}
                 multiSelectionKeyCode={["Control", "Meta", "Shift"]}
-                selectionKeyCode={null}
-                selectionOnDrag
-                panOnDrag={[1, 2]}
+                selectionKeyCode="Shift"
+                selectionOnDrag={false}
+                panOnDrag
                 edgesFocusable
                 fitView
                 fitViewOptions={{ maxZoom: 1, padding: 0.25 }}

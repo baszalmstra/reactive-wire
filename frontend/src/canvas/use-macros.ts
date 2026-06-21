@@ -17,7 +17,7 @@ export function useMacros(initial: MacroMap = {}): MacroLibrary {
   const [macros, setMacros] = useState<MacroMap>(initial);
   const put = useCallback((def: MacroDef) => setMacros((m) => ({ ...m, [def.id]: def })), []);
   const remove = useCallback((id: string) => setMacros((m) => { const n = { ...m }; delete n[id]; return n; }), []);
-  const replace = useCallback((m: MacroMap) => setMacros(m), []);
+  const replace = useCallback((m: MacroMap) => setMacros((current) => (JSON.stringify(current) === JSON.stringify(m) ? current : m)), []);
   return { macros, put, remove, replace };
 }
 

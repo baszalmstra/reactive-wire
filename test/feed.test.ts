@@ -75,4 +75,11 @@ describe("deploy WebSocket connection guards", () => {
     const rejected = validateConnection(req("127.0.0.1:7420", "http://localhost:5173", "/?token=wrong"), { port: 7420, deployToken: "secret" });
     expect(rejected?.status).toBe(401);
   });
+
+  it("requires a deploy token when the WebSocket binds outside loopback even if Host is spoofed", () => {
+    const rejected = validateConnection(req("127.0.0.1:7420"), { port: 7420, host: "0.0.0.0" });
+
+    expect(rejected?.status).toBe(401);
+    expect(rejected?.message).toContain("RW_DEPLOY_TOKEN");
+  });
 });

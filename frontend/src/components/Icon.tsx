@@ -19,6 +19,15 @@ export function Icon({ name, size = 15 }: { name: IconName | string; size?: numb
           <path d="M4 7h16M4 12h16M4 17h16" {...common} />
         </svg>
       );
+    case "ha":
+      return (
+        <svg viewBox="0 0 24 24" style={s} aria-hidden="true">
+          <path d="M4 11.5 12 5l8 6.5" {...common} />
+          <path d="M6.5 10.5V19h11v-8.5" {...common} />
+          <path d="M10 19v-5h4v5" {...common} />
+          <circle cx="18" cy="6" r="2" fill={c} stroke="none" />
+        </svg>
+      );
     case "sun":
       return (
         <svg viewBox="0 0 24 24" style={s}>

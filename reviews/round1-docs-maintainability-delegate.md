@@ -1,0 +1,11 @@
+Did not write `reviews/round1-docs-maintainability-delegate.md` because the task also says **Do not modify files**.
+
+Findings:
+
+- **HIGH — Future schema/version migration can lose data in memory.** `shared/collab.ts:32-39` hard-codes snapshot `version: 1`; sanitization coerces all snapshots to v1 (`shared/collab.ts:123-141`). `ensureEditorDocInitialized()` replaces docs whose `meta.version !== VERSION` with an empty document (`shared/collab.ts:204-207`), and load calls this after reading persisted bytes (`src/server/doc-store.ts:63-67`). A future v2 `.ydoc` opened by older code can be reset in memory and later persisted. Add explicit migrations/unknown-version failure/backups.
+
+- **MED — `RW_DATA_DIR` operational docs are too thin.** README only says persisted in `RW_DATA_DIR` default `.rw-data` (`README.md:83-85`); env examples only list the variable (`.env.example:21-23`, `docs/.env.example:13-14`). Implementation stores `editor-doc.ydoc` relative to process CWD (`src/server/index.ts:26`, `src/server/doc-store.ts:27`) and has no documented backup/restore/corruption/container-volume guidance. Document absolute-path recommendation, file name, recovery, permissions, and deployment volume setup.
+
+- **MED — Collaboration protocol API is not centralized/versioned.** Server emits/accepts raw `docState`/`docUpdate` JSON shapes (`src/server/feed.ts:334`, `src/server/feed.ts:349-364`), while the frontend defines separate local packet handling (`frontend/src/server-conn.ts:19-23`, `frontend/src/server-conn.ts:82-83`, `frontend/src/server-conn.ts:122-126`). No shared protocol type, protocol version, doc id, or error-code contract; future multi-doc/auth/migration work will be brittle.
+
+- **MED — App collaboration sync needs ownership clarification/extraction.** Sync state/effects are embedded in `App.tsx` (`frontend/src/App.tsx:172-175`, `frontend/src/App.tsx:271-348`). `activeFlowId` is persisted as shared document metadata (`shared/collab.ts:34`, `shared/collab.ts:216`, `shared/collab.ts:243`), but remote apply prefers the local active tab (`frontend/src/App.tsx:279`) and the debounce writes it back (`frontend/src/App.tsx:338-345`). Clarify whether active tab is shared or client-local, and consider extracting/test-covering a `useCollaborativeDocument` hook.

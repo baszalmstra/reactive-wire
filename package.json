@@ -9,15 +9,20 @@
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "dev": "tsx watch src/server/index.ts",
-    "start": "tsx src/server/index.ts"
+    "start": "tsx src/server/index.ts",
+    "e2e": "playwright test",
+    "e2e:ui": "playwright test --ui",
+    "e2e:app": "node e2e/start-app.mjs"
   },
   "dependencies": {
     "@vue/reactivity": "^3.5.13",
     "dotenv": "^16.4.7",
     "home-assistant-js-websocket": "^9.4.0",
-    "ws": "^8.18.0"
+    "ws": "^8.18.0",
+    "yjs": "^13.6.31"
   },
   "devDependencies": {
+    "@playwright/test": "^1.61.0",
     "@types/node": "^22.10.0",
     "@types/ws": "^8.5.13",
     "tsx": "^4.19.2",

@@ -16,7 +16,8 @@ export interface Flow {
 let flowSeq = 0;
 export function newFlowId(): string {
   flowSeq += 1;
-  return `flow-${Date.now().toString(36)}-${flowSeq}`;
+  const rand = globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2, 10);
+  return `flow-${Date.now().toString(36)}-${rand}-${flowSeq}`;
 }
 
 export function emptyFlow(name: string): Flow {

@@ -29,7 +29,7 @@ export function NodeConfigPopup({
       onMouseDown={onCancel}
     >
       <div
-        className="w-[420px] max-w-[92vw] bg-rw-panel border border-rw-line rounded-[14px] shadow-rw overflow-hidden"
+        className="w-[420px] max-w-[92vw] bg-rw-panel border border-rw-line rounded-[14px] shadow-rw overflow-visible"
         onMouseDown={(e) => e.stopPropagation()}
       >
         <div className="px-[18px] pt-4 pb-1 font-bold text-[15px]">Choose {requires.label.toLowerCase()}</div>

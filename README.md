@@ -18,8 +18,11 @@ entities, and deploy it to a server that actuates Home Assistant live.
   never on a non-`Ok` value (safety).
 - **Editor** (React Flow): drag nodes from a palette, connect typed pins (type + cycle
   validated), edit values inline, autocomplete real entities, live values on every pin.
-- **Server**: long-lived-token HA WebSocket — streams a live entity feed and actuates on
-  deploy (dry-run preview by default). In-memory mock + simulator when no HA is configured.
+- **Server**: long-lived-token HA WebSocket — streams a live entity feed, synchronizes the
+  collaborative editor document, and actuates on deploy (dry-run preview by default). In-memory
+  mock + simulator when no HA is configured.
+- **Collaborative persistence**: editor flows/macros sync live between connected browsers and are
+  saved to disk so the document survives server restarts.
 - **Editable pin values**: input defaults, constants, and compare operands via one mechanism.
 
 See [DESIGN.md §9](./DESIGN.md) for the roadmap.
@@ -42,7 +45,10 @@ pixi run test            # run the engine/unit test suite
 pixi run typecheck       # type-check the core
 pixi run start           # run the server against a live Home Assistant
 pixi run check           # typecheck core + editor and run the tests
+pixi run e2e             # Playwright browser smoke tests with the mock server + Vite
 ```
+
+The Playwright suite starts its own mock server and frontend via `e2e/start-app.mjs` on isolated default ports (`7421`/`5175`); install the browser once with `npx playwright install chromium` if Playwright asks for it.
 
 Editor frontend (run in ./frontend automatically; auto-installs if needed):
 
@@ -77,8 +83,15 @@ HA_URL=http://homeassistant.local:8123 HA_TOKEN=<token> pixi run start
 ```
 
 Without `HA_URL`/`HA_TOKEN`, the server runs in **mock mode** with simulated entities, so the
-editor works as a demo with no Home Assistant. The server starts with **no graph deployed** —
-build one in the editor and Deploy it (persistent save/load is on the roadmap, §9).
+editor works as a demo with no Home Assistant. The collaborative editor document is persisted in
+`RW_DATA_DIR` (default `.rw-data`, ignored by git) and is loaded again after server restarts. In
+production/container setups, point `RW_DATA_DIR` at an absolute path on a durable volume and back up
+`editor-doc.ydoc`; it contains the saved editor graph/macros, not HA tokens. Individual client
+updates are capped at 2 MB and the compact document state at 8 MB by default; if either limit is hit,
+remove large embedded payloads from the document or restore a smaller backup. If a future incompatible
+document version is encountered, the server refuses to overwrite it rather than silently resetting the
+file. The server still starts with **no graph deployed** — persisted edits are not actuated until you
+Deploy.
 
 **Safety:** just running the server (and the editor's live preview) **never changes your
 home** — the auto-started demo graph runs in dry-run. Sinks actuate only when you **Deploy**

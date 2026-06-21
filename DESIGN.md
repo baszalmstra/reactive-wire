@@ -152,8 +152,9 @@ Tracked as we go. ✅ = resolved, ⏳ = in progress, ⬜ = not yet discussed.
 - ✅ **Q6 HA integration** → `subscribeEntities` feed + `callService` (built; §8).
 - ✅ **Q7 Node catalog (MVP)**: entity source, light sink (reconciling), constants, compare,
   logic (`AND`/`OR`/`NOT`), sum, select. _Build pending:_ time/`now` + duration, edge/hold/fold.
-- ⬜ **Q9 Persistence / format**: graph serialization + editor save/load + server
-  reload-on-restart. **Not built — the recommended next step** (see §9).
+- ⏳ **Q9 Persistence / format**: collaborative editor document persistence and reload-on-restart
+  are built via Yjs updates. Runtime memory/deployed-graph auto-restart persistence remains separate
+  production hardening (see §9).
 - ⬜ **Q10 Execution location & lifecycle**: when does the graph run? Headless vs needs editor open?
   - ✅ Topology = D9 (headless server is source of truth).
   - 🎯 **Future goal: ship as a Home Assistant add-on** (Supervisor-managed Docker
@@ -450,9 +451,9 @@ editable inputs (set a fixed value without wiring a constant).
 ## 9. Roadmap / TODO
 
 ### Recommended next
-1. **Persistence (Q9).** Editor **save/load** of graphs; server **persists the deployed graph
-   to disk** and **reloads + re-runs it on restart**. Turns a live demo into a real always-on
-   tool (currently a restart loses everything). The deploy payload is already the save format.
+1. **Operational hardening for collaboration.** The editor document now persists and live-syncs;
+   next persistence work is operational polish: backups/restore UI, optional multi-document routing,
+   presence indicators, and server-computed pin-value streaming so the editor can become a pure view.
 
 ### Core engine / model
 
@@ -460,9 +461,9 @@ editable inputs (set a fixed value without wiring a constant).
 - ✅ **Stateful nodes**: `edge`/`rising`/`falling`, `hold(initial)`, `fold`/`scan` (joining
   `toggle`). Each declares a **state-persistence policy** (Q3a): `seed-at-boot` (default,
   ephemeral, restart-safe), `durable` (kept verbatim when a restored memory map is passed
-  back — for the persistence layer to save/restore), `reseed-from-world` (boots initial state
-  from a configured entity's live value). On-disk persistence itself is still Q9 below, so
-  `durable` behaves like `seed-at-boot` until that lands.
+  back — for a future runtime-memory persistence layer), `reseed-from-world` (boots initial
+  state from a configured entity's live value). Editor document persistence is built; runtime
+  state memory persistence remains separate.
 - ✅ **Time / duration nodes**: `now()` + `since`/`duration` (ms/sec/min/hr). Time is an
   explicit injected `now` (epoch ms) param — the server drives a 1s tick, the editor ticks
   React state, tests pass fixed values. Entities expose `last_changed`/`last_updated` as
@@ -497,8 +498,8 @@ config defaults for now).
 - ✅ **Node descriptions**: one-line per-node description in the registry, shown in the inspector
   and as a palette hover tooltip.
 
-_Minor follow-ups from review:_ comments/multi-flow are send-only until graph save/load (Q9)
-exists; `fetch` output-type selector; variadic shrink-on-disconnect.
+_Minor follow-ups from review:_ presence/collaborator cursors, `fetch` output-type selector,
+variadic shrink-on-disconnect.
 
 ### Architecture / tidy-up (built)
 - ✅ **Per-node registry**: each node type is a self-contained `NodeDef` under
@@ -515,5 +516,5 @@ exists; `fetch` output-type selector; variadic shrink-on-disconnect.
 ### Productionization (later)
 - **Ship as a Home Assistant add-on** (Supervisor Docker, ingress UI, `SUPERVISOR_TOKEN`) — Q10.
 - **Conda-package node distribution** (D8) + a community index.
-- Multi-user / auth beyond a long-lived token (currently a non-goal).
+- Auth beyond the current deploy-token model (roles/users/OAuth) for exposed multi-user setups.
 - Error-UX completeness (D19 schema-drift ghost-pin healing; full D20).
