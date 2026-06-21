@@ -1,17 +1,19 @@
+import { useState } from "react";
 import type { NodeData } from "../../../shared/node-types.js";
 import type { EvalResults } from "../../../shared/results.js";
 import type { EntityMap } from "../../../shared/entities.js";
 import { TYPE_VAR, TYPE_LABEL } from "../../../shared/theme.js";
+import { formatValue, type RWValue } from "../../../shared/value.js";
 import { Icon } from "../components/Icon.js";
 import { DeviceClassIcon } from "../components/DeviceClassIcon.js";
 import { HealthDot, MemBadge } from "../components/Badges.js";
-import { ValueChip } from "../components/ValueChip.js";
 import { EntityPicker } from "./EntityPicker.js";
 import { DirSelect, UnitSelect } from "../components/Widgets.js";
 import { describeNode } from "./node-templates.js";
 import { NodeValueEditors } from "./NodeValueEditors.js";
 import { Sparkline, type Sample } from "../components/Sparkline.js";
 import { isMacroInstance, macroHasMemory, type MacroMap } from "../../../shared/macros.js";
+import { cn } from "../cn.js";
 
 /** Sink node types whose target is a Home Assistant entity, and the picker domains they allow. */
 const SINK_ENTITY_DOMAINS: Record<string, string[] | undefined> = {
@@ -23,16 +25,38 @@ const SINK_ENTITY_DOMAINS: Record<string, string[] | undefined> = {
   "sink-call": undefined,
 };
 
-const sectionTitle = "text-[10px] font-bold tracking-[.08em] uppercase text-rw-faint pt-4 pb-2";
-
 function TypeChip({ type }: { type: NodeData["outputs"][number]["type"] }) {
   return (
-    <span
-      className="inline-flex items-center gap-[5px] font-mono text-[10px] px-[7px] py-[1.5px] rounded-[5px] text-[var(--tc)] bg-[color-mix(in_oklab,var(--tc)_14%,transparent)] border-[0.5px] border-[color-mix(in_oklab,var(--tc)_30%,transparent)]"
-      style={{ ["--tc" as string]: TYPE_VAR[type] }}
-    >
-      <span className="w-[7px] h-[7px] rounded-full bg-[var(--tc)]" />
+    <span className="rw-typechip" style={{ ["--tc" as string]: TYPE_VAR[type] }}>
+      <span className="rw-typechip-dot" />
       {TYPE_LABEL[type]}
+    </span>
+  );
+}
+
+function BigValue({ value, unit, deviceClass }: { value: RWValue | undefined; unit?: string; deviceClass?: unknown }) {
+  const f = formatValue(value);
+  const typeColor = value && (value.status === "ok" || value.status === "stale") ? TYPE_VAR[value.type] : undefined;
+  const cls = cn(
+    "rw-bigval",
+    f.kind === "error" && "err",
+    (f.kind === "unavail" || f.kind === "none") && "unavail",
+    f.stale && "stale",
+  );
+
+  if (f.kind === "error") {
+    return <span className={cls}><span className="rw-bv-ico">⚠</span>error</span>;
+  }
+  if (f.kind === "unavail") return <span className={cls}>— unavailable</span>;
+  if (f.kind === "none") return <span className={cls}>—</span>;
+
+  return (
+    <span className={cls} style={{ ["--tc" as string]: typeColor }}>
+      {deviceClass ? <DeviceClassIcon deviceClass={deviceClass} /> : null}
+      {f.kind === "bool" && <span className={cn("rw-booldot lg", f.bool && "on")} />}
+      {f.kind === "color" && <span className="rw-swatch lg" style={{ background: f.swatch }} />}
+      <span>{f.text}</span>
+      {unit && f.kind === "num" ? <span className="rw-unit">{unit}</span> : null}
     </span>
   );
 }
@@ -60,13 +84,24 @@ export function Inspector({
   /** Open the definition canvas for a macro id (the inspector's "Edit macro" action). */
   onEditMacro?: (macroId: string) => void;
 }) {
+  const [collapsed, setCollapsed] = useState(false);
+
+  if (collapsed) {
+    return (
+      <aside className="rw-inspector collapsed">
+        <button className="rw-insp-expand" onClick={() => setCollapsed(false)} title="Expand inspector" aria-label="Expand inspector">‹</button>
+      </aside>
+    );
+  }
+
   if (!node) {
     return (
-      <aside className="w-[312px] flex-none bg-rw-panel border-l border-rw-line flex flex-col items-center justify-center text-center px-6 text-rw-faint">
-        <div className="w-[52px] h-[52px] rounded-[13px] bg-rw-panel2 flex items-center justify-center mb-3">
-          <Icon name="sel" size={22} />
+      <aside className="rw-inspector">
+        <button className="rw-insp-collapse" onClick={() => setCollapsed(true)} title="Collapse inspector" aria-label="Collapse inspector">›</button>
+        <div className="rw-insp-empty">
+          <div className="rw-insp-empty-glyph"><Icon name="sel" size={22} /></div>
+          <p>Select a node to inspect its live value and edit its settings.</p>
         </div>
-        <p className="text-[12px] leading-relaxed">Select a node to inspect its live value and edit its settings.</p>
       </aside>
     );
   }
@@ -83,52 +118,48 @@ export function Inspector({
   const macroMemory = macroDef ? macroHasMemory(macroDef, macros) : !!node.stateful;
 
   // An entity node's state value carries a device-class symbol drawn from the live feed.
-  const deviceClass =
-    node.type === "entity" ? entities[String(cfg.entity_id ?? "")]?.attributes?.device_class : undefined;
+  const deviceClass = node.type === "entity" ? entities[String(cfg.entity_id ?? "")]?.attributes?.device_class : undefined;
+  const healthLabel = health === "ok" ? "healthy" : health === "warn" ? "warning" : "error";
 
   return (
-    <aside className="w-[312px] flex-none bg-rw-panel border-l border-rw-line flex flex-col min-h-0">
-      <div className="flex items-center gap-[9px] px-[14px] py-[13px] border-b border-rw-line">
-        <span className="text-rw-dim flex">
-          <Icon name={node.icon} />
-        </span>
-        <div className="flex-1 min-w-0">
-          <div className="font-mono text-[13px] font-medium whitespace-nowrap overflow-hidden text-ellipsis">{node.title}</div>
-          <div className="text-[10px] text-rw-faint uppercase tracking-[.04em] mt-[2px]">{node.subtitle}</div>
+    <aside className="rw-inspector">
+      <div className="rw-insp-hd">
+        <span className="rw-insp-ico"><Icon name={node.icon} /></span>
+        <div className="rw-insp-titles">
+          <div className="rw-insp-title">{node.title}</div>
+          <div className="rw-insp-sub">{node.subtitle}</div>
         </div>
-        {isMacro && macroMemory && <MemBadge />}
-        <HealthDot health={health} />
+        <button className="rw-insp-collapse" onClick={() => setCollapsed(true)} title="Collapse inspector" aria-label="Collapse inspector">›</button>
       </div>
 
-      <div className="flex-1 overflow-y-auto px-[14px] pb-6">
-        {description && (
-          <p className="text-[11.5px] text-rw-dim leading-relaxed pt-3">{description}</p>
-        )}
+      <div className="rw-insp-scroll">
+        <div className="rw-insp-healthrow">
+          <HealthDot health={health} />
+          <span className={cn("rw-health-label", health)}>{healthLabel}</span>
+          {macroMemory ? <span className="rw-mem-label"><MemBadge />uses memory</span> : null}
+        </div>
+
+        {description && <p className="rw-insp-desc">{description}</p>}
 
         {isMacro && (
           <>
-            <div className={sectionTitle}>Macro</div>
+            <div className="rw-insp-sect">Macro</div>
             {macroDef ? (
-              <div className="flex flex-col gap-2.5">
-                <div className="flex items-center gap-2">
-                  <span className="text-rw-dim flex"><Icon name="macro" size={15} /></span>
-                  <span className="font-mono text-[12px] flex-1 truncate">{macroDef.name}</span>
+              <div className="rw-insp-card">
+                <div className="rw-insp-card-row">
+                  <span className="rw-insp-ico"><Icon name="macro" size={15} /></span>
+                  <span className="rw-insp-card-title">{macroDef.name}</span>
                   {macroMemory ? <MemBadge /> : null}
                 </div>
-                <p className="text-[11px] text-rw-faint leading-relaxed">
-                  {macroDef.inputs.length} input{macroDef.inputs.length === 1 ? "" : "s"} ·{" "}
-                  {macroDef.outputs.length} output{macroDef.outputs.length === 1 ? "" : "s"} ·{" "}
+                <p className="rw-cfg-note">
+                  {macroDef.inputs.length} input{macroDef.inputs.length === 1 ? "" : "s"} · {" "}
+                  {macroDef.outputs.length} output{macroDef.outputs.length === 1 ? "" : "s"} · {" "}
                   {macroMemory ? "uses memory" : "stateless"}
                 </p>
-                <button
-                  onClick={() => onEditMacro?.(macroDef.id)}
-                  className="h-8 px-3 rounded-lg bg-rw-accent text-rw-accent-text font-bold text-[12px] cursor-pointer hover:brightness-110 self-start"
-                >
-                  Edit macro
-                </button>
+                <button onClick={() => onEditMacro?.(macroDef.id)} className="rw-btn primary sm self-start">Edit macro</button>
               </div>
             ) : (
-              <p className="text-[11.5px] text-rw-faint leading-relaxed">
+              <p className="rw-cfg-note">
                 This placement's definition is missing from the library — its wiring is preserved, but it cannot be edited or evaluated.
               </p>
             )}
@@ -137,24 +168,24 @@ export function Inspector({
 
         {node.outputs.length > 0 && (
           <>
-            <div className={sectionTitle}>Live value</div>
-            <div className="flex flex-col gap-2">
+            <div className="rw-insp-sect">Live value</div>
+            <div className="rw-insp-values">
               {node.outputs.map((p) => (
-                <div key={p.id} className="flex items-center justify-between gap-2">
-                  <span className="text-[11px] text-rw-dim">{p.label || p.id}</span>
-                  <span className="flex items-center gap-1.5">
-                    {p.id === "state" && <DeviceClassIcon deviceClass={deviceClass} />}
-                    <ValueChip value={results.outputs[`${node.id}:${p.id}`]} unit={p.unit} />
-                  </span>
+                <div key={p.id} className="rw-insp-val">
+                  <div className="rw-insp-val-label">
+                    <span>{p.label || p.id}</span>
+                    <TypeChip type={p.type} />
+                  </div>
+                  <BigValue value={results.outputs[`${node.id}:${p.id}`]} unit={p.unit} deviceClass={p.id === "state" ? deviceClass : undefined} />
                 </div>
               ))}
             </div>
 
-            <div className={sectionTitle}>Value history</div>
-            <div className="flex flex-col gap-2.5">
+            <div className="rw-insp-sect">Value history</div>
+            <div className="rw-insp-history">
               {node.outputs.map((p) => (
-                <div key={p.id} className="flex flex-col gap-1">
-                  {node.outputs.length > 1 && <span className="text-[10px] text-rw-faint">{p.label || p.id}</span>}
+                <div key={p.id} className="rw-insp-spark-block">
+                  {node.outputs.length > 1 && <span className="rw-pinlist-h">{p.label || p.id}</span>}
                   <Sparkline history={history[`${node.id}:${p.id}`] ?? []} />
                 </div>
               ))}
@@ -162,11 +193,11 @@ export function Inspector({
           </>
         )}
 
-        <div className={sectionTitle}>Settings</div>
-        <div className="flex flex-col gap-2.5">
+        <div className="rw-insp-sect">Settings</div>
+        <div className="rw-cfg-stack">
           {(node.type === "entity" || node.type in SINK_ENTITY_DOMAINS) && (
-            <label className="flex flex-col gap-1.5">
-              <span className="text-[11px] text-rw-dim">entity id</span>
+            <label className="rw-cfg-field">
+              <span>entity id</span>
               <EntityPicker
                 value={String(cfg.entity_id ?? "")}
                 onChange={(v) => set({ entity_id: v })}
@@ -178,31 +209,19 @@ export function Inspector({
 
           {(node.type === "sink-call" || node.type === "sink-notify" || node.type === "sink-tts") && (
             <>
-              <label className="flex flex-col gap-1.5">
-                <span className="text-[11px] text-rw-dim">{node.type === "sink-call" ? "domain" : "service"}</span>
-                <input
-                  className="bg-rw-panel2 border border-rw-line rounded-[6px] px-2 py-1 text-[11.5px] font-mono"
-                  value={String(node.type === "sink-call" ? cfg.domain ?? "" : cfg.service ?? "")}
-                  onChange={(e) => set(node.type === "sink-call" ? { domain: e.target.value } : { service: e.target.value })}
-                />
+              <label className="rw-cfg-field">
+                <span>{node.type === "sink-call" ? "domain" : "service"}</span>
+                <input className="rw-input" value={String(node.type === "sink-call" ? cfg.domain ?? "" : cfg.service ?? "")} onChange={(e) => set(node.type === "sink-call" ? { domain: e.target.value } : { service: e.target.value })} />
               </label>
               {node.type === "sink-call" && (
                 <>
-                  <label className="flex flex-col gap-1.5">
-                    <span className="text-[11px] text-rw-dim">service (on)</span>
-                    <input
-                      className="bg-rw-panel2 border border-rw-line rounded-[6px] px-2 py-1 text-[11.5px] font-mono"
-                      value={String(cfg.service ?? "")}
-                      onChange={(e) => set({ service: e.target.value })}
-                    />
+                  <label className="rw-cfg-field">
+                    <span>service (on)</span>
+                    <input className="rw-input" value={String(cfg.service ?? "")} onChange={(e) => set({ service: e.target.value })} />
                   </label>
-                  <label className="flex flex-col gap-1.5">
-                    <span className="text-[11px] text-rw-dim">service (off)</span>
-                    <input
-                      className="bg-rw-panel2 border border-rw-line rounded-[6px] px-2 py-1 text-[11.5px] font-mono"
-                      value={String(cfg.service_off ?? "")}
-                      onChange={(e) => set({ service_off: e.target.value })}
-                    />
+                  <label className="rw-cfg-field">
+                    <span>service (off)</span>
+                    <input className="rw-input" value={String(cfg.service_off ?? "")} onChange={(e) => set({ service_off: e.target.value })} />
                   </label>
                 </>
               )}
@@ -211,50 +230,32 @@ export function Inspector({
 
           {node.type === "fetch" && (
             <>
-              <label className="flex flex-col gap-1.5">
-                <span className="text-[11px] text-rw-dim">url</span>
-                <input
-                  className="bg-rw-panel2 border border-rw-line rounded-[6px] px-2 py-1 text-[11.5px] font-mono"
-                  value={String(cfg.url ?? "")}
-                  placeholder="https://api.example.com/data"
-                  onChange={(e) => set({ url: e.target.value })}
-                />
+              <label className="rw-cfg-field">
+                <span>url</span>
+                <input className="rw-input" value={String(cfg.url ?? "")} placeholder="https://api.example.com/data" onChange={(e) => set({ url: e.target.value })} />
               </label>
-              <label className="flex flex-col gap-1.5">
-                <span className="text-[11px] text-rw-dim">json path</span>
-                <input
-                  className="bg-rw-panel2 border border-rw-line rounded-[6px] px-2 py-1 text-[11.5px] font-mono"
-                  value={String(cfg.path ?? "")}
-                  placeholder="main.temp"
-                  onChange={(e) => set({ path: e.target.value })}
-                />
+              <label className="rw-cfg-field">
+                <span>json path</span>
+                <input className="rw-input" value={String(cfg.path ?? "")} placeholder="main.temp" onChange={(e) => set({ path: e.target.value })} />
               </label>
-              <label className="flex flex-col gap-1.5">
-                <span className="text-[11px] text-rw-dim">poll interval (s)</span>
-                <input
-                  type="number"
-                  min={1}
-                  className="bg-rw-panel2 border border-rw-line rounded-[6px] px-2 py-1 text-[11.5px] font-mono"
-                  value={Number(cfg.interval ?? 60)}
-                  onChange={(e) => set({ interval: Number(e.target.value) })}
-                />
+              <label className="rw-cfg-field">
+                <span>poll interval (s)</span>
+                <input type="number" min={1} className="rw-input rw-num" value={Number(cfg.interval ?? 60)} onChange={(e) => set({ interval: Number(e.target.value) })} />
               </label>
-              <p className="text-[11px] text-rw-faint leading-relaxed">
-                Fetching runs on the server after deploy. The preview shows the value as loading until then.
-              </p>
+              <p className="rw-cfg-note">Fetching runs on the server after deploy. The preview shows the value as loading until then.</p>
             </>
           )}
 
           {node.type === "duration" && (
-            <label className="flex items-center gap-2">
-              <span className="text-[11px] text-rw-dim w-12 shrink-0">unit</span>
+            <label className="rw-cfg-row">
+              <span>unit</span>
               <UnitSelect value={String(cfg.unit ?? "min")} onChange={(v) => set({ unit: v })} />
             </label>
           )}
 
           {node.type === "dt-shift" && (
-            <label className="flex items-center gap-2">
-              <span className="text-[11px] text-rw-dim w-12 shrink-0">dir</span>
+            <label className="rw-cfg-row">
+              <span>dir</span>
               <DirSelect value={String(cfg.dir ?? "plus")} onChange={(v) => set({ dir: v })} />
             </label>
           )}
@@ -262,29 +263,31 @@ export function Inspector({
           <NodeValueEditors node={node} results={results} onConfig={onConfig} onSetValue={onSetValue} inset />
 
           {["and", "or", "not", "select", "toggle"].includes(node.type) && (
-            <p className="text-[11.5px] text-rw-faint leading-relaxed">No editable settings — behavior is fixed by the node type.</p>
+            <p className="rw-cfg-note">No editable settings — behavior is fixed by the node type.</p>
           )}
 
           {isMacro && (
-            <p className="text-[11.5px] text-rw-faint leading-relaxed">
+            <p className="rw-cfg-note">
               Unwired inputs accept a literal default above. The macro's behavior lives in its definition — open it with “Edit macro”.
             </p>
           )}
         </div>
 
-        <div className={sectionTitle}>Pins</div>
-        <div className="flex flex-col gap-1.5">
+        <div className="rw-insp-sect">Pins</div>
+        <div className="rw-pinlist">
+          {node.inputs.length > 0 && <div className="rw-pinlist-h">Inputs</div>}
           {node.inputs.map((p) => (
-            <div key={`i-${p.id}`} className="flex items-center gap-[9px] text-[11.5px] text-rw-dim">
-              <span className="text-rw-faint w-3">↦</span>
-              <span className="flex-1">{p.label || p.id || "in"}</span>
+            <div key={`i-${p.id}`} className="rw-pinlist-row">
+              <span className="rw-pin-dir">↦</span>
+              <span className="rw-pin-name">{p.label || p.id || "in"}</span>
               <TypeChip type={p.type} />
             </div>
           ))}
+          {node.outputs.length > 0 && <div className="rw-pinlist-h">Outputs</div>}
           {node.outputs.map((p) => (
-            <div key={`o-${p.id}`} className="flex items-center gap-[9px] text-[11.5px] text-rw-dim">
-              <span className="text-rw-faint w-3">↤</span>
-              <span className="flex-1">{p.label || p.id}</span>
+            <div key={`o-${p.id}`} className="rw-pinlist-row">
+              <span className="rw-pin-dir">↤</span>
+              <span className="rw-pin-name">{p.label || p.id}</span>
               <TypeChip type={p.type} />
             </div>
           ))}
