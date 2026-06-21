@@ -207,29 +207,7 @@ export function App() {
   const memories = useRef<Record<string, Memory>>({});
   const hasSeenServer = server.connected || lastSync !== null;
   const entities = server.connected ? server.entities : hasSeenServer ? server.entities : simEntities;
-  const entityTemplates = useMemo<NodeTemplate[]>(() => {
-    const base = PALETTE.find((t) => t.type === "entity");
-    if (!base) return [];
-    return Object.keys(entities).sort().slice(0, 80).map((entityId) => ({
-      type: `entity:${entityId}`,
-      category: "Entities",
-      label: entityId,
-      icon: entityIcon(entityId),
-      make: (id) => {
-        const e = entities[entityId];
-        const icon = entityIcon(entityId);
-        const def = base.make(id);
-        return {
-          ...def,
-          title: entityId,
-          icon,
-          config: { ...def.config, entity_id: entityId },
-          outputs: def.outputs.map((p) => (p.id === "state" ? { ...p, type: entityStateType(entityId, e?.state ?? "", e?.attributes ?? {}) } : p)),
-        };
-      },
-    }));
-  }, [entities]);
-  const paletteTemplates = useMemo(() => [...PALETTE, ...entityTemplates], [entityTemplates]);
+  const paletteTemplates = PALETTE;
 
   // A transient message bottom-right; the latest one replaces any earlier one.
   const toastTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -1096,7 +1074,7 @@ export function App() {
 
       <div className="relative flex-1 min-h-0 flex">
         <div className="rw-sidebar-wrap flex min-h-0">
-          <Palette onAdd={addNode} extra={entityTemplates}>
+          <Palette onAdd={addNode}>
             <MacroList
               macros={macroLib.macros}
               onPlace={placeMacro}

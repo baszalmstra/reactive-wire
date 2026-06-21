@@ -38,11 +38,11 @@ test.describe.serial("Reactive Wire editor with mock server", () => {
     await expect(page.locator(".react-flow__node", { hasText: "binary_sensor.room_presence" }).last()).toBeVisible();
   });
 
-  test("offers mock/live Home Assistant entities directly in the palette", async ({ page }) => {
-    await expect(page.getByRole("button", { name: /sun\.sun \+/ })).toBeVisible();
-    await page.getByRole("button", { name: /sun\.sun \+/ }).click();
-
-    await expect(page.locator(".react-flow__node", { hasText: "sun.sun" }).last()).toBeVisible();
+  test("keeps Home Assistant entity ids out of the palette", async ({ page }) => {
+    await expect(page.getByRole("button", { name: /^Entity \+$/ })).toBeVisible();
+    await expect(page.getByRole("button", { name: /sun\.sun \+/ })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: /light\.bedroom \+/ })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: /binary_sensor\.room_presence \+/ })).toHaveCount(0);
   });
 
   test("shows unavailable entity output warnings in the Problems panel", async ({ page }) => {
