@@ -5,7 +5,7 @@ import { base } from "./template-base.js";
 
 export const sinkLight: NodeDef = {
   type: "sink-light",
-  description: "Drives a light to the desired on/color/brightness, acting only on a change.",
+  description: "Drives a light to the desired on/color/temperature/brightness, acting only on a change. Its inputs follow the target light's supported capabilities.",
   sinkGatePin: "on",
   template: {
     type: "sink-light", category: "Sinks", label: "Light", icon: "bulb",
@@ -29,6 +29,7 @@ export const sinkLight: NodeDef = {
   evalSink: ({ cfg, okInput, entities }) => reconcileLight(String(cfg.entity_id ?? ""), {
     on: okInput("on"),
     color: okInput("color"),
+    temperature: okInput("temperature"),
     brightness: okInput("brightness"),
   }, entities),
 };

@@ -43,7 +43,9 @@ export function currentNodeTemplates(): NodeTemplates {
 export function reconcileDefs(nodes: NodeData[], templates: NodeTemplates, options: ReconcileOptions = {}): NodeData[] {
   const isWired = options.isWired ?? (() => true);
   return nodes.map((node) => {
-    if (node.type === "entity") return node;
+    // Entity nodes track live attributes, and light sinks track their target light's capabilities;
+    // both shape their own pins per entity, so healing them against a static template would fight it.
+    if (node.type === "entity" || node.type === "sink-light") return node;
     const template = templates.get(node.type);
     if (!template) return node;
     // A collaborative def can arrive with malformed pin arrays; leave it for the deploy sanitizer

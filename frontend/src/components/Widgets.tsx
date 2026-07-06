@@ -1,8 +1,11 @@
-import { useState, type PointerEvent } from "react";
+import { useState, type CSSProperties, type PointerEvent } from "react";
 import { DURATION_UNITS, durationLiteralSeconds, durationUnitSeconds, normalizeDurationUnit, type DurationUnit } from "../../../shared/duration.js";
 import type { SinkAction } from "../../../shared/results.js";
 import { TYPE_VAR, type ValueType } from "../../../shared/theme.js";
+import type { RWValue } from "../../../shared/value.js";
+import { kelvinToHex } from "../../../shared/engine/light-caps.js";
 import { cn } from "../cn.js";
+import { Icon } from "./Icon.js";
 
 const DEFAULT_COLOR = "#ffffff";
 
@@ -336,5 +339,115 @@ export function SinkPanel({ action, actuating }: { action?: SinkAction; actuatin
         <div className="mt-1 text-[9px] text-rw-faint">triggered {formatSinkTime(action.lastTriggeredAt)}</div>
       )}
     </div>
+  );
+}
+
+/** A live value counts for the preview only when it actually carries a value (ok or stale). */
+function settled(v: RWValue | null | undefined): boolean {
+  return v != null && (v.status === "ok" || v.status === "stale");
+}
+
+// The warm tint a lit light falls back to when neither a color nor a temperature is wired.
+const LIGHT_DEFAULT = "#ffd18a";
+
+export interface LightState {
+  on?: RWValue | null;
+  color?: RWValue | null;
+  /** Color temperature in Kelvin; drives the glow when no RGB color is wired. */
+  temperature?: RWValue | null;
+  brightness?: RWValue | null;
+}
+
+interface LightVisual {
+  isOn: boolean;
+  isOff: boolean;
+  /** The color the bulb glows: the wired RGB color, else the temperature's white, else warm. */
+  glow: string;
+  /** Glow intensity in [0.35, 1], tracking brightness. */
+  level: number;
+  /** The dimensions the call would apply, e.g. "#FF3B30 · 90%" or "3000K · 60%". */
+  label: string;
+}
+
+/**
+ * Resolve a light's desired dimensions into how its bulb should read. An RGB color wins over a color
+ * temperature (a light applies one), and either falls back to a warm white; brightness scales the
+ * glow between a floor and full so a dim-but-on light still clearly reads as lit.
+ */
+function lightVisual({ on, color, temperature, brightness }: LightState): LightVisual {
+  const isOn = settled(on) && on!.v === true;
+  const isOff = settled(on) && on!.v === false;
+  const hex = isOn && settled(color) && typeof color!.v === "string" ? String(color!.v) : null;
+  const kelvin = isOn && !hex && settled(temperature) && typeof temperature!.v === "number" ? Math.round(temperature!.v) : null;
+  const pct =
+    settled(brightness) && typeof brightness!.v === "number"
+      ? Math.max(0, Math.min(100, Math.round((brightness!.v / 255) * 100)))
+      : null;
+  const glow = hex ?? (kelvin != null ? kelvinToHex(kelvin) : LIGHT_DEFAULT);
+  const level = pct == null ? 1 : Math.max(0.35, pct / 100);
+  const detail = hex ? hex.toUpperCase() : kelvin != null ? `${kelvin}K` : null;
+  const label = isOn
+    ? [detail, pct == null ? null : `${pct}%`].filter(Boolean).join(" · ") || "on"
+    : isOff
+      ? "off"
+      : "—";
+  return { isOn, isOff, glow, level, label };
+}
+
+/**
+ * The light sink's inspector preview: a bulb that glows in the wired color — or the color
+ * temperature's white — at an intensity tracking brightness when the light will be on, a dim disc
+ * when it will be off, and a neutral dashed outline when the on command is not yet driven, alongside
+ * the dimensions the call would apply.
+ */
+export function LightPreview(state: LightState) {
+  const { isOn, isOff, glow, level, label } = lightVisual(state);
+
+  const bulb = isOn
+    ? "border-transparent"
+    : isOff
+      ? "border-rw-line bg-[color-mix(in_oklab,var(--rw-text)_8%,transparent)]"
+      : "border-dashed border-rw-line";
+  const bulbStyle: CSSProperties = isOn
+    ? { background: glow, opacity: 0.55 + level * 0.45, boxShadow: `0 0 ${5 + level * 13}px ${level * 3}px ${glow}` }
+    : {};
+
+  return (
+    <div className="flex items-center gap-2.5">
+      <span className={cn("w-6 h-6 rounded-full shrink-0 border box-border", bulb)} style={bulbStyle} />
+      <div className="min-w-0 leading-tight">
+        <div className="text-[9px] font-bold tracking-[.05em] uppercase text-rw-faint">
+          {isOn ? "on" : isOff ? "off" : "idle"}
+        </div>
+        <div className={cn("font-mono text-[12px] truncate", isOn ? "text-rw-text" : "text-rw-dim")}>{label}</div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The light sink's title-bar glyph, standing in for the static bulb icon: it lights up in the wired
+ * color — or the color temperature's white — haloed at an intensity that tracks brightness when the
+ * light will be on, dims when it will be off, and shows the plain bulb outline when the on command
+ * is not yet driven.
+ */
+export function LightGlyph(state: LightState) {
+  const { isOn, isOff, glow, level } = lightVisual(state);
+
+  if (!isOn) {
+    // Off reads as a faint bulb; an unknown/undriven command keeps the neutral icon tone.
+    return (
+      <span className={cn("flex shrink-0", isOff ? "text-rw-faint opacity-70" : "text-rw-dim")}>
+        <Icon name="bulb" />
+      </span>
+    );
+  }
+  return (
+    <span className="relative flex shrink-0 items-center justify-center" style={{ color: glow }}>
+      <span className="absolute inset-[-3px] rounded-full" style={{ background: glow, filter: "blur(4px)", opacity: 0.25 + level * 0.5 }} />
+      <span className="relative" style={{ filter: `drop-shadow(0 0 ${1.5 + level * 3}px ${glow})` }}>
+        <Icon name="bulb" />
+      </span>
+    </span>
   );
 }

@@ -7,7 +7,7 @@ import { Icon } from "../components/Icon.js";
 import { DeviceClassIcon } from "../components/DeviceClassIcon.js";
 import { HealthDot, MemBadge } from "../components/Badges.js";
 import { ValueChip } from "../components/ValueChip.js";
-import { DirSelect, OpSelect, PinValueEditor, SinkPanel, UnitSelect } from "../components/Widgets.js";
+import { DirSelect, LightGlyph, OpSelect, PinValueEditor, SinkPanel, UnitSelect } from "../components/Widgets.js";
 import { useResults } from "./results-context.js";
 import type { PinDef } from "../../../shared/node-types.js";
 import type { RWNodeType } from "./validation.js";
@@ -91,9 +91,18 @@ export function RWNode({ id, data, selected }: NodeProps<RWNodeType>) {
           health === "error" ? "bg-[color-mix(in_oklab,var(--rw-h-error)_13%,var(--rw-node-hdr))]" : "bg-rw-node-hdr",
         )}
       >
-        <span className="text-rw-dim flex shrink-0">
-          <Icon name={def.icon} />
-        </span>
+        {def.type === "sink-light" ? (
+          <LightGlyph
+            on={results.inputs[`${id}:on`]}
+            color={results.inputs[`${id}:color`]}
+            temperature={results.inputs[`${id}:temperature`]}
+            brightness={results.inputs[`${id}:brightness`]}
+          />
+        ) : (
+          <span className="text-rw-dim flex shrink-0">
+            <Icon name={def.icon} />
+          </span>
+        )}
         <div className="flex-1 min-w-0">
           <div className="font-mono text-[11.5px] font-medium tracking-[-.01em] text-rw-text whitespace-nowrap overflow-hidden text-ellipsis">
             {def.title}

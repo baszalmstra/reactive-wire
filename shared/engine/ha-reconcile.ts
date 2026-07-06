@@ -5,6 +5,8 @@ import { hexToRgb, type RWValue } from "../value.js";
 export interface DesiredLightState {
   on: RWValue | null;
   color?: RWValue | null;
+  /** Color temperature in Kelvin. Ignored when an RGB color is also desired — a light applies one. */
+  temperature?: RWValue | null;
   brightness?: RWValue | null;
 }
 
@@ -34,6 +36,15 @@ function brightnessMatches(actual: unknown, want: unknown): boolean {
   return Number(actual) === Number(want);
 }
 
+// A light's current color temperature in Kelvin, taken from `color_temp_kelvin` when present or
+// converted from the legacy `color_temp` (mireds) otherwise.
+function actualKelvin(attributes: Record<string, unknown>): number | undefined {
+  const kelvin = Number(attributes.color_temp_kelvin);
+  if (Number.isFinite(kelvin)) return kelvin;
+  const mireds = Number(attributes.color_temp);
+  return Number.isFinite(mireds) && mireds > 0 ? Math.round(1e6 / mireds) : undefined;
+}
+
 export function reconcileLight(entity_id: string, desired: DesiredLightState, entities: EntityMap): ServiceCall | null {
   const on = desired.on;
   if (!on) return null;
@@ -47,11 +58,17 @@ export function reconcileLight(entity_id: string, desired: DesiredLightState, en
 
   const data: Record<string, unknown> = {};
   let differs = actualState !== "on";
+  // A light applies either an RGB color or a color temperature, not both; a wired color wins.
   const color = desired.color;
+  const temperature = desired.temperature;
   if (color) {
     const want = hexToRgb(String(color.v));
     data.rgb_color = want;
     if (!e || !rgbMatches(e.attributes.rgb_color, want)) differs = true;
+  } else if (temperature) {
+    const want = Math.round(Number(temperature.v));
+    data.color_temp_kelvin = want;
+    if (!e || actualKelvin(e.attributes) !== want) differs = true;
   }
   const brightness = desired.brightness;
   if (brightness) {

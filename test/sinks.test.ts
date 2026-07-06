@@ -115,6 +115,41 @@ describe("light reconciling sink", () => {
     ]);
     expect(c[0]!.call).toEqual({ domain: "light", service: "turn_on", data: { brightness: 64 }, target: { entity_id: "light.lr" } });
   });
+
+  const tempNode = sink("sink-light", { entity_id: "light.lr" }, [
+    { id: "on", type: "bool" },
+    { id: "temperature", type: "num" },
+  ]);
+
+  it("turns on with color_temp_kelvin when the temperature differs", () => {
+    const c = run(tempNode, [
+      { pin: { id: "on", type: "bool" }, value: { out: true } },
+      { pin: { id: "temperature", type: "num" }, value: { out: 3000 } },
+    ], { "light.lr": { state: "on", attributes: { color_temp_kelvin: 2700 } } });
+    expect(c[0]!.call).toEqual({ domain: "light", service: "turn_on", data: { color_temp_kelvin: 3000 }, target: { entity_id: "light.lr" } });
+  });
+
+  it("holds when the color temperature already matches, including via legacy mireds", () => {
+    const c = run(tempNode, [
+      { pin: { id: "on", type: "bool" }, value: { out: true } },
+      { pin: { id: "temperature", type: "num" }, value: { out: 2500 } },
+    ], { "light.lr": { state: "on", attributes: { color_temp: 400 } } });
+    expect(c).toHaveLength(0);
+  });
+
+  it("prefers rgb color over temperature when both are desired", () => {
+    const bothNode = sink("sink-light", { entity_id: "light.lr" }, [
+      { id: "on", type: "bool" },
+      { id: "color", type: "color" },
+      { id: "temperature", type: "num" },
+    ]);
+    const c = run(bothNode, [
+      { pin: { id: "on", type: "bool" }, value: { out: true } },
+      { pin: { id: "color", type: "color" }, value: { out: "#336699" } },
+      { pin: { id: "temperature", type: "num" }, value: { out: 3000 } },
+    ], { "light.lr": { state: "off", attributes: {} } });
+    expect(c[0]!.call.data).toEqual({ rgb_color: [51, 102, 153] });
+  });
 });
 
 describe("generic call-service sink", () => {

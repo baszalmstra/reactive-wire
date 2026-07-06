@@ -8,7 +8,7 @@ import { Icon } from "../components/Icon.js";
 import { DeviceClassIcon } from "../components/DeviceClassIcon.js";
 import { HealthDot, MemBadge } from "../components/Badges.js";
 import { EntityPicker } from "./EntityPicker.js";
-import { DirSelect, UnitSelect } from "../components/Widgets.js";
+import { DirSelect, LightPreview, UnitSelect } from "../components/Widgets.js";
 import { describeNode } from "./node-templates.js";
 import { NodeValueEditors } from "./NodeValueEditors.js";
 import { Sparkline, type Sample } from "../components/Sparkline.js";
@@ -178,6 +178,20 @@ export function Inspector({
                   <span>{d.text}</span>
                 </div>
               ))}
+            </div>
+          </>
+        )}
+
+        {node.type === "sink-light" && (
+          <>
+            <div className="rw-insp-sect">Light</div>
+            <div className="rw-insp-card">
+              <LightPreview
+                on={results.inputs[`${node.id}:on`]}
+                color={results.inputs[`${node.id}:color`]}
+                temperature={results.inputs[`${node.id}:temperature`]}
+                brightness={results.inputs[`${node.id}:brightness`]}
+              />
             </div>
           </>
         )}

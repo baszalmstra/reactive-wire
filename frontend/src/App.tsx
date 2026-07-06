@@ -20,6 +20,7 @@ import { simulate } from "./example/sim.js";
 import { nodeGeom, type NodeData } from "../../shared/node-types.js";
 import type { EntityMap } from "../../shared/entities.js";
 import { entityStateType } from "../../shared/value.js";
+import { lightCaps, reconcileLightSinkPins } from "../../shared/engine/light-caps.js";
 import { initialNodes, initialEdges } from "./example/rf-graph.js";
 import { RWNode } from "./canvas/RWNode.js";
 import { Inspector } from "./canvas/Inspector.js";
@@ -429,10 +430,17 @@ export function App() {
             def.icon = entityIcon(entityId);
             def.outputs = def.outputs.map((p) => (p.id === "state" ? { ...p, type: stateType } : p));
           }
+          // A light sink exposes only the dimensions its target light supports; reshape its input
+          // pins from the picked light's capabilities, ghosting any wired pin the light lacks.
+          if (def.type === "sink-light" && "entity_id" in patch) {
+            const caps = lightCaps(entities[String(patch.entity_id ?? "")]?.attributes);
+            const isWired = (pinId: string) => edges.some((e) => e.target === id && e.targetHandle === pinId);
+            def.inputs = reconcileLightSinkPins(def.inputs, caps, isWired);
+          }
           return { ...n, data: { def } };
         }),
       ),
-    [setNodes, entities],
+    [setNodes, entities, edges],
   );
   const onSetValue = useCallback(
     (id: string, pin: string, value: unknown) =>
