@@ -71,6 +71,7 @@ export function RWEdge({
   markerEnd,
   data,
   interactionWidth,
+  selected,
 }: EdgeProps<RWEdgeType>) {
   const [edgePath, labelX, labelY] = getBezierPath({ sourceX, sourceY, sourcePosition, targetX, targetY, targetPosition });
   const valueType = data?.valueType ?? data?.value?.type ?? "any";
@@ -79,6 +80,22 @@ export function RWEdge({
   const wireColor = status === "error" ? "var(--rw-h-error)" : TYPE_VAR[value.type];
   const style = { "--wire": wireColor } as CSSProperties;
   const active = isBooleanOn(value);
+  const pathStyle = {
+    ...style,
+    stroke: wireColor,
+    strokeWidth: selected ? 4.2 : active ? 3.6 : 3.5,
+    opacity: status === "unavailable" ? 0.36 : status === "stale" ? 0.56 : 1,
+    strokeDasharray: status === "error" ? "8 5" : status === "unavailable" ? "3 8" : status === "stale" ? "12 7" : undefined,
+    filter: selected
+      ? "drop-shadow(0 0 4px color-mix(in oklab, var(--rw-accent) 70%, transparent))"
+      : status === "error"
+        ? "drop-shadow(0 0 4px color-mix(in oklab, var(--rw-h-error) 55%, transparent))"
+        : status === "ok"
+          ? active
+            ? "drop-shadow(0 0 3px color-mix(in oklab, var(--wire) 32%, transparent))"
+            : "drop-shadow(0 0 2px color-mix(in oklab, var(--wire) 26%, transparent))"
+          : "none",
+  } as CSSProperties;
 
   return (
     <>
@@ -90,7 +107,7 @@ export function RWEdge({
         markerEnd={markerEnd}
         interactionWidth={interactionWidth ?? 20}
         className={`rw-edge-main ${status} ${active ? "bool-on" : ""}`}
-        style={style}
+        style={pathStyle}
       />
       {active && <path className="rw-edge-flow" d={edgePath} pathLength={1} style={style} />}
       <EdgeLabelRenderer>

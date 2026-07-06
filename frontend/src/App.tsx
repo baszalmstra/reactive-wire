@@ -14,7 +14,6 @@ import {
   type OnSelectionChangeParams,
   type ReactFlowInstance,
 } from "@xyflow/react";
-import "@xyflow/react/dist/style.css";
 import { buildThemeVars, gridStyle, TYPE_VAR, type Aesthetic, type Mode } from "../../shared/theme.js";
 import { cn } from "./cn.js";
 import { evaluate, type Memory, type ViewEdge } from "../../shared/engine/evaluate.js";
