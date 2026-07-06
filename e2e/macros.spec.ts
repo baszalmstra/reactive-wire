@@ -7,6 +7,7 @@ import {
   moveNode,
   placements,
   selectNode,
+  setMacroInput,
 } from "./macros-utils.js";
 
 /**
@@ -144,12 +145,12 @@ test.describe.serial("Macros and grouping against the mock server", () => {
     await macroPaletteRow(page, "Macro 1").click();
     const first = placements(page, "Macro 1").last();
     await moveNode(page, first, 480, 300);
-    await first.locator("input.rw-num").fill("3");
+    await setMacroInput(first, "3");
 
     await macroPaletteRow(page, "Macro 1").click();
     const second = placements(page, "Macro 1").last();
     await moveNode(page, second, 480, 520);
-    await second.locator("input.rw-num").fill("8");
+    await setMacroInput(second, "8");
 
     // Two placements, two distinct outputs — the instances do not share state.
     const all = placements(page, "Macro 1");
@@ -180,7 +181,11 @@ test.describe.serial("Macros and grouping against the mock server", () => {
   test("removes a macro from the library via the palette", async ({ page }) => {
     const { mid } = await buildChain(page);
     await selectNode(page, mid);
-    await page.getByRole("button", { name: "Group" }).click();
+    // Gate on the selection registering: Group only enables once a node is selected, so clicking it
+    // before the header click commits would be a no-op and leave the library empty.
+    const group = page.getByRole("button", { name: "Group" });
+    await expect(group).toBeEnabled();
+    await group.click();
     await expect(macroPaletteRow(page, "Macro 1")).toBeVisible();
 
     await page.locator('button[title="Delete macro"]').click();

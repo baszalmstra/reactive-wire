@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 import { clearCanvas } from "./canvas-utils.js";
 import { debugState, nodeOfType, onlySink, queryServer, stateToBool } from "./deploy-depth-utils.js";
 
@@ -10,8 +10,8 @@ import { debugState, nodeOfType, onlySink, queryServer, stateToBool } from "./de
  * end to end, not just that the editor rendered a result.
  *
  * Wiring mechanics (pin-drag) are owned by a sibling spec; per the task's latitude to keep wiring
- * minimal, the actuating graph here uses the Light sink's editable `on` command input (default
- * false) rather than dragging a wire. light.bedroom is seeded "on" by the simulator and the MockHA
+ * minimal, the actuating graph here sets the Light sink's editable `on` command input to an explicit
+ * off rather than dragging a wire. light.bedroom is seeded "on" by the simulator and the MockHA
  * records service calls without mutating state, so the sink deterministically and stably wants to
  * turn it off — a fixed target for the cross-layer assertions.
  */
@@ -27,12 +27,21 @@ async function addEntity(page: Page, entityId: string): Promise<void> {
   await expect(page.locator(".react-flow__node", { hasText: entityId }).last()).toBeVisible();
 }
 
-async function addLightSink(page: Page, lightId: string): Promise<void> {
+async function addLightSink(page: Page, lightId: string): Promise<Locator> {
   await page.getByRole("button", { name: /^Light \+$/ }).click();
   await expect(page.getByText("Choose light entity", { exact: true })).toBeVisible();
   await page.getByRole("option", { name: new RegExp(lightId.replace(/\./g, "\\.")) }).click();
   await page.getByRole("button", { name: "Add" }).click();
   await expect(page.getByText("Choose light entity", { exact: true })).toHaveCount(0);
+  // The sink node shows its template subtitle, not the entity id, so match on that.
+  const sink = page.locator(".react-flow__node", { hasText: "reconciling sink" }).last();
+  await expect(sink).toBeVisible();
+  return sink;
+}
+
+/** Set a reconciling light sink's `on` command to an explicit boolean via its inline pin toggle. */
+async function setSinkOn(sink: Locator, on: boolean): Promise<void> {
+  await sink.getByRole("button", { name: on ? "on" : "off", exact: true }).click();
 }
 
 /** Push the current graph through the deploy guard and wait for the UI to flip to LIVE. */
@@ -69,12 +78,31 @@ test.describe.serial("Deploy depth: cross-layer against server debugState", () =
 
   test("deploys an actuating graph and the server runtime reflects it end to end", async ({ page }) => {
     await addEntity(page, "binary_sensor.room_presence");
-    await addLightSink(page, "light.bedroom");
+    const lightSink = await addLightSink(page, "light.bedroom");
+
+    // An unset command input is unavailable, so the reconciling sink would make no call. Set the `on`
+    // command to an explicit off so it wants a concrete turn_off against the (seeded on) light.
+    await setSinkOn(lightSink, false);
 
     const deployGroup = page.locator(".rw-deploy-group");
     await expect(deployGroup).toContainText("DRAFT");
     await deployViaGuard(page);
     await expect(page.locator(".rw-deploy-note")).toHaveText(/deployed/);
+
+    // The runtime evaluates asynchronously after the deploy lands, so its first debugState frame can
+    // arrive before the sink's desired call is computed. Wait until the runtime has settled — deployed
+    // with the sink wanting a concrete call — before snapshotting, so a pre-first-tick null isn't read
+    // as a failure. The target is stable (light seeded on, command set off), so the snapshot taken
+    // right after still carries it.
+    await expect
+      .poll(
+        async () => {
+          const d = await debugState(PORT);
+          return d.deployed && onlySink(d)?.desired != null;
+        },
+        { timeout: 10_000 },
+      )
+      .toBe(true);
 
     // Cross-layer: ask the server directly what it deployed and what its runtime is doing.
     const { debug } = await queryServer(PORT);
@@ -95,8 +123,8 @@ test.describe.serial("Deploy depth: cross-layer against server debugState", () =
     expect(stateOut.type).toBe("bool");
     expect(typeof stateOut.value).toBe("boolean");
 
-    // The reconciling Light sink wants to turn light.bedroom off (its command input defaults to off
-    // while the light is on) — a real desired ServiceCall. Its health is not in error; the optional
+    // The reconciling Light sink wants to turn light.bedroom off (its command was set off while the
+    // light is on) — a real desired ServiceCall. Its health is not in error; the optional
     // color/brightness inputs are simply unset.
     const sinkNode = nodeOfType(debug, "sink-light");
     expect(sinkNode, "a sink-light node should be present in the server's deployed graph").toBeDefined();

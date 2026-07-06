@@ -80,6 +80,21 @@ export async function connect(page: Page, from: Locator, to: Locator): Promise<v
 }
 
 /**
+ * Drag a wire and confirm it landed as a new edge, re-dragging if the pointer sequence was dropped.
+ * Under full-suite load a re-render (a live entity tick shifting a handle) or a starved event can
+ * make a single drag create no edge. The retry fires only when the edge count did not advance, so a
+ * genuine connection is never duplicated; use this where a wire must succeed, not where the app is
+ * expected to refuse the connection (type mismatch / cycle), which still use plain connect().
+ */
+export async function connectUntilEdge(page: Page, from: Locator, to: Locator): Promise<void> {
+  const target = (await edges(page).count()) + 1;
+  await expect(async () => {
+    await connect(page, from, to);
+    await expect(edges(page)).toHaveCount(target, { timeout: 2000 });
+  }).toPass({ timeout: 15_000 });
+}
+
+/**
  * Select the wire drawn between two handles by clicking its midpoint. React Flow's default bezier
  * for left/right handles passes exactly through the midpoint of the straight line between the two
  * endpoints, so the average of the handle centers lands on the (focusable) edge path.

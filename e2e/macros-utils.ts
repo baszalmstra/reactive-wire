@@ -45,6 +45,22 @@ export async function wire(page: Page, from: Locator, fromPin: string, to: Locat
   await page.mouse.up();
 }
 
+/**
+ * Drag a wire and confirm it landed as a new edge, re-dragging if the pointer sequence was dropped.
+ * Under full-suite load React can be mid-commit (a re-render from a live entity tick shifts a handle,
+ * or an event is starved) when the drag fires, so a single drag occasionally creates no edge. The
+ * re-measure-and-retry only fires when the edge count did not advance, so a genuine wire is never
+ * duplicated; a drag that merely landed slowly is caught by the inner wait, not retried.
+ */
+export async function wireUntilEdge(page: Page, from: Locator, fromPin: string, to: Locator, toPin: string): Promise<void> {
+  const edges = page.locator(".react-flow__edge");
+  const target = (await edges.count()) + 1;
+  await expect(async () => {
+    await wire(page, from, fromPin, to, toPin);
+    await expect(edges).toHaveCount(target, { timeout: 2000 });
+  }).toPass({ timeout: 15_000 });
+}
+
 /** Click a node's header to select it (optionally adding to the selection with Shift). */
 export async function selectNode(page: Page, node: Locator, opts: { add?: boolean } = {}): Promise<void> {
   await node.locator(".rw-drag").click(opts.add ? { modifiers: ["Shift"] } : {});
@@ -70,10 +86,24 @@ export async function buildChain(page: Page): Promise<{ num: Locator; mid: Locat
   await moveNode(page, mid, 640, 320);
   await moveNode(page, down, 940, 340);
 
-  await wire(page, num, "out", mid, "i0");
-  await wire(page, mid, "out", down, "i0");
+  await wireUntilEdge(page, num, "out", mid, "i0");
+  await wireUntilEdge(page, mid, "out", down, "i0");
   await expect(page.locator(".react-flow__edge")).toHaveCount(2);
   return { num, mid, down };
+}
+
+/**
+ * Type a literal into a macro placement's editable number input. An unset number pin renders a
+ * "+ set" affordance rather than a bare field, so reveal the input first when it isn't already
+ * showing, then fill it. Waiting on the input keeps this robust to the node still mounting.
+ */
+export async function setMacroInput(node: Locator, value: string): Promise<void> {
+  const input = node.locator("input.rw-num");
+  if ((await input.count()) === 0) {
+    await node.getByRole("button", { name: "+ set" }).click();
+  }
+  await expect(input).toBeVisible();
+  await input.fill(value);
 }
 
 /** The palette row for a macro definition, clickable to place a fresh instance. */

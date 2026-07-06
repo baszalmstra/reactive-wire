@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { clearCanvas } from "./canvas-utils.js";
-import { addNode, connect, edges, inPin, moveNodeTo, nodes, outPin, selectWire } from "./wiring-utils.js";
+import { addNode, connect, connectUntilEdge, edges, inPin, moveNodeTo, nodes, outPin, selectWire } from "./wiring-utils.js";
 
 /**
  * Graph-building mechanics against the mock server started by start-app.mjs: dragging pin-to-pin
@@ -158,7 +158,7 @@ test.describe.serial("Graph building against the mock server", () => {
     const notNode = await addNode(page, "NOT");
     await moveNodeTo(page, notNode, RIGHT.x, RIGHT.y);
 
-    await connect(page, outPin(boolNode, "out"), inPin(notNode, "in"));
+    await connectUntilEdge(page, outPin(boolNode, "out"), inPin(notNode, "in"));
     await expect(edges(page)).toHaveCount(1);
     await expect(notNode).toContainText("true");
 
