@@ -38,10 +38,13 @@ jobs:
           cache: true
           locked: true
 
+      - name: Install npm dependencies through pixi tasks
+        run: pixi run --locked install-all
+
       - name: Bump version metadata and changelog
         env:
           RELEASE_NOTES: ${{ github.event.inputs.release_notes }}
-        run: node scripts/prepare-release.mjs "${{ github.event.inputs.version }}"
+        run: npx --no-install tsx scripts/prepare-release.ts "${{ github.event.inputs.version }}"
 
       - name: Validate release build context
         run: pixi run --locked addon-build

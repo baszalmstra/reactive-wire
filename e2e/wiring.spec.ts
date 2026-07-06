@@ -3,7 +3,7 @@ import { clearCanvas } from "./canvas-utils.js";
 import { addNode, connect, connectUntilEdge, edges, inPin, moveNodeTo, nodes, outPin, selectWire } from "./wiring-utils.js";
 
 /**
- * Graph-building mechanics against the mock server started by start-app.mjs: dragging pin-to-pin
+ * Graph-building mechanics against the mock server started by start-app.ts: dragging pin-to-pin
  * wires, connection validation (type mismatch + cycle rejection), deleting wires and nodes, and
  * undo/redo. The editor evaluates the graph live, so a downstream node's value chip is the observable
  * signal that a wire took effect. The mock server's collaborative document is shared and persisted,

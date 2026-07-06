@@ -1,13 +1,27 @@
-#!/usr/bin/env node
+#!/usr/bin/env tsx
+import { spawnSync } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { spawnSync } from "node:child_process";
 
 const root = process.cwd();
 const serverOut = join(root, "build", "addon-server");
 const addonApp = join(root, "reactive_wire", "app");
 
-function run(command, args, options = {}) {
+interface RunOptions {
+  cwd?: string;
+  env?: NodeJS.ProcessEnv;
+}
+
+interface PackageJson {
+  name?: string;
+  version?: string;
+  description?: string;
+  type?: string;
+  dependencies?: Record<string, string>;
+  packages?: Record<string, { version?: string }>;
+}
+
+function run(command: string, args: string[], options: RunOptions = {}): void {
   const result = spawnSync(command, args, {
     cwd: options.cwd ?? root,
     env: { ...process.env, ...(options.env ?? {}) },
@@ -17,32 +31,36 @@ function run(command, args, options = {}) {
   if (result.status !== 0) process.exit(result.status ?? 1);
 }
 
-function copy(from, to) {
+function copy(from: string, to: string): void {
   if (!existsSync(from)) throw new Error(`Missing build input: ${from}`);
   cpSync(from, to, { recursive: true });
 }
 
-function readJson(path) {
-  return JSON.parse(readFileSync(path, "utf8"));
+function readJson<T>(path: string): T {
+  return JSON.parse(readFileSync(path, "utf8")) as T;
 }
 
-function writeJson(path, value) {
+function writeJson(path: string, value: unknown): void {
   writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`);
 }
 
-function runtimePackage() {
-  const rootPackage = readJson(join(root, "package.json"));
-  const rootLock = readJson(join(root, "package-lock.json"));
-  const dependencies = {};
+function runtimePackage(): Required<Pick<PackageJson, "name" | "version" | "description" | "type">> & {
+  private: true;
+  scripts: { start: string };
+  dependencies: Record<string, string>;
+} {
+  const rootPackage = readJson<PackageJson>(join(root, "package.json"));
+  const rootLock = readJson<PackageJson>(join(root, "package-lock.json"));
+  const dependencies: Record<string, string> = {};
   for (const name of Object.keys(rootPackage.dependencies ?? {}).sort()) {
     const locked = rootLock.packages?.[`node_modules/${name}`]?.version;
-    dependencies[name] = locked ?? rootPackage.dependencies[name];
+    dependencies[name] = locked ?? rootPackage.dependencies![name]!;
   }
   return {
-    name: rootPackage.name,
-    version: rootPackage.version,
-    description: rootPackage.description,
-    type: rootPackage.type,
+    name: rootPackage.name ?? "reactive-wire",
+    version: rootPackage.version ?? "0.0.0",
+    description: rootPackage.description ?? "Reactive Wire",
+    type: rootPackage.type ?? "module",
     private: true,
     scripts: {
       start: "node server/src/server/index.js",
@@ -59,6 +77,7 @@ run("npx", ["--no-install", "tsc", "-p", "tsconfig.addon.json"]);
 run("npm", ["run", "build"], {
   cwd: join(root, "frontend"),
   env: {
+    ...process.env,
     VITE_BASE: "./",
     VITE_RW_SAME_ORIGIN: "1",
   },

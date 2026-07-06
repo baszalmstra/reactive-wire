@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 import { clearCanvas } from "./canvas-utils.js";
 
 /**
- * Exercises the deploy path end to end against the mock server started by start-app.mjs: build a
+ * Exercises the deploy path end to end against the mock server started by start-app.ts: build a
  * graph from the palette (a live entity plus a reconciling light sink), push it through the deploy
  * guard, and prove the server's deployResult surfaces back in the editor UI. The mock server binds
  * to loopback and accepts deploys without a token (connection-policy), so no token wiring is needed.

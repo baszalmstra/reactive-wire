@@ -11,7 +11,7 @@ import {
 } from "./macros-utils.js";
 
 /**
- * End-to-end coverage for macros / grouping against the mock server started by start-app.mjs.
+ * End-to-end coverage for macros / grouping against the mock server started by start-app.ts.
  * A macro is built by selecting nodes on the canvas and grouping them: the wires that cross the
  * selection become the macro's typed boundary, and a single placement node replaces the selection
  * while keeping its outer wiring. These specs drive that flow through the real UI — group, edit the

@@ -33,7 +33,7 @@ export function useFlows(options: {
   // flow's working copy. Switching tabs stashes the working copy back into its flow and loads the
   // next one. Inactive flows keep their nodes/edges here.
   const [flows, setFlows] = useState<Flow[]>(() => [{ ...emptyFlow("Flow 1"), nodes: initialNodes, edges: initialEdges }]);
-  const [activeFlowId, setActiveFlowId] = useState(() => flows[0].id);
+  const [activeFlowId, setActiveFlowId] = useState(() => flows[0]!.id);
   const flowTabs = useMemo(() => flows.map((f) => ({ id: f.id, name: f.name })), [flows]);
 
   // Switch to another flow: stash the active working store into its flow entry, then load the
@@ -85,6 +85,7 @@ export function useFlows(options: {
         // When closing the active flow, fall to a neighbour and load its store.
         if (id === activeFlowId) {
           const next = rest[Math.max(0, idx - 1)];
+          if (!next) return rest;
           setNodes(next.nodes);
           setEdges(next.edges);
           setActiveFlowId(next.id);

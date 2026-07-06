@@ -28,6 +28,16 @@ function helperGraph(): { nodes: NodeData[]; edges: ViewEdge[] } {
   return { nodes, edges };
 }
 
+/** A reconciling light sink driven by another boolean entity. */
+function lightGraph(): { nodes: NodeData[]; edges: ViewEdge[] } {
+  const nodes: NodeData[] = [
+    { id: "src", type: "entity", title: "", subtitle: "", icon: "bulb", x: 0, y: 0, config: { entity_id: "binary_sensor.x" }, inputs: [], outputs: [{ id: "state", label: "", type: "bool" }] },
+    { id: "snk", type: "sink-light", title: "", subtitle: "", icon: "bulb", x: 0, y: 0, config: { entity_id: "light.lr" }, inputs: [{ id: "on", label: "", type: "bool" }], outputs: [] },
+  ];
+  const edges: ViewEdge[] = [{ id: "e", from: { node: "src", pin: "state" }, to: { node: "snk", pin: "on" } }];
+  return { nodes, edges };
+}
+
 /** A generic call-service sink driven by a boolean entity. */
 function callGraph(): { nodes: NodeData[]; edges: ViewEdge[] } {
   const nodes: NodeData[] = [
@@ -138,6 +148,69 @@ describe("Deployer — generic call-service sink", () => {
   });
 });
 
+describe("Deployer — reconciling light sink", () => {
+  it("does not repeat the same correction on unrelated recomputes", async () => {
+    const ha = new MockHA();
+    ha.setState("light.lr", "on");
+    ha.setState("binary_sensor.x", "off");
+    const deployer = new Deployer(ha, 100_000);
+    const { nodes, edges } = lightGraph();
+    deployer.deploy(nodes, edges, true);
+    await flushPromises();
+
+    expect(ha.calls).toHaveLength(1);
+    expect(ha.lastCall()).toEqual({ domain: "light", service: "turn_off", data: {}, target: { entity_id: "light.lr" } });
+
+    // The desired value and observed target state are unchanged, so a noisy/ticking recompute
+    // must not hammer Home Assistant with the identical correction again.
+    ha.setState("sensor.noise", "tick");
+    await flushPromises();
+    expect(ha.calls).toHaveLength(1);
+
+    // Once the target matches, the correction memory is cleared. A later real drift is corrected.
+    ha.setState("light.lr", "off");
+    await flushPromises();
+    expect(ha.calls).toHaveLength(1);
+    ha.setState("light.lr", "on", { marker: 1 });
+    await flushPromises();
+    expect(ha.calls).toHaveLength(2);
+    expect(ha.lastCall()?.service).toBe("turn_off");
+
+    deployer.stop();
+  });
+
+  it("marks a failed call as an error and suppresses the same failed context", async () => {
+    const ha = new MockHA();
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    let deployer: Deployer | undefined;
+    ha.callService = (call) => {
+      ha.calls.push(call);
+      return Promise.reject({ message: "boom", code: "service_failed" });
+    };
+    try {
+      ha.setState("light.lr", "on");
+      ha.setState("binary_sensor.x", "off");
+      deployer = new Deployer(ha, 100_000);
+      const { nodes, edges } = lightGraph();
+      deployer.deploy(nodes, edges, true);
+      await flushPromises();
+
+      expect(ha.calls).toHaveLength(1);
+      expect(deployer.inspect().nodes.snk?.health).toBe("error");
+      expect(deployer.inspect().sinks.snk?.status).toBe("error");
+      expect(deployer.inspect().sinks.snk?.note).toContain("boom");
+
+      ha.setState("sensor.noise", "retry?");
+      await flushPromises();
+      expect(ha.calls).toHaveLength(1);
+      expect(deployer.inspect().sinks.snk?.status).toBe("error");
+    } finally {
+      deployer?.stop();
+      errorSpy.mockRestore();
+    }
+  });
+});
+
 describe("Deployer — reconciling input_boolean sink", () => {
   it("acts only on the diff and not when the helper already matches", async () => {
     const ha = new MockHA();
@@ -160,7 +233,7 @@ describe("Deployer — reconciling input_boolean sink", () => {
     deployer.stop();
   });
 
-  it("re-emits the same correction after Home Assistant echoes a no-op instead of changing state", async () => {
+  it("does not re-emit the same correction after Home Assistant echoes an unchanged state", async () => {
     const ha = new MockHA();
     ha.setState("input_boolean.flag", "off");
     ha.setState("binary_sensor.x", "on");
@@ -170,12 +243,11 @@ describe("Deployer — reconciling input_boolean sink", () => {
 
     expect(ha.calls).toHaveLength(1);
     await flushPromises();
-    // The service call failed or was ignored, and HA reports the helper is still off. Because
-    // actual still differs from desired, the identical turn_on correction must not be suppressed.
+    // HA is still reporting the same target state and the desired value did not change, so the
+    // runtime waits instead of retrying the identical correction on every recompute.
     ha.setState("input_boolean.flag", "off");
     await flushPromises();
-    expect(ha.calls).toHaveLength(2);
-    expect(ha.lastCall()).toEqual({ domain: "input_boolean", service: "turn_on", data: {}, target: { entity_id: "input_boolean.flag" } });
+    expect(ha.calls).toHaveLength(1);
 
     deployer.stop();
   });

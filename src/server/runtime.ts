@@ -1,4 +1,4 @@
-import { evaluate, isSink, sinkCalls, type Memory, type ViewEdge } from "../../shared/engine/evaluate.js";
+import { evaluate, isSink, isTransientSink, sinkCalls, type Memory, type ViewEdge } from "../../shared/engine/evaluate.js";
 import { expandMacros } from "../../shared/engine/expand.js";
 import type { MacroMap } from "../../shared/macros.js";
 import type { Health, NodeData } from "../../shared/node-types.js";
@@ -51,6 +51,12 @@ export interface DeployerSnapshot {
   sinks: Record<string, DebugSink>;
 }
 
+interface SinkFailure {
+  /** The desired call + observed-world context that failed. */
+  key: string;
+  message: string;
+}
+
 /** A value that survives JSON serialization, or its string form when it would throw (circular, BigInt). */
 function jsonSafe(value: unknown): unknown {
   try {
@@ -80,6 +86,42 @@ function debugCall(call: ServiceCall): ServiceCall {
     : { domain: call.domain, service: call.service, data };
 }
 
+function keyOf(value: unknown): string {
+  try {
+    const json = JSON.stringify(value);
+    if (json !== undefined) return json;
+  } catch {
+    // Fall through to String for circular or otherwise unserializable values.
+  }
+  return String(value);
+}
+
+function serviceErrorMessage(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  if (typeof err === "string") return err;
+  if (typeof err === "object" && err !== null) {
+    const rec = err as Record<string, unknown>;
+    if (typeof rec.message === "string") return rec.message;
+    return keyOf(err);
+  }
+  return String(err);
+}
+
+function isReconcilingSinkType(type: string): boolean {
+  return type !== "sink-call" && !isTransientSink(type);
+}
+
+/** The target entity state the current correction was based on, folded into de-dupe keys. */
+function observedTargetState(call: ServiceCall, entities: EntityMap): unknown {
+  const entityId = call.target?.entity_id;
+  if (!entityId) return null;
+  return entities[entityId] ?? null;
+}
+
+function reconcilingAttemptKey(call: ServiceCall, entities: EntityMap): string {
+  return keyOf({ call, observed: observedTargetState(call, entities) });
+}
+
 /** A no-op fetch used when no real one is supplied; every fetch source then stays unavailable. */
 const noFetch: FetchFn = () => Promise.reject(new Error("no fetch configured"));
 
@@ -98,9 +140,11 @@ export interface DurableMemory {
 
 /**
  * Runs a deployed graph with the same engine the editor previews with: on every entity
- * change it re-evaluates and reconciles each sink, calling a service whenever the actual
- * state differs from the desired state. Sinks whose command input is not a concrete value are skipped, so an offline
- * input can never actuate. In preview mode calls are logged instead of executed.
+ * change it re-evaluates and reconciles each sink. A reconciling sink gets one service attempt
+ * for a given desired call + observed target state, then waits for the target or desired value to
+ * change before trying that same correction again. Sinks whose command input is not a concrete
+ * value are skipped, so an offline input can never actuate. In preview mode calls are logged
+ * instead of executed.
  *
  * Async data-source (fetch) nodes are driven by a Poller at the edge: it fetches each source
  * on its interval and writes the latest body into a source map, then triggers a recompute. The
@@ -113,6 +157,8 @@ export class Deployer {
   private generation = 0;
   private readonly inFlight = new Map<string, string>();
   private readonly lastNonReconciling = new Map<string, string>();
+  private readonly lastReconcilingAttempt = new Map<string, string>();
+  private readonly callFailures = new Map<string, SinkFailure>();
   private readonly lastTriggeredAt = new Map<string, number>();
   private readonly lastTriggeredCall = new Map<string, ServiceCall>();
   private readonly tick: ReturnType<typeof setInterval>;
@@ -145,6 +191,8 @@ export class Deployer {
     this.generation += 1;
     this.inFlight.clear();
     this.lastNonReconciling.clear();
+    this.lastReconcilingAttempt.clear();
+    this.callFailures.clear();
     this.lastTriggeredAt.clear();
     this.lastTriggeredCall.clear();
     this.graph = { nodes: flat.nodes, edges: flat.edges };
@@ -162,6 +210,8 @@ export class Deployer {
     this.generation += 1;
     this.inFlight.clear();
     this.lastNonReconciling.clear();
+    this.lastReconcilingAttempt.clear();
+    this.callFailures.clear();
     this.lastTriggeredAt.clear();
     this.lastTriggeredCall.clear();
     clearInterval(this.tick);
@@ -187,15 +237,16 @@ export class Deployer {
           const v = results.outputs[`${n.id}:${p.id}`];
           if (v) outputs[p.id] = debugValue(v);
         }
-        nodes[n.id] = { type: n.type, health: results.health[n.id] ?? "ok", outputs };
+        const failure = isSink(n.type) ? this.callFailures.get(n.id) : undefined;
+        nodes[n.id] = { type: n.type, health: failure ? "error" : results.health[n.id] ?? "ok", outputs };
         if (isSink(n.type)) {
           const action = results.actions[n.id];
           const desired = results.sinks[n.id];
           const lastCall = this.lastTriggeredCall.get(n.id) ?? null;
           sinks[n.id] = {
             desired: desired ? debugCall(desired) : null,
-            note: action?.note,
-            status: action?.status ?? "ok",
+            note: failure ? `last call failed: ${failure.message}` : action?.note,
+            status: failure ? "error" : action?.status ?? "ok",
             inFlight: this.inFlight.has(n.id),
             lastCall: lastCall ? debugCall(lastCall) : null,
             lastTriggeredAt: this.lastTriggeredAt.get(n.id) ?? null,
@@ -229,23 +280,36 @@ export class Deployer {
     this.lastResults = results;
     this.lastRunAt = Date.now();
     const byId = new Map(this.graph.nodes.map((n) => [n.id, n]));
+    for (const n of this.graph.nodes) {
+      // Once a reconciling sink no longer wants a call, any remembered failed/outstanding
+      // correction is resolved by the world matching (or by the command becoming unavailable).
+      if (isSink(n.type) && isReconcilingSinkType(n.type) && !results.sinks[n.id]) {
+        this.lastReconcilingAttempt.delete(n.id);
+        this.callFailures.delete(n.id);
+      }
+    }
     const generation = this.generation;
     for (const { nodeId, call } of sinkCalls(this.graph.nodes, results)) {
-      // Reconciling sinks decide whether to hold by comparing desired values with the current
-      // entity snapshot inside the engine. Do not permanently de-dupe those calls: if a previous
-      // actuation failed, or HA later drifts back, the same correction must be allowed to fire
-      // again. We do suppress an identical call while it is already in flight, and the generic
-      // call-service sink keeps its old edge-ish behavior by remembering the last successful
-      // command until its desired service/data changes.
+      // Reconciling sinks already compare desired values with the target entity snapshot. The
+      // runtime adds a second guard: one correction is attempted for a given desired call and
+      // observed target state, then it waits for either the desired call or the target state to
+      // change. This keeps clock ticks/unrelated entity updates from hammering HA with the same
+      // service call while still allowing a later real drift to be corrected.
       const nodeType = byId.get(nodeId)?.type ?? "";
       const rememberUntilChange = nodeType === "sink-call";
-      const key = JSON.stringify(call);
+      const reconciling = isReconcilingSinkType(nodeType);
+      const key = keyOf(call);
+      const failureKey = reconciling ? reconcilingAttemptKey(call, entities) : key;
+      if (this.callFailures.get(nodeId)?.key !== failureKey) this.callFailures.delete(nodeId);
       if (this.inFlight.get(nodeId) === key) continue;
       if (rememberUntilChange && this.lastNonReconciling.get(nodeId) === key) continue;
+      if (reconciling && this.lastReconcilingAttempt.get(nodeId) === failureKey) continue;
       this.inFlight.set(nodeId, key);
+      if (reconciling) this.lastReconcilingAttempt.set(nodeId, failureKey);
+      this.callFailures.delete(nodeId);
       this.recordTriggered(nodeId, call);
       if (this.actuate) {
-        void this.executeCall(generation, nodeId, key, call, rememberUntilChange);
+        void this.executeCall(generation, nodeId, key, failureKey, call, rememberUntilChange);
       } else {
         this.inFlight.delete(nodeId);
         if (rememberUntilChange) this.lastNonReconciling.set(nodeId, key);
@@ -259,18 +323,23 @@ export class Deployer {
     generation: number,
     nodeId: string,
     key: string,
+    failureKey: string,
     call: Parameters<HAClient["callService"]>[0],
     rememberUntilChange: boolean,
   ): Promise<void> {
     const targetId = call.target?.entity_id ?? "";
     try {
       await this.ha.callService(call);
-      if (generation === this.generation && this.inFlight.get(nodeId) === key && rememberUntilChange) {
-        this.lastNonReconciling.set(nodeId, key);
+      if (generation === this.generation && this.inFlight.get(nodeId) === key) {
+        if (rememberUntilChange) this.lastNonReconciling.set(nodeId, key);
+        this.callFailures.delete(nodeId);
       }
       log("info", "deployer", "sink call", { mode: "live", service: call.service, entity: targetId, data: call.data });
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = serviceErrorMessage(err);
+      if (generation === this.generation && this.inFlight.get(nodeId) === key) {
+        this.callFailures.set(nodeId, { key: failureKey, message: msg });
+      }
       log("error", "deployer", "sink call failed", { mode: "live", service: call.service, entity: targetId, error: msg });
     } finally {
       if (generation === this.generation && this.inFlight.get(nodeId) === key) this.inFlight.delete(nodeId);

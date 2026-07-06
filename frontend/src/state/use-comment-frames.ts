@@ -101,7 +101,7 @@ export function useCommentFrames(options: {
     const sel = nodesRef.current.find((n) => n.id === selected && isRWNode(n)) as RWNodeType | undefined;
     let position: { x: number; y: number };
     let data: CommentData;
-    const color = COMMENT_COLOR_KEYS[cmtc.current % COMMENT_COLOR_KEYS.length];
+    const color = COMMENT_COLOR_KEYS[cmtc.current % COMMENT_COLOR_KEYS.length] ?? "slate";
     if (sel) {
       const g = nodeGeom(sel.data.def);
       const pad = 38;

@@ -1,14 +1,17 @@
-#!/usr/bin/env node
+#!/usr/bin/env tsx
 // Connect to a running Reactive Wire server, request a one-shot debugState snapshot, pretty-print
 // it, and exit. Reads RW_HOST (default 127.0.0.1), RW_PORT (default 7420), and RW_DEPLOY_TOKEN
-// (sent as the connection token when set). Only depends on the `ws` package, so plain `node` runs
-// it. Usage: node query-state.mjs
+// (sent as the connection token when set). Usage: npx tsx scripts/query-state.ts
 import WebSocket from "ws";
 
 const host = process.env.RW_HOST?.trim() || "127.0.0.1";
 const port = Number(process.env.RW_PORT ?? 7420);
 const token = process.env.RW_DEPLOY_TOKEN?.trim();
 const url = `ws://${host}:${port}/${token ? `?token=${encodeURIComponent(token)}` : ""}`;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
 
 const ws = new WebSocket(url, { headers: { origin: "http://localhost:5173" } });
 const timer = setTimeout(() => {
@@ -18,14 +21,14 @@ const timer = setTimeout(() => {
 
 ws.on("open", () => ws.send(JSON.stringify({ type: "debugState" })));
 ws.on("message", (raw) => {
-  let msg;
+  let msg: unknown;
   try {
     msg = JSON.parse(String(raw));
   } catch {
     return;
   }
   // The server also pushes `entities` and `docState` frames on connect; wait for our answer.
-  if (msg.type !== "debugState") return;
+  if (!isRecord(msg) || msg.type !== "debugState") return;
   clearTimeout(timer);
   console.log(JSON.stringify(msg, null, 2));
   ws.close();

@@ -3,7 +3,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 
 const [version, outPath] = process.argv.slice(2);
 if (!version || !outPath) {
-  console.error("Usage: node scripts/extract-release-notes.mjs <version> <output-file>");
+  console.error("Usage: npx tsx scripts/extract-release-notes.ts <version> <output-file>");
   process.exit(1);
 }
 

@@ -1,5 +1,6 @@
-import { rmSync, mkdirSync } from "node:fs";
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcessByStdio, type SpawnOptionsWithoutStdio } from "node:child_process";
+import { mkdirSync, rmSync } from "node:fs";
+import type { Readable } from "node:stream";
 import { dirname, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -15,9 +16,15 @@ rmSync(dataDir, { recursive: true, force: true });
 mkdirSync(dataDir, { recursive: true });
 
 const isWin = process.platform === "win32";
-const children = [];
+type ManagedChild = ChildProcessByStdio<null, Readable, Readable>;
+const children: ManagedChild[] = [];
 
-function start(name, command, args, options = {}) {
+type StartOptions = Omit<SpawnOptionsWithoutStdio, "cwd" | "shell" | "stdio"> & {
+  cwd?: string;
+  env?: NodeJS.ProcessEnv;
+};
+
+function start(name: string, command: string, args: string[], options: StartOptions = {}): ManagedChild {
   const child = spawn(command, args, {
     cwd: root,
     shell: false,
@@ -38,7 +45,7 @@ function start(name, command, args, options = {}) {
 }
 
 let stopping = false;
-function stopAll() {
+function stopAll(): void {
   stopping = true;
   for (const child of children) {
     if (!child.killed) child.kill(isWin ? undefined : "SIGTERM");
@@ -50,7 +57,7 @@ process.on("SIGTERM", () => { stopAll(); process.exit(143); });
 process.on("exit", stopAll);
 
 const npmCommand = isWin ? "cmd.exe" : "npm";
-const npmArgs = (args) => isWin ? ["/d", "/s", "/c", ["npm", ...args].join(" ")] : args;
+const npmArgs = (args: string[]): string[] => isWin ? ["/d", "/s", "/c", ["npm", ...args].join(" ")] : args;
 
 start("server", npmCommand, npmArgs(["run", "start"]), {
   env: {

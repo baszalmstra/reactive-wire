@@ -12,6 +12,13 @@ import {
   type DocUpdateMessage,
   type EditorDocumentSnapshot,
 } from "../../shared/collab.js";
+import { parseJsonRecord } from "../../shared/json.js";
+import {
+  frameToken,
+  isDebugStateRequestMessage,
+  isDeployClientMessage,
+  isDocUpdateMessage,
+} from "../../shared/protocol.js";
 import { type EntityFeed } from "../ha/client.js";
 import {
   requestToken,
@@ -54,10 +61,6 @@ export interface FeedHandlers {
   onDocumentChange?: (snapshot: EditorDocumentSnapshot) => { ok: boolean; unsupported?: string[]; error?: string } | void;
   /** Returns a read-only snapshot of runtime state, answering a debugState query. When absent, introspection is disabled. */
   inspect?: () => DebugStateSnapshot;
-}
-
-function isRecord(v: unknown): v is Record<string, unknown> {
-  return typeof v === "object" && v !== null && !Array.isArray(v);
 }
 
 function deployResultFrame(result: { ok: boolean; unsupported?: string[]; error?: string }): string {
@@ -172,16 +175,12 @@ export function startFeed(ha: EntityFeed, portOrOptions: number | FeedOptions, h
       }
     }
     ws.on("message", (raw) => {
-      let msg: unknown;
-      try {
-        msg = JSON.parse(String(raw));
-      } catch {
+      const msg = parseJsonRecord(String(raw));
+      if (!msg) {
         sendDeployResult(ws, { ok: false, error: "Malformed JSON message" });
         return;
       }
-      if (!isRecord(msg)) return;
-      const messageToken = typeof msg.token === "string" ? msg.token : null;
-      const tokenOk = connectionTokenOk || tokenMatches(messageToken, options.deployToken);
+      const tokenOk = connectionTokenOk || tokenMatches(frameToken(msg), options.deployToken);
 
       if (msg.type === "docUpdate") {
         if (!handlers.documentStore) {
@@ -192,7 +191,7 @@ export function startFeed(ha: EntityFeed, portOrOptions: number | FeedOptions, h
           sendDocError(ws, "Invalid deploy token");
           return;
         }
-        if (typeof msg.update !== "string") {
+        if (!isDocUpdateMessage(msg)) {
           sendDocError(ws, "Document update must be a base64 string");
           return;
         }
@@ -219,7 +218,7 @@ export function startFeed(ha: EntityFeed, portOrOptions: number | FeedOptions, h
         return;
       }
 
-      if (msg.type === "debugState") {
+      if (isDebugStateRequestMessage(msg)) {
         // A read-only introspection query. The connection policy already restricts who can reach
         // the feed at all, so no deploy token is required; the answer goes only to the asker.
         if (ws.readyState !== WebSocket.OPEN) return;
@@ -245,6 +244,10 @@ export function startFeed(ha: EntityFeed, portOrOptions: number | FeedOptions, h
       }
       if (!tokenOk) {
         sendDeployResult(ws, { ok: false, error: "Invalid deploy token" });
+        return;
+      }
+      if (!isDeployClientMessage(msg)) {
+        sendDeployResult(ws, { ok: false, error: "Deploy frame must include a graph" });
         return;
       }
       const validated = sanitizeDeployRequest(msg.graph);

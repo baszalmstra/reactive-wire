@@ -30,7 +30,7 @@ token-gated, but the connection handshake is: when `RW_DEPLOY_TOKEN` is set you 
 `RW_DEPLOY_TOKEN`). Use the bundled script:
 
 ```sh
-node scripts/query-state.mjs    # honors RW_HOST/RW_PORT/RW_DEPLOY_TOKEN
+npx tsx scripts/query-state.ts # honors RW_HOST/RW_PORT/RW_DEPLOY_TOKEN
 ```
 
 ### Reading the snapshot
@@ -58,11 +58,11 @@ a shared TypeScript helper, so run it through tsx:
 
 ```sh
 # bash / Linux
-RW_DATA_DIR=.rw-data npx tsx scripts/decode-doc.mjs
+RW_DATA_DIR=.rw-data npx tsx scripts/decode-doc.ts
 ```
 ```powershell
 # PowerShell (Windows)
-$env:RW_DATA_DIR = ".rw-data"; npx tsx scripts/decode-doc.mjs
+$env:RW_DATA_DIR = ".rw-data"; npx tsx scripts/decode-doc.ts
 ```
 
 It prints a compact overview (per-flow node/edge counts, settings, macro count) plus the full

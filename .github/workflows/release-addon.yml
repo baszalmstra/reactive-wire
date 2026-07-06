@@ -10,8 +10,8 @@ on:
       - pixi.toml
       - pixi.lock
       - tsconfig.addon.json
-      - scripts/build-addon-context.mjs
-      - scripts/extract-release-notes.mjs
+      - scripts/build-addon-context.ts
+      - scripts/extract-release-notes.ts
       - src/**
       - shared/**
       - frontend/**
@@ -88,7 +88,7 @@ jobs:
 
       - name: Extract release notes
         if: steps.version.outputs.tag_exists == 'false'
-        run: node scripts/extract-release-notes.mjs "${{ steps.version.outputs.version }}" /tmp/release-notes.md
+        run: npx --no-install tsx scripts/extract-release-notes.ts "${{ steps.version.outputs.version }}" /tmp/release-notes.md
 
       - name: Set up QEMU
         if: steps.version.outputs.tag_exists == 'false'

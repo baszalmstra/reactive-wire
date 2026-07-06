@@ -7,14 +7,18 @@
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "npm run typecheck:core && npm run typecheck:configs && npm run typecheck:scripts && npm run typecheck:e2e",
+    "typecheck:core": "tsc --noEmit -p tsconfig.json",
+    "typecheck:configs": "tsc --noEmit -p tsconfig.configs.json",
+    "typecheck:scripts": "tsc --noEmit -p tsconfig.scripts.json",
+    "typecheck:e2e": "tsc --noEmit -p tsconfig.e2e.json",
     "dev": "tsx watch src/server/index.ts",
     "start": "tsx src/server/index.ts",
     "e2e": "playwright test",
-    "addon:build": "node scripts/build-addon-context.mjs",
-    "release:prepare": "node scripts/prepare-release.mjs",
+    "addon:build": "tsx scripts/build-addon-context.ts",
+    "release:prepare": "tsx scripts/prepare-release.ts",
     "e2e:ui": "playwright test --ui",
-    "e2e:app": "node e2e/start-app.mjs"
+    "e2e:app": "tsx e2e/start-app.ts"
   },
   "dependencies": {
     "dotenv": "^16.4.7",

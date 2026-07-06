@@ -12,7 +12,7 @@ type Story = StoryObj<typeof FlowTabs>;
 
 function Demo({ initial }: { initial: { id: string; name: string }[] }) {
   const [flows, setFlows] = useState(initial);
-  const [active, setActive] = useState(initial[0].id);
+  const [active, setActive] = useState(initial[0]!.id);
   return (
     <div style={{ width: 520, border: "1px solid var(--rw-line)", borderRadius: 8, overflow: "hidden" }}>
       <FlowTabs
@@ -28,7 +28,7 @@ function Demo({ initial }: { initial: { id: string; name: string }[] }) {
         onClose={(id) =>
           setFlows((fs) => {
             const rest = fs.filter((f) => f.id !== id);
-            if (id === active && rest.length) setActive(rest[0].id);
+            if (id === active && rest.length) setActive(rest[0]!.id);
             return rest;
           })
         }

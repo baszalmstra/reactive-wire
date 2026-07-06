@@ -1,0 +1,8 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": ["node", "vite/client"]
+  },
+  "include": ["vitest.config.ts", "vitest.workspace.ts", "frontend/vite.config.ts", "frontend/eslint.config.ts"]
+}

@@ -48,7 +48,7 @@ export function useUndoRedo(options: {
     const current = snapshot();
     setPast((p) => {
       if (!p.length) return p;
-      const prev = p[p.length - 1];
+      const prev = p[p.length - 1]!;
       setFuture((f) => [current, ...f]);
       setNodes(prev.nodes);
       setEdges(prev.edges);
@@ -59,7 +59,7 @@ export function useUndoRedo(options: {
     const current = snapshot();
     setFuture((f) => {
       if (!f.length) return f;
-      const next = f[0];
+      const next = f[0]!;
       setPast((p) => [...p, current]);
       setNodes(next.nodes);
       setEdges(next.edges);

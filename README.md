@@ -56,7 +56,7 @@ pixi run check           # typecheck core + editor and run the tests
 pixi run e2e             # Playwright browser smoke tests with the mock server + Vite
 ```
 
-The Playwright suite starts its own mock server and frontend via `e2e/start-app.mjs` on isolated default ports (`7421`/`5175`); install the browser once with `npx playwright install chromium` if Playwright asks for it.
+The Playwright suite starts its own mock server and frontend via `e2e/start-app.ts` on isolated default ports (`7421`/`5175`); install the browser once with `npx playwright install chromium` if Playwright asks for it.
 
 Editor frontend (run in ./frontend automatically; auto-installs if needed):
 

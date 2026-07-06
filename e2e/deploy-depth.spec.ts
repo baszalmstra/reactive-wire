@@ -119,6 +119,7 @@ test.describe.serial("Deploy depth: cross-layer against server debugState", () =
     expect(entityNode!.health).not.toBe("error");
     const stateOut = entityNode!.outputs.state;
     expect(stateOut, "the entity node should expose a resolved state output").toBeDefined();
+    if (!stateOut) throw new Error("entity state output missing after deploy");
     expect(stateOut.status).toBe("ok");
     expect(stateOut.type).toBe("bool");
     expect(typeof stateOut.value).toBe("boolean");
@@ -153,8 +154,10 @@ test.describe.serial("Deploy depth: cross-layer against server debugState", () =
       const feed = entities["binary_sensor.room_presence"];
       expect(feed, "the server should report the sensor in its live feed").toBeDefined();
       const entityNode = nodeOfType(debug, "entity");
-      expect(entityNode?.outputs.state?.status).toBe("ok");
-      expect(entityNode!.outputs.state.value).toBe(stateToBool(feed.state));
+      const stateOut = entityNode?.outputs.state;
+      expect(stateOut?.status).toBe("ok");
+      if (!feed || !stateOut) throw new Error("server feed or entity state output missing");
+      expect(stateOut.value).toBe(stateToBool(feed.state));
       await page.waitForTimeout(400);
     }
   });

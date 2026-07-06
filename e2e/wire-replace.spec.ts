@@ -4,7 +4,7 @@ import { clearCanvas } from "./canvas-utils.js";
 /**
  * Single-source inputs: a new wire into an already-wired input replaces the old one as one edit
  * (one undo step), and while a connection is dragged onto an occupied input the wire it will
- * replace renders as doomed. Runs against the mock server started by start-app.mjs; the shared
+ * replace renders as doomed. Runs against the mock server started by start-app.ts; the shared
  * collaborative document persists between specs, so each test starts from an empty canvas.
  *
  * The pin-dragging helpers below are copied (not imported) from the wiring-utils used by the
