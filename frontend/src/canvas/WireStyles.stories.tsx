@@ -3,7 +3,6 @@ import type { Meta, StoryObj } from "@storybook/react";
 import { TYPE_LABEL, TYPE_VAR, type ValueType } from "../../../shared/theme.js";
 import { ER, ST, UN, V, formatValue, type RWValue } from "../../../shared/value.js";
 
-type Variant = "color" | "value" | "recommended";
 type WireStatus = RWValue["status"];
 
 type Sample = {
@@ -87,31 +86,29 @@ function ValueBadge({ value }: { value: RWValue }) {
   );
 }
 
-function WirePreview({ sample, variant }: { sample: Sample; variant: Variant }) {
+function WirePreview({ sample }: { sample: Sample }) {
   const color = sample.value.status === "error" ? "var(--rw-h-error)" : TYPE_VAR[sample.type];
   const muted = sample.value.status === "unavailable";
   const stale = sample.value.status === "stale";
   const d = "M 18 32 C 84 4, 176 60, 242 32";
   const opacity = muted ? 0.34 : stale ? 0.58 : 1;
   const style = { "--wire": color } as CSSProperties;
-  const showValue = variant !== "color";
-  const recommended = variant === "recommended";
-  const glow = recommended && isBooleanOn(sample.value);
+  const glow = isBooleanOn(sample.value);
 
   return (
-    <div className={`wire-demo ${variant} ${statusClass(sample.value)} ${glow ? "bool-on" : ""}`} style={style}>
+    <div className={`wire-demo ${statusClass(sample.value)} ${glow ? "bool-on" : ""}`} style={style}>
       <svg viewBox="0 0 260 64" aria-hidden="true">
         <path className="wire-halo" d={d} />
         <path className="wire-main" d={d} style={{ opacity }} />
         {glow && <path className="wire-flow" d={d} />}
-        {recommended && sample.value.status === "ok" && (
+        {sample.value.status === "ok" && (
           <>
             <circle className="wire-port" cx="18" cy="32" r="4.3" />
             <circle className="wire-port" cx="242" cy="32" r="4.3" />
           </>
         )}
       </svg>
-      {showValue && <ValueBadge value={sample.value} />}
+      <ValueBadge value={sample.value} />
     </div>
   );
 }
@@ -212,7 +209,7 @@ function Playground() {
         <ValueControl state={state} setState={setState} />
       </div>
       <div className="wire-playground-preview">
-        <WirePreview sample={sample} variant="recommended" />
+        <WirePreview sample={sample} />
       </div>
     </section>
   );
@@ -236,7 +233,7 @@ function WireRow({ sample }: { sample: Sample }) {
         <strong>{TYPE_LABEL[sample.type]}</strong>
         <small>{sample.note}</small>
       </div>
-      <WirePreview sample={sample} variant="recommended" />
+      <WirePreview sample={sample} />
     </div>
   );
 }
@@ -263,7 +260,7 @@ function WireStylePrototype() {
 
       <div className="wire-columns">
         <Column title="Status handling" blurb="Status should be visible even without hovering, because it changes safety semantics.">
-          {STATUS_SAMPLES.map((sample) => <WirePreview key={sample.note} sample={sample} variant="recommended" />)}
+          {STATUS_SAMPLES.map((sample) => <WirePreview key={sample.note} sample={sample} />)}
         </Column>
         <Column title="Rules this prototype tests" blurb="The pattern should stay learnable and not fight the existing pin/chip language.">
           <ul className="wire-rules">
@@ -303,13 +300,11 @@ const css = `
 .wire-demo { position: relative; height: 64px; border-radius: 12px; background: color-mix(in oklab, var(--rw-canvas) 88%, transparent); overflow: hidden; border: 1px solid color-mix(in oklab, var(--rw-line-soft) 72%, transparent); }
 .wire-demo svg { position: absolute; inset: 0; width: 100%; height: 100%; }
 .wire-halo { fill: none; stroke: color-mix(in oklab, var(--rw-line-soft) 66%, transparent); stroke-width: 7; stroke-linecap: round; opacity: .72; }
-.wire-main { fill: none; stroke: var(--wire); stroke-width: 3.25; stroke-linecap: round; filter: drop-shadow(0 0 2px color-mix(in oklab, var(--wire) 28%, transparent)); }
-.wire-demo.value .wire-main { stroke-width: 3.35; }
-.wire-demo.recommended .wire-main { stroke-width: 3.5; }
-.wire-demo.recommended.bool-on .wire-main { stroke-width: 3.6; filter: drop-shadow(0 0 3px color-mix(in oklab, var(--wire) 32%, transparent)); }
+.wire-main { fill: none; stroke: var(--wire); stroke-width: 3.5; stroke-linecap: round; filter: drop-shadow(0 0 2px color-mix(in oklab, var(--wire) 28%, transparent)); }
+.wire-demo.bool-on .wire-main { stroke-width: 3.6; filter: drop-shadow(0 0 3px color-mix(in oklab, var(--wire) 32%, transparent)); }
 .wire-flow { fill: none; stroke: color-mix(in oklab, var(--wire) 84%, white 16%); stroke-width: 5.5; stroke-linecap: round; stroke-dasharray: 26 222; stroke-dashoffset: 0; opacity: .32; filter: drop-shadow(0 0 5px color-mix(in oklab, var(--wire) 42%, transparent)); animation: wireFlow 2.15s linear infinite; }
 .wire-port { fill: var(--rw-canvas); stroke: var(--wire); stroke-width: 2; }
-.wire-demo.recommended.bool-on .wire-port { filter: drop-shadow(0 0 3px color-mix(in oklab, var(--wire) 38%, transparent)); }
+.wire-demo.bool-on .wire-port { filter: drop-shadow(0 0 3px color-mix(in oklab, var(--wire) 38%, transparent)); }
 .wire-value { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); display: inline-flex; align-items: center; gap: 6px; max-width: 118px; padding: 4px 8px; border-radius: 999px; border: 1px solid color-mix(in oklab, var(--wire) 58%, var(--rw-line)); background: color-mix(in oklab, var(--rw-panel) 92%, transparent); color: var(--rw-text); font: 500 10.5px var(--font-mono); white-space: nowrap; box-shadow: 0 5px 14px -12px rgba(0,0,0,.45); }
 .wire-value.stale { border-style: dashed; color: var(--rw-faint); }
 .wire-value.unavailable { border-style: dashed; color: var(--rw-faint); background: color-mix(in oklab, var(--rw-panel2) 78%, transparent); }
