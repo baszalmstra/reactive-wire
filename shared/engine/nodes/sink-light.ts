@@ -1,14 +1,7 @@
-import { UN, hexToRgb } from "../../value.js";
+import { UN } from "../../value.js";
+import { reconcileLight } from "../ha-reconcile.js";
 import type { NodeDef } from "../node-def.js";
 import { base } from "./template-base.js";
-
-function rgbMatches(actual: unknown, want: [number, number, number]): boolean {
-  return Array.isArray(actual) && actual.length >= 3 && want.every((v, i) => Number(actual[i]) === v);
-}
-
-function brightnessMatches(actual: unknown, want: unknown): boolean {
-  return Number(actual) === Number(want);
-}
 
 export const sinkLight: NodeDef = {
   type: "sink-light",
@@ -34,32 +27,9 @@ export const sinkLight: NodeDef = {
   // current state and only write when at least one requested dimension differs. If the entity is
   // missing (or a requested attribute is absent), emit the desired call rather than assuming the
   // world already matches.
-  evalSink: ({ cfg, okInput, entities }) => {
-    const entity_id = String(cfg.entity_id ?? "");
-    const on = okInput("on");
-    if (!on) return null;
-
-    const e = entities[entity_id];
-    const actualState = e ? String(e.state) : undefined;
-    if (on.v === false) {
-      if (actualState === "off") return null;
-      return { domain: "light", service: "turn_off", data: {}, target: { entity_id } };
-    }
-
-    const data: Record<string, unknown> = {};
-    let differs = actualState !== "on";
-    const color = okInput("color");
-    if (color) {
-      const want = hexToRgb(String(color.v));
-      data.rgb_color = want;
-      if (!e || !rgbMatches(e.attributes.rgb_color, want)) differs = true;
-    }
-    const brightness = okInput("brightness");
-    if (brightness) {
-      data.brightness = brightness.v;
-      if (!e || !brightnessMatches(e.attributes.brightness, brightness.v)) differs = true;
-    }
-    if (!differs) return null;
-    return { domain: "light", service: "turn_on", data, target: { entity_id } };
-  },
+  evalSink: ({ cfg, okInput, entities }) => reconcileLight(String(cfg.entity_id ?? ""), {
+    on: okInput("on"),
+    color: okInput("color"),
+    brightness: okInput("brightness"),
+  }, entities),
 };

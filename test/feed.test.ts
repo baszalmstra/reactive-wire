@@ -1,6 +1,7 @@
 import type { IncomingMessage } from "node:http";
 import { describe, expect, it } from "vitest";
-import { sanitizeDeployRequest, validateConnection } from "../src/server/feed.js";
+import { validateConnection } from "../src/server/connection-policy.js";
+import { sanitizeDeployRequest } from "../src/server/deploy-validation.js";
 
 function req(host: string, origin?: string, url = "/"): IncomingMessage {
   return { headers: { host, ...(origin !== undefined ? { origin } : {}) }, url } as IncomingMessage;
@@ -56,28 +57,28 @@ describe("deploy graph validation", () => {
 
 describe("deploy WebSocket connection guards", () => {
   it("allows loopback hosts/origins by default", () => {
-    expect(validateConnection(req("127.0.0.1:7420", "http://localhost:5173"), { port: 7420 })).toBeNull();
-    expect(validateConnection(req("localhost:7420", "null"), { port: 7420 })).toBeNull();
+    expect(validateConnection(req("127.0.0.1:7420", "http://localhost:5173"), {})).toBeNull();
+    expect(validateConnection(req("localhost:7420", "null"), {})).toBeNull();
   });
 
   it("does not treat DNS-rebinding-looking hostnames as loopback", () => {
-    const rejectedHost = validateConnection(req("127.attacker.example:7420", "http://localhost:5173"), { port: 7420 });
+    const rejectedHost = validateConnection(req("127.attacker.example:7420", "http://localhost:5173"), {});
     expect(rejectedHost?.status).toBe(403);
     expect(rejectedHost?.message).toContain("Host");
 
-    const rejectedOrigin = validateConnection(req("127.0.0.1:7420", "http://127.attacker.example:5173"), { port: 7420 });
+    const rejectedOrigin = validateConnection(req("127.0.0.1:7420", "http://127.attacker.example:5173"), {});
     expect(rejectedOrigin?.status).toBe(403);
     expect(rejectedOrigin?.message).toContain("Origin");
   });
 
   it("requires the configured deploy token on the connection URL", () => {
-    expect(validateConnection(req("127.0.0.1:7420", "http://localhost:5173", "/?token=secret"), { port: 7420, deployToken: "secret" })).toBeNull();
-    const rejected = validateConnection(req("127.0.0.1:7420", "http://localhost:5173", "/?token=wrong"), { port: 7420, deployToken: "secret" });
+    expect(validateConnection(req("127.0.0.1:7420", "http://localhost:5173", "/?token=secret"), { deployToken: "secret" })).toBeNull();
+    const rejected = validateConnection(req("127.0.0.1:7420", "http://localhost:5173", "/?token=wrong"), { deployToken: "secret" });
     expect(rejected?.status).toBe(401);
   });
 
   it("requires a deploy token when the WebSocket binds outside loopback even if Host is spoofed", () => {
-    const rejected = validateConnection(req("127.0.0.1:7420"), { port: 7420, host: "0.0.0.0" });
+    const rejected = validateConnection(req("127.0.0.1:7420"), { host: "0.0.0.0" });
 
     expect(rejected?.status).toBe(401);
     expect(rejected?.message).toContain("RW_DEPLOY_TOKEN");

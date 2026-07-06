@@ -14,54 +14,20 @@ import {
 } from "@xyflow/react";
 import { TYPE_VAR, gridStyle, type Aesthetic } from "../../../shared/theme.js";
 import { evaluate, type ViewEdge } from "../../../shared/engine/evaluate.js";
-import type { NodeData, PinDef } from "../../../shared/node-types.js";
+import type { NodeData } from "../../../shared/node-types.js";
 import { RWNode } from "./RWNode.js";
 import { Palette } from "./Palette.js";
 import { ResultsProvider } from "./results-context.js";
 import { connectionValid, edgeStyle, type RWNodeType } from "./validation.js";
 import { PALETTE, growVariadic, type NodeTemplate } from "./node-templates.js";
 import { boundaryTemplates } from "./boundary-templates.js";
-import { MACRO_IN, MACRO_OUT, macroHasMemory, type MacroDef, type MacroMap } from "../../../shared/macros.js";
+import { MACRO_IN, MACRO_OUT, type MacroDef, type MacroMap } from "../../../shared/macros.js";
 import { Icon } from "../components/Icon.js";
 import { MacroBoundaryPanel, type BoundaryPin } from "./MacroBoundaryPanel.js";
 import type { ValueType } from "../../../shared/theme.js";
+import { macroDefFromFlow, macroDefToFlow } from "./macro-editing.js";
 
 const nodeTypes = { rw: RWNode };
-
-/** Convert a stored macro definition into React Flow nodes and edges for editing. */
-function toFlow(def: MacroDef): { nodes: RWNodeType[]; edges: Edge[] } {
-  const nodes = def.nodes.map((n) => ({
-    id: n.id,
-    type: "rw" as const,
-    position: { x: n.x, y: n.y },
-    dragHandle: ".rw-drag",
-    data: { def: n },
-  }));
-  const edges = def.edges.map((e) => ({
-    id: e.id,
-    source: e.from.node,
-    sourceHandle: e.from.pin,
-    target: e.to.node,
-    targetHandle: e.to.pin,
-    animated: true,
-  }));
-  return { nodes, edges };
-}
-
-/**
- * Read the macro's external interface back from its boundary nodes after editing. Every macro-in
- * output becomes a macro input and every macro-out input becomes a macro output, so the interface
- * is the union across all boundary nodes (one node with many pins, or many single-pin nodes).
- */
-function boundaryPins(nodes: NodeData[]): { inputs: PinDef[]; outputs: PinDef[] } {
-  const inputs: PinDef[] = [];
-  const outputs: PinDef[] = [];
-  for (const n of nodes) {
-    if (n.type === MACRO_IN) for (const p of n.outputs) inputs.push({ ...p });
-    if (n.type === MACRO_OUT) for (const p of n.inputs) outputs.push({ ...p });
-  }
-  return { inputs, outputs };
-}
 
 /**
  * A full-screen editor for a macro's definition canvas. It hosts the same node canvas as the main
@@ -86,7 +52,7 @@ export function MacroEditor({
   onSave: (def: MacroDef) => void;
   onClose: () => void;
 }) {
-  const initial = useMemo(() => toFlow(def), [def]);
+  const initial = useMemo(() => macroDefToFlow(def), [def]);
   const [nodes, setNodes, onNodesChange] = useNodesState<RWNodeType>(initial.nodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initial.edges);
   const [name, setName] = useState(def.name);
@@ -212,12 +178,7 @@ export function MacroEditor({
   );
 
   const save = useCallback(() => {
-    const liveNodes: NodeData[] = nodes.map((n) => ({ ...n.data.def, x: n.position.x, y: n.position.y }));
-    const liveEdges: ViewEdge[] = edges.map((e) => ({ id: e.id, from: { node: e.source, pin: e.sourceHandle ?? "" }, to: { node: e.target, pin: e.targetHandle ?? "" } }));
-    const { inputs, outputs } = boundaryPins(liveNodes);
-    const updated: MacroDef = { ...def, name: name.trim() || def.name, nodes: liveNodes, edges: liveEdges, inputs, outputs, stateful: false };
-    updated.stateful = macroHasMemory(updated, { ...macros, [updated.id]: updated });
-    onSave(updated);
+    onSave(macroDefFromFlow({ original: def, name, nodes, edges, macros }));
   }, [nodes, edges, def, name, macros, onSave]);
 
   const grid = gridStyle(aesthetic);

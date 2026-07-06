@@ -44,7 +44,7 @@ import {
 } from "./canvas/comments.js";
 import { MobileBar } from "./components/MobileBar.js";
 import { useIsMobile } from "./use-is-mobile.js";
-import { useMacros, syncInstance } from "./canvas/use-macros.js";
+import { useMacros } from "./canvas/use-macros.js";
 import { groupSelection } from "./canvas/grouping.js";
 import { isMacroInstance, makeMacroInstance, type MacroDef, type MacroMap } from "../../shared/macros.js";
 import { MacroEditor } from "./canvas/MacroEditor.js";
@@ -60,17 +60,21 @@ import { FlowTabs } from "./components/FlowTabs.js";
 import { Icon } from "./components/Icon.js";
 import { emptyFlow, type EditorNode, type Flow } from "./canvas/flows.js";
 import { useValueHistory } from "./canvas/use-value-history.js";
+import { syncMacroInstances } from "./canvas/macro-editing.js";
 import type { EvalResults } from "../../shared/results.js";
 import {
   DEFAULT_MAX_DOC_STATE_BYTES,
   applyEditorSnapshotDiff,
   decodeUpdateBase64,
-  emptyEditorDocumentSnapshot,
   snapshotFromEditorDoc,
-  type CollabEdge,
-  type CollabNode,
   type EditorDocumentSnapshot,
 } from "../../shared/collab.js";
+import {
+  editorSnapshotHasUserContent,
+  editorSnapshotsEqual,
+  snapshotFromWorkingState,
+  workingStateFromSnapshot,
+} from "./state/editor-document.js";
 
 const nodeTypes = { rw: RWNode, comment: CommentNode };
 const DEFAULT_AESTHETIC: Aesthetic = "ide";
@@ -98,17 +102,6 @@ const emptyResults = (): EvalResults => ({ outputs: {}, inputs: {}, health: {}, 
 const collabServerOrigin = { source: "server" };
 const collabLocalOrigin = { source: "local" };
 
-function nodesForCollab(nodes: EditorNode[]): CollabNode[] {
-  return nodes.map((node) => {
-    const { selected: _selected, ...rest } = node as EditorNode & { selected?: boolean };
-    return rest as unknown as CollabNode;
-  });
-}
-
-function edgesForCollab(edges: Edge[]): CollabEdge[] {
-  return edges.map((edge) => ({ ...edge }) as unknown as CollabEdge);
-}
-
 function withInitialSize(node: EditorNode): EditorNode {
   if (node.type === "rw") {
     const def = (node as RWNodeType).data.def;
@@ -124,18 +117,6 @@ function withInitialSize(node: EditorNode): EditorNode {
 
 function rwEditorNode(id: string, def: NodeData, position: { x: number; y: number }, zIndex = 1): EditorNode {
   return withInitialSize({ id, type: "rw", position, dragHandle: ".rw-drag", zIndex, data: { def } } as EditorNode);
-}
-
-function collabNodeToEditor(node: CollabNode): EditorNode {
-  return withInitialSize({ ...node, selected: false } as unknown as EditorNode);
-}
-
-function collabEdgeToEditor(edge: CollabEdge): Edge {
-  return { ...edge } as unknown as Edge;
-}
-
-function snapshotEqual(a: EditorDocumentSnapshot | null, b: EditorDocumentSnapshot): boolean {
-  return !!a && JSON.stringify(a) === JSON.stringify(b);
 }
 
 function entityIcon(entityId: string): NodeData["icon"] {
@@ -280,51 +261,26 @@ export function App() {
   edgesRef.current = edges;
   const deploy = server.deploy;
 
-  const localDocumentSnapshot = useCallback((): EditorDocumentSnapshot => {
-    const stashedFlows = flows.map((flow) =>
-      flow.id === activeFlowId
-        ? { ...flow, nodes: nodesRef.current, edges: edgesRef.current }
-        : flow,
-    );
-    const snapshotFlows = stashedFlows.map((flow) => ({
-      id: flow.id,
-      name: flow.name,
-      nodes: nodesForCollab(flow.nodes),
-      edges: edgesForCollab(flow.edges),
-    }));
-    if (snapshotFlows.length === 0) snapshotFlows.push(emptyEditorDocumentSnapshot().flows[0]!);
-    // The active tab is local UI state. Persist a stable fallback only so old/new clients have a
-    // valid active flow if their current tab disappears, but don't make collaborators fight over it.
-    const deployFlowId = snapshotFlows.some((flow) => flow.id === activeFlowId) ? activeFlowId : snapshotFlows[0]?.id;
-    return {
-      version: 1,
-      activeFlowId: snapshotFlows[0]?.id,
-      flows: snapshotFlows,
-      macros: macroLib.macros,
-      settings: { autoDeploy, deployFlowId },
-    };
-  }, [activeFlowId, autoDeploy, flows, macroLib.macros]);
+  const localDocumentSnapshot = useCallback((): EditorDocumentSnapshot => snapshotFromWorkingState({
+    flows,
+    activeFlowId,
+    activeNodes: nodesRef.current,
+    activeEdges: edgesRef.current,
+    macros: macroLib.macros,
+    autoDeploy,
+  }), [activeFlowId, autoDeploy, flows, macroLib.macros]);
 
   const applyRemoteDocumentSnapshot = useCallback((snapshot: EditorDocumentSnapshot) => {
     applyingCollab.current = true;
-    const nextFlows = snapshot.flows.map((flow) => ({
-      id: flow.id,
-      name: flow.name,
-      nodes: flow.nodes.map(collabNodeToEditor),
-      edges: flow.edges.map(collabEdgeToEditor),
-    }));
-    const nextActive = nextFlows.find((flow) => flow.id === activeFlowId)?.id ?? snapshot.activeFlowId ?? nextFlows[0]?.id;
-    setFlows(nextFlows);
-    const active = nextFlows.find((flow) => flow.id === nextActive) ?? nextFlows[0];
-    if (active) {
-      setActiveFlowId(active.id);
-      setNodes(active.nodes);
-      setEdges(active.edges);
-    }
-    macroLib.replace(snapshot.macros);
-    setAutoDeploy(snapshot.settings.autoDeploy);
-    setSelected((id) => (id && active?.nodes.some((node) => node.id === id) ? id : null));
-    setSelectedIds((ids) => ids.filter((id) => active?.nodes.some((node) => node.id === id)));
+    const applied = workingStateFromSnapshot(snapshot, activeFlowId);
+    setFlows(applied.flows);
+    setActiveFlowId(applied.activeFlowId);
+    setNodes(applied.activeNodes);
+    setEdges(applied.activeEdges);
+    macroLib.replace(applied.macros);
+    setAutoDeploy(applied.autoDeploy);
+    setSelected((id) => (id && applied.activeNodes.some((node) => node.id === id) ? id : null));
+    setSelectedIds((ids) => ids.filter((id) => applied.activeNodes.some((node) => node.id === id)));
     setPast([]);
     setFuture([]);
     queueMicrotask(() => {
@@ -332,16 +288,11 @@ export function App() {
     });
   }, [activeFlowId, macroLib.replace, setEdges, setNodes]);
 
-  const localSnapshotHasUserContent = (snapshot: EditorDocumentSnapshot): boolean =>
-    snapshot.flows.length > 1 ||
-    snapshot.flows.some((flow) => flow.nodes.length > 0 || flow.edges.length > 0 || flow.name !== "Flow 1") ||
-    Object.keys(snapshot.macros).length > 0;
-
   const flushLocalDocumentToCollab = useCallback((allowBeforeReady = false) => {
     if ((!allowBeforeReady && !collabReady.current) || applyingCollab.current) return;
     const next = localDocumentSnapshot();
-    if (allowBeforeReady && !collabReady.current && !localSnapshotHasUserContent(next)) return;
-    if (snapshotEqual(lastCollabSnapshot.current, next)) return;
+    if (allowBeforeReady && !collabReady.current && !editorSnapshotHasUserContent(next)) return;
+    if (editorSnapshotsEqual(lastCollabSnapshot.current, next)) return;
     const previous = lastCollabSnapshot.current ?? snapshotFromEditorDoc(collabDoc.current);
     applyEditorSnapshotDiff(collabDoc.current, previous, next, collabLocalOrigin);
     lastCollabSnapshot.current = snapshotFromEditorDoc(collabDoc.current);
@@ -735,7 +686,11 @@ export function App() {
     (def: MacroDef) => {
       const macros = { ...macroLib.macros, [def.id]: def };
       macroLib.put(def);
-      setNodes((ns) => ns.map((n) => (isRWNode(n) ? { ...n, data: { def: syncInstance(n.data.def, macros) } } : n)));
+      setNodes((ns) => {
+        const graphNodes = syncMacroInstances(ns.filter(isRWNode), macros);
+        const byId = new Map(graphNodes.map((n) => [n.id, n]));
+        return ns.map((n) => (isRWNode(n) ? byId.get(n.id) ?? n : n));
+      });
       setEditingMacro(null);
     },
     [macroLib, setNodes],
