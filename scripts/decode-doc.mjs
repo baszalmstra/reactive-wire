@@ -2,11 +2,11 @@
 // Decode the persisted collaborative editor document and print its snapshot as JSON. Reads the
 // same file the server writes: RW_DATA_DIR/editor-doc.ydoc (default .rw-data), overridable with
 // RW_DOC_FILE. Imports the shared collab helper, so run it through tsx:
-//   npx tsx .claude/skills/debug-live/scripts/decode-doc.mjs
+//   npx tsx scripts/decode-doc.mjs
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import * as Y from "yjs";
-import { snapshotFromEditorDoc } from "../../../../shared/collab.js";
+import { snapshotFromEditorDoc } from "../shared/collab.js";
 
 const dataDir = process.env.RW_DATA_DIR?.trim() || ".rw-data";
 const file = process.env.RW_DOC_FILE?.trim() || join(dataDir, "editor-doc.ydoc");

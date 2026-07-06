@@ -1,12 +1,16 @@
+## Dot-prefixed files and directories are local state (tool caches, env files,
+## runtime data) — except the tracked configuration re-included below.
+.*
+!.gitignore
+!.env.example
+!.github/
+!.claude/
+!.storybook/
+
 node_modules/
-.pixi/
-.pi/
 dist/
-*.log
-.env
-.rw-data/
-.rw-data-e2e/
-.design-bundle/
 storybook-static/
+build/
 test-results/
 playwright-report/
+*.log

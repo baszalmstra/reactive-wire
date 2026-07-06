@@ -1,7 +1,9 @@
 # CLAUDE.md
 
 Guidance for AI agents working in this repo. The [README](./README.md) is the human-facing
-tour; this file is the operational companion. Design rationale lives in [DESIGN.md](./DESIGN.md);
+tour; this file is the operational companion, and [AGENTS.md](./AGENTS.md) carries the same
+content for any other agent — the detailed guides live in `docs/agents/`. Design rationale lives
+in [DESIGN.md](./DESIGN.md);
 **code comments describe behavior only — never cite design ids, past refactors, or future work.**
 
 ## What this is
@@ -62,7 +64,7 @@ connection handshake itself requires the token (see `connection-policy.ts`), so 
 `?token=<value>` on the WebSocket URL to connect at all. Query a running server:
 
 ```sh
-node .claude/skills/debug-live/scripts/query-state.mjs   # RW_PORT/RW_DEPLOY_TOKEN honored
+node scripts/query-state.mjs   # RW_PORT/RW_DEPLOY_TOKEN honored
 ```
 
 Or inline, with only the `ws` package:
@@ -83,4 +85,4 @@ field on the `deployer` component, not a message prefix.
 Version control is [jj](https://github.com/jj-vcs/jj), colocated with git — jj auto-snapshots the
 working copy, so there is no staging step. The collaborative editor document persists to
 `RW_DATA_DIR/editor-doc.ydoc` (default `.rw-data`, git-ignored); decode it with
-`npx tsx .claude/skills/debug-live/scripts/decode-doc.mjs`.
+`npx tsx scripts/decode-doc.mjs`.
