@@ -393,7 +393,13 @@ export function App() {
   const onSetValue = useCallback(
     (id: string, pin: string, value: unknown) =>
       setNodes((ns) =>
-        ns.map((n) => (n.id === id && isRWNode(n) ? { ...n, data: { def: { ...n.data.def, values: { ...n.data.def.values, [pin]: value } } } } : n)),
+        ns.map((n) => {
+          if (!(n.id === id && isRWNode(n))) return n;
+          const values = { ...(n.data.def.values ?? {}) };
+          if (value === undefined) delete values[pin];
+          else values[pin] = value;
+          return { ...n, data: { def: { ...n.data.def, values: Object.keys(values).length ? values : undefined } } };
+        }),
       ),
     [setNodes],
   );

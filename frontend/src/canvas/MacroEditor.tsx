@@ -88,7 +88,13 @@ export function MacroEditor({
   );
   const onSetValue = useCallback(
     (id: string, pin: string, value: unknown) =>
-      setNodes((ns) => ns.map((n) => (n.id === id ? { ...n, data: { def: { ...n.data.def, values: { ...n.data.def.values, [pin]: value } } } } : n))),
+      setNodes((ns) => ns.map((n) => {
+        if (n.id !== id) return n;
+        const values = { ...(n.data.def.values ?? {}) };
+        if (value === undefined) delete values[pin];
+        else values[pin] = value;
+        return { ...n, data: { def: { ...n.data.def, values: Object.keys(values).length ? values : undefined } } };
+      })),
     [setNodes],
   );
 

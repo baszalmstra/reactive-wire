@@ -13,7 +13,6 @@ export const sinkLight: NodeDef = {
     make: (id) => base(id, {
       type: "sink-light", title: "light", subtitle: "Light · reconciling sink", icon: "bulb", w: 248,
       bodyExtra: 56, widget: "sink", config: { entity_id: "" },
-      values: { on: false },
       inputs: [
         { id: "on", label: "on", type: "bool", editable: true },
         { id: "color", label: "color", type: "color", editable: true },

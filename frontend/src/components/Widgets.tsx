@@ -3,7 +3,9 @@ import type { SinkAction } from "../../../shared/results.js";
 import { TYPE_VAR, type ValueType } from "../../../shared/theme.js";
 import { cn } from "../cn.js";
 
-export const COLOR_PRESETS = ["#ff3b30", "#ff9f0a", "#ffd60a", "#34c759", "#0a84ff", "#bf5af2", "#ffffff", "#1c1c1e"];
+const DEFAULT_COLOR = "#ffffff";
+
+export const COLOR_PRESETS = [DEFAULT_COLOR, "#ffd60a", "#ff9f0a", "#ff3b30", "#34c759", "#0a84ff", "#bf5af2", "#64d2ff"];
 
 const INPUT =
   "nodrag h-[28px] px-2 rounded-[6px] border border-rw-line bg-rw-panel2 text-rw-text font-mono text-[11.5px] outline-none w-full focus:border-rw-accent";
@@ -27,25 +29,32 @@ export function PinValueEditor({
   // Outline each editor in its value type's color, matching the pins and wires.
   const tc = TYPE_VAR[type as ValueType] ?? "var(--rw-t-any)";
   if (type === "bool") {
+    const unset = value === undefined || value === null;
     const on = value === true || value === "true";
     return (
       <button
         onClick={() => onChange(!on)}
         onPointerDown={stop}
-        title={on ? "true" : "false"}
+        title={unset ? "unset — click to set true" : on ? "true" : "false"}
         style={{ borderColor: tc }}
-        className={cn("nodrag relative w-[30px] h-[18px] rounded-full border transition-colors shrink-0", on ? "bg-rw-accent" : "bg-rw-line")}
+        className={cn(
+          "nodrag relative w-[30px] h-[18px] rounded-full border transition-colors shrink-0",
+          unset ? "border-dashed bg-rw-panel2" : on ? "bg-rw-accent" : "bg-rw-line",
+        )}
       >
         <span className={cn("absolute top-[2px] left-[2px] w-[12px] h-[12px] rounded-full bg-white shadow-[0_1px_2px_rgba(0,0,0,.3)] transition-transform", on && "translate-x-[12px]")} />
       </button>
     );
   }
   if (type === "num") {
+    const n = Number(value);
+    const numberText = value === undefined || value === null || value === "" || !Number.isFinite(n) ? "" : String(n);
     return (
       <input
         type="number"
-        value={Number(value ?? 0)}
-        onChange={(e) => onChange(Number(e.target.value))}
+        value={numberText}
+        placeholder="unset"
+        onChange={(e) => onChange(e.target.value === "" ? undefined : Number(e.target.value))}
         onPointerDown={stop}
         style={{ borderColor: tc }}
         className={cn(INPUT, "rw-num")}
@@ -53,9 +62,19 @@ export function PinValueEditor({
     );
   }
   if (type === "color") {
-    const hex = typeof value === "string" ? value : "#ff3b30";
+    const colorUnset = typeof value !== "string";
+    const hex = typeof value === "string" ? value : DEFAULT_COLOR;
     const swatch = (
-      <div className="relative w-7 h-7 rounded-[6px] overflow-hidden border shrink-0" style={{ background: hex, borderColor: tc }} onPointerDown={stop}>
+      <div
+        className="relative w-7 h-7 rounded-[6px] overflow-hidden border shrink-0"
+        style={{
+          background: colorUnset ? `linear-gradient(135deg, transparent 0 46%, var(--rw-line) 46% 54%, transparent 54%), ${DEFAULT_COLOR}` : hex,
+          borderColor: tc,
+          borderStyle: colorUnset ? "dashed" : "solid",
+        }}
+        title={colorUnset ? "unset — click to choose white" : hex}
+        onPointerDown={stop}
+      >
         <input type="color" value={hex} onChange={(e) => onChange(e.target.value)} className="nodrag absolute -inset-[20%] w-[140%] h-[140%] opacity-0 cursor-pointer" />
       </div>
     );
@@ -72,7 +91,7 @@ export function PinValueEditor({
     );
   }
   return (
-    <input value={String(value ?? "")} onChange={(e) => onChange(e.target.value)} onPointerDown={stop} style={{ borderColor: tc }} className={INPUT} />
+    <input value={String(value ?? "")} placeholder="unset" onChange={(e) => onChange(e.target.value)} onPointerDown={stop} style={{ borderColor: tc }} className={INPUT} />
   );
 }
 

@@ -13,7 +13,6 @@ export const sinkCall: NodeDef = {
       type: "sink-call", title: "service", subtitle: "Generic · call service", icon: "const", w: 248,
       bodyExtra: 56, widget: "sink",
       config: { entity_id: "", domain: "homeassistant", service: "turn_on", service_off: "turn_off" },
-      values: { on: false },
       inputs: [{ id: "on", label: "on", type: "bool", editable: true }],
       outputs: [],
     }),

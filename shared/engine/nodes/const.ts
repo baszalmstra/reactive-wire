@@ -60,7 +60,7 @@ export const constColor: NodeDef = {
     type: "const-color", category: "Constants", label: "Color", icon: "const",
     make: (id) => base(id, {
       type: "const-color", title: "Color", subtitle: "Constant", icon: "const", w: 176,
-      values: { out: "#ff3b30" },
+      values: { out: "#ffffff" },
       inputs: [],
       outputs: [{ id: "out", label: "color", type: "color", editable: true }],
     }),
