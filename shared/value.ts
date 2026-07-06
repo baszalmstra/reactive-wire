@@ -61,20 +61,29 @@ function fmtNum(n: unknown): string {
 }
 
 /**
- * A duration's magnitude is carried internally as a number of seconds. Render it in the largest
- * unit that keeps the number readable: sub-second as milliseconds, then seconds, minutes, hours,
- * and days, rounded to one decimal (e.g. 600 -> "10 min", 5400 -> "1.5 h", 0.25 -> "250 ms").
+ * A duration's magnitude is carried internally as a number of seconds. Render it like a compact
+ * human duration instead of a fractional larger unit: 588 -> "9 min 48 s", 5400 -> "1 h 30 min",
+ * 0.25 -> "250 ms". Long values keep the two largest non-zero units so chips stay readable.
  */
 export function formatDuration(secondsValue: unknown): string {
   const s = Number(secondsValue);
   if (!Number.isFinite(s)) return String(secondsValue);
+  const sign = s < 0 ? "-" : "";
   const abs = Math.abs(s);
-  const round = (x: number) => (Math.round(x * 10) / 10).toString();
-  if (abs < 1) return `${round(s * 1000)} ms`;
-  if (abs < 60) return `${round(s)} s`;
-  if (abs < 3600) return `${round(s / 60)} min`;
-  if (abs < 86400) return `${round(s / 3600)} h`;
-  return `${round(s / 86400)} d`;
+  const round1 = (x: number) => (Math.round(x * 10) / 10).toString();
+  if (abs < 1) return `${sign}${round1(abs * 1000)} ms`;
+  if (abs < 60) return `${sign}${round1(abs)} s`;
+
+  let remaining = Math.round(abs);
+  const parts: string[] = [];
+  for (const [label, size] of [["d", 86400], ["h", 3600], ["min", 60], ["s", 1]] as const) {
+    const count = Math.floor(remaining / size);
+    if (count === 0) continue;
+    parts.push(`${count} ${label}`);
+    remaining -= count * size;
+    if (parts.length === 2) break;
+  }
+  return sign + (parts.join(" ") || "0 s");
 }
 
 /**

@@ -11,16 +11,18 @@ describe("formatDuration", () => {
     expect(formatDuration(0.25)).toBe("250 ms");
     expect(formatDuration(0)).toBe("0 ms");
   });
-  it("renders seconds, minutes, hours, and days in the largest readable unit", () => {
+  it("renders seconds, minutes, hours, and days as compact compound units", () => {
     expect(formatDuration(30)).toBe("30 s");
     expect(formatDuration(600)).toBe("10 min");
-    expect(formatDuration(90)).toBe("1.5 min");
+    expect(formatDuration(588)).toBe("9 min 48 s");
+    expect(formatDuration(90)).toBe("1 min 30 s");
     expect(formatDuration(3600)).toBe("1 h");
-    expect(formatDuration(5400)).toBe("1.5 h");
+    expect(formatDuration(5400)).toBe("1 h 30 min");
     expect(formatDuration(172800)).toBe("2 d");
   });
   it("handles negative spans symmetrically", () => {
     expect(formatDuration(-600)).toBe("-10 min");
+    expect(formatDuration(-588)).toBe("-9 min 48 s");
   });
 });
 
