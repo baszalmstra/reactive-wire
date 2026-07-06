@@ -5,7 +5,7 @@
 > and data sources, rather than imperatively scripted through transitions.
 
 **Status:** Living document — design grilling complete; now tracking implementation.
-**Last updated:** 2026-06-15
+**Last updated:** 2026-07-06
 
 > **Quick orientation:** §3 records the original design decisions. Some evolved during
 > implementation — see **§3.1**. The **current, accurate architecture** is **§8**. The
@@ -54,7 +54,9 @@ re-derives the output.
 - **Modern standards & tooling**; reproducible env via **pixi**.
 
 ### Non-Goals (for the prototype)
-- Production hardening, multi-user, auth beyond a long-lived HA token.
+- Full multi-user auth (roles/users/OAuth). The server *does* ship a deliberate exposure model —
+  loopback-default bind, a deploy token, and host/origin allowlists (**D23**) — but not identity
+  or per-user permissions.
 - Full parity with Node-RED's node catalog.
 - (TBD) Whether we ever run *inside* HA as an add-on vs. standalone service.
 
@@ -77,7 +79,7 @@ re-derives the output.
 | D10 | Reactive engine | **Signals core** (recommended **alien-signals**, fallback `@vue/reactivity`) for glitch-free, topologically-ordered, lazy propagation. RxJS only at async edges, never the core. | Signals are the only family giving glitch-free diamond propagation for free (§5.2). |
 | D11 | **Behaviors-only wires + stateful nodes** | The graph has **one wire type: behaviors** (continuous, always-current values). No separate "event" wire type. The event-ish residue (edge/`rising`, `scan`/`fold`/toggle, dedup, `hold`) collapses into **nodes with local state** — analogous to React: pure node = `useMemo`, stateful node = `useState`/`useReducer`/`usePrevious`. Implemented as a writable signal updated by an effect over inputs. Editor marks stateful nodes with a "has memory" badge so the graph stays honest. | Maximally reactive & one honest wire type; pushes durations/timers (time is a behavior) and reconcilable actions into pure derivation; confines memory to where it's irreducible. Driven by user's "it's local state, like useState" insight. |
 
-| D12 | Type system | **Primitives only: `boolean`, `number`, `string`** — plus a **`Color`** type (light color is central). **No enums** for now (strings cover HVAC modes, light effects, etc.). Nominal semantic types (Brightness/Kelvin) and HA-domain entity types are **rejected** for the prototype. Connection rule: exact-type match or explicit conversion node (no silent coercion). Wires colored by type. | User wants minimal; primitives are enough to start; Color earns its own type because it's the headline use case. |
+| D12 | Type system | **Primitives only: `boolean`, `number`, `string`** — plus a **`Color`** type (light color is central). **No enums** for now (strings cover HVAC modes, light effects, etc.). Nominal semantic types (Brightness/Kelvin) and HA-domain entity types are **rejected** for the prototype. Connection rule: exact-type match or explicit conversion node (no silent coercion). Wires colored by type. _(Extended — see §3.1: `duration`/`datetime` added as first-class types; entity pins typed from `device_class`.)_ | User wants minimal; primitives are enough to start; Color earns its own type because it's the headline use case. |
 | D13 | Entity nodes | **Each HA entity is a node; each attribute (and its state) is exposed as its own typed output pin.** The node introspects the entity and emits one pin per attribute. Pin types via best-effort parse at the boundary: numeric→`number`, on/off/home/etc.→`boolean`, color attrs→`Color`, else `string`. (This *is* the "parse HA's stringly-typed states into typed behaviors" layer.) | Node-RED-like clarity but typed; no need to pre-model HA domains as types — the node self-describes from the live entity. |
 
 | D14 | Variadic & generic pins | **Variadic (n-ary) inputs** for associative/commutative reducers (`AND`, `OR`, later `SUM`/`MIN`/`MAX`/`CONCAT`) via **auto-growing pins** (always one trailing empty input; connecting it spawns the next). Kept **homogeneous** (all inputs same type). **Genericity only as connect-time pin resolution**: "open"/`any` pins lock to a concrete type on first connection (covers generic `Select`/`if`, passthrough, `hold`). **Full macro-level type parameters stay deferred** (refines D12). | Directly attacks the core pain (combining many conditions cleanly); cheap to implement (engine folds over connected inputs); avoids a real generic type system while still typing `Select`. |
@@ -104,7 +106,8 @@ distinct visual that recolors on resolution; serialization stores **per-node pin
   **Kleene-correct** for 3-valued logic, used by **both** the editor (preview) and the server
   (actuation). Signals' only edge here (lazy/glitch-free) is irrelevant at home-automation
   graph sizes, and one shared pure engine removed a graph-translation layer and the
-  two-engine drift. (`@vue/reactivity` is no longer used by the runtime.) See §8.
+  two-engine drift. `@vue/reactivity` is being dropped from the runtime entirely
+  *(landing in the same batch)*. See §8.
 - **D22 (editable pin values) — added.** A pin may carry an editable literal value
   (`PinDef.editable`, stored in `NodeData.values[pinId]`). One mechanism, three uses: an
   **input default** when unconnected, a **constant's** output literal, and **compare's**
@@ -115,6 +118,22 @@ distinct visual that recolors on resolution; serialization stores **per-node pin
   Streaming server-computed values (so the editor is a pure view) remains a possible refinement.
 - **D12 (Color representation, Q4a) — resolved:** `Color` is a hex string (`#rrggbb`);
   HA `rgb_color` arrays are parsed to/from it.
+- **D12 (type system) — extended.** The wire types are no longer just the primitives + `Color`.
+  Two temporal types are now first-class (`shared/theme.ts` `ValueType`, `shared/value.ts`):
+  **`duration`** (a span carried internally as seconds) and **`datetime`** (an instant carried
+  internally as epoch-ms). They have their own wire color, chip formatting, and parsing, and back
+  the time nodes below. Entity **state** pin typing is now **device-class-driven**, not a
+  best-effort parse of the current value (`entityStateType`, `shared/value.ts`): a
+  `binary_sensor` is `bool`; a sensor whose `device_class` is `timestamp` → `datetime`,
+  `duration` → `duration`, `enum` → `str`, and any other declared class or a
+  `unit_of_measurement` → `num`; only a class-less, unit-less entity falls back to sniffing the
+  raw state (hex→`Color`, on/off words→`bool`, finite→`num`, else `str`). Typing from metadata
+  keeps a pin's type stable even while the entity is `unavailable`. `last_changed`/`last_updated`
+  are exposed as **`datetime`** pins (not raw epoch-ms numbers). New nodes: `datetimeSubtract`
+  (two `datetime` → the `duration` between them) and `datetimeShift` (a `datetime` ± a `duration`
+  → a shifted `datetime`), alongside `now`/`since`/`duration`. Device classes also drive editor
+  affordances (`frontend/src/components/DeviceClassIcon.tsx`). Enums remain unmodeled — HA `enum`
+  device classes still surface as `str`, so the original "no enums" call stands.
 
 **How we push the "event" residue into behaviors (worked through with user):**
 - **Conditions/durations** → always behaviors. *Time is the canonical behavior*, so
@@ -323,130 +342,141 @@ variadic) · `Select`/`if` (generic). _Next:_ time/`now` + duration, stateful ed
 | D18 | Errors as values | **Every behavior is `Value<T> = Ok(T) \| Unavailable \| Error(msg)`**; non-Ok values **propagate** reactively. **Boolean ops = Kleene 3-valued** (`false AND unavailable = false`; `true AND unavailable = unavailable`). **Arithmetic = strict propagation**. **SAFETY RULE: sinks NEVER actuate on a non-`Ok` desired value** — they hold/do nothing, never write a default. | Mirrors HA's own `unavailable`/`unknown`; keeps errors reactive; prevents "offline sensor turns off all lights." |
 | D19 | Schema drift / dangling refs | Reference entities & attributes by **stable id** (`entity_id` + attribute key), never pin position. Missing attr/entity → render a **ghost/error pin** (don't drop it), downstream value = `Error`. **Never auto-delete** (temporary disappearance is normal); **auto-heal** when it returns. User actions: reconnect / delete pin / leave pending. | Preserve user intent across world-flux (same principle as boot-seeding); reboots/offline devices must not shred graphs. |
 | D20 | Error UX | Inline red/dashed error pins + tooltips; value chips show `unavailable`/`error` **distinctly** (never blank/fake). **Node health badge** (ok/warn/error) legible zoomed-out. **"Problems" panel** (structural vs runtime, click-to-focus). Connect-time rejections **explain themselves**. **Deploy guard**: block hard errors, warn soft. **HA-disconnected banner** + stale/greyed values + **no actuation while disconnected**. | "User interaction around errors" is first-class, not an afterthought. |
+| D23 | Server security model | **Safe-by-default exposure, opt-in to expose.** The deploy/control WebSocket **binds to loopback** (`127.0.0.1`) by default; binding outside loopback **requires `RW_DEPLOY_TOKEN`** (refused otherwise). Host and Origin are checked against allowlists (`RW_ALLOWED_HOSTS`/`RW_ALLOWED_ORIGINS`), with loopback hosts/origins and local-file (`Origin: null`) connections allowed only from loopback. The loopback test is **DNS-rebind-resistant** (only numeric `127.x` / `::1` / `localhost` qualify — `127.attacker.example` does not), and the token check is **timing-safe** (`timingSafeEqual`). Every deploy graph and every collaborative-document update is **structurally sanitized** before use (`sanitizeDeployRequest`, `shared/collab.ts`): node/edge/macro/pin count caps, bounded string length and JSON depth, prototype-pollution-safe keys, and coercion to the known wire types. | A home-automation server actuates real devices, so exposure must be a deliberate act, not a default. Loopback + token + allowlists resist LAN/CSRF/DNS-rebind reach; input caps bound the blast radius of a malicious or buggy client without a full auth system (still a non-goal — see §2, §9). |
+
+Implementation: `src/server/connection-policy.ts` (bind/host/origin/token) and
+`src/server/deploy-validation.ts` (graph sanitization); the same caps apply to collab updates in
+`shared/collab.ts`. Configured via `RW_HOST`, `RW_DEPLOY_TOKEN`, `RW_ALLOWED_HOSTS`,
+`RW_ALLOWED_ORIGINS` (documented in `.env.example`).
 
 ## 8. Architecture (current, as built)
 
 Single TypeScript codebase, pixi-managed. **One engine** powers both editor preview and
-server actuation. (The subsections after this map are a chronological build log; this map is
-the current source of truth.)
+server actuation. This section is the **only** current-state map; older chronological build-log
+prose has been folded in and removed. The tree is four layers: a DOM-free **`shared/`** engine
+and wire model, an always-on **`src/server/`**, a React **`frontend/`** editor, and a thin
+**`src/ha/`** Home Assistant adapter.
 
 **Shared engine — `shared/`** (single source of truth for semantics, imported by **both** the
-editor and the server; the server no longer reaches into `frontend/`): a neutral, DOM-free
-directory both tsconfigs include. `shared/engine/evaluate.ts` is a pure recompute over
-`(nodes, edges, entityMap, memory)` → resolved `RWValue` per pin, plus per-node health, sink
-display actions, and a `connected` map. Kleene 3-valued logic (D18); editable pin defaults via
-`inEff` (D22); generic-type resolution via `typeGroup`; strict-DAG cycle guard (D17).
-`sinkCalls()` turns sink inputs into concrete HA service calls (non-`Ok` → skipped — the safety
-rule). `shared/` also holds `value.ts`, `results.ts`, `node-types.ts`, `entities.ts`, `theme.ts`,
-`macros.ts`, and `engine/expand.ts` (macro inlining).
+editor and the server; the server never reaches into `frontend/`): a neutral, DOM-free directory
+both tsconfigs include. `shared/engine/evaluate.ts` is a pure recompute over
+`(nodes, edges, entityMap, memory, now, sources)` → resolved `RWValue` per pin, plus per-node
+health, sink display actions, and a `connected` map. Kleene 3-valued logic (D18); editable pin
+defaults via `inEff` (D22); generic-type resolution via `typeGroup`; strict-DAG cycle guard
+(D17). `sinkCalls()` turns sink inputs into concrete HA service calls (non-`Ok` → skipped — the
+safety rule). Supporting modules: `engine/expand.ts` (macro inlining), `engine/node-def.ts`
+(the `NodeDef` contract), `engine/engine-support.ts` and `engine/ha-reconcile.ts` (shared
+reconcile/diff helpers), plus `value.ts`, `results.ts`, `node-types.ts`, `entities.ts`,
+`theme.ts`, `macros.ts`, and `collab.ts` (the collaborative-document model — see below).
 
 **Node registry — `shared/engine/nodes/`**: each node type is a self-contained `NodeDef` (plain
 object, not a class) — its palette template, one-line description, pure `eval(ctx)`, and (for
-sinks) `evalSink`. `evaluate.ts` keeps the cross-cutting machinery (Kleene helpers, generic/
-variadic resolution, memory threading) and dispatches to the registry. `node-templates.ts`
-derives `PALETTE` and `describeNode()` from it, so a node's presentation and behavior live in one
-place.
+sinks) `evalSink`. `index.ts` assembles the registry; `evaluate.ts` keeps the cross-cutting
+machinery (Kleene helpers, generic/variadic resolution, memory threading) and dispatches to it.
+`frontend/src/canvas/node-templates.ts` re-exports the registry-derived `PALETTE`/`describeNode`
+plus editor-side variadic-pin helpers, so a node's presentation and behavior live in one place.
+Built-in nodes: `entity`, `const`, `compare`, `logic`, `sum`, `select`, `passthrough`, the
+stateful `edge`/`hold`/`fold`/`toggle`, the async `fetch`, the time nodes (`now`/`since`/
+`duration`/`datetimeSubtract`/`datetimeShift`, see `time.ts`), the macro `boundary` nodes, and
+the sinks `sink-light`/`sink-call`/`sink-climate`/`sink-cover`/`sink-input`/`sink-transient`.
 
 **Server — `src/server/`** (always-on source of truth, D9):
-- `index.ts` — boots `RealHA` (`HA_URL`/`HA_TOKEN`) or `MockHA` + `sim.ts`; starts the feed; holds the `Deployer`.
-- `feed.ts` — WebSocket (default `:7420`): streams the live entity map; accepts `deploy` requests.
-- `runtime.ts` — `Deployer`: re-runs the deployed graph with `evaluate` on every entity change and actuates sinks (preview vs live).
-- `ha/` — `HAClient` + `EntityFeed` interfaces, `MockHA`, `RealHA` (`subscribeEntities` + `callService`).
+- `index.ts` — boots `RealHA` (`HA_URL`/`HA_TOKEN`) or `MockHA` + `sim.ts`; reads config from
+  env (`RW_PORT`, `RW_HOST`, `RW_DEPLOY_TOKEN`, `RW_ALLOWED_HOSTS`/`RW_ALLOWED_ORIGINS`,
+  `RW_DATA_DIR`); starts the feed; holds the `Deployer`, the `EditorDocumentStore`, and the
+  `AutoDeployController`.
+- `feed.ts` — WebSocket (default `:7420`): streams the live entity map, accepts `deploy`
+  requests, and carries the collaborative-document frames. Every upgrade passes the
+  connection-policy check first.
+- `runtime.ts` — `Deployer`: inlines macros, then re-runs the deployed graph with `evaluate` on
+  every entity change and on a 1 s clock tick, reconciling sinks (preview dry-run vs live
+  actuation) with in-flight de-dup and echo-safety.
+- `poller.ts` — the async data-source driver: for each `fetch` node it polls the URL on the
+  node's interval, decodes the body, and writes the latest `SourceResult` (loading→`unavailable`,
+  failure→`error`, success→`ok`) into a source map the synchronous engine reads. Overlapping/
+  stale responses are dropped by generation + per-node sequence.
+- `doc-store.ts` — `EditorDocumentStore`: the server-side Yjs `Y.Doc`, persisted as a binary
+  snapshot under `RW_DATA_DIR` (`editor-doc.ydoc`, atomic tmp+rename write) and reloaded on
+  boot — the editor document survives restarts.
+- `collab-deploy-adapter.ts` — projects the collaborative document to the deploy graph
+  (`graphFromEditorSnapshot`) and the `AutoDeployController` that redeploys the server-selected
+  `deployFlowId` when `autoDeploy` is on and the graph signature changes.
+- `connection-policy.ts` / `deploy-validation.ts` — the security layer (D23): host/origin
+  allowlists, loopback-default bind, timing-safe deploy-token check, and structural
+  sanitization of deploy graphs. See "Server security model" below.
+- `sim.ts` — the offline entity simulator used when no `HA_URL`/`HA_TOKEN` is set.
 
-**Editor — `frontend/src/`**: React + Vite + Tailwind v4 + React Flow (D5).
-- `App.tsx` — wires entity feed (or offline sim) → `evaluate` → React Flow; deploy/auto-deploy; theme; connection state.
-- `canvas/` — `RWNode` (custom node + typed Handles), `validation` (type + cycle), `Palette`, `Inspector`, `EntityPicker`, `NodeConfigPopup`, `NodeValueEditors`, `results-context`.
-- `components/` — `ValueChip`, `Pin`, `Badges`, `Widgets` (`PinValueEditor`/`OpSelect`/`SinkPanel`), `Icon`, `NodeView` (Storybook only).
-- `canvas/node-templates.ts` — re-exports the registry-derived `PALETTE`/`describeNode` plus the variadic-pin helpers (kept editor-side, depends only on `shared/`); shared types/tokens now live in `shared/`.
+**Collaborative document & persistence** (`shared/collab.ts`, `src/server/doc-store.ts`,
+`frontend/src/state/editor-document.ts`): the editor document — flows (nodes/edges), macros, and
+server-owned `settings` (`autoDeploy`, `deployFlowId`) — is a **Yjs CRDT** (`shared/collab.ts`
+defines the `Y.Doc` shape, snapshot/diff projection, and sanitization caps). Clients and server
+exchange it as base64-encoded Yjs update frames (`docState`/`docUpdate`/`docError`) multiplexed
+over the **existing feed WebSocket** rather than a dedicated binary endpoint (see the collab
+rationale in §9). `autoDeploy`/`deployFlowId` are **server-owned document settings**, so the
+server can auto-deploy the chosen flow independently of any client's active tab. Deploy remains
+an explicit act: a remote collaborator's edit only actuates Home Assistant when `autoDeploy` is
+enabled (see the safety caveat in §9).
 
-**Remaining root `src/`** — server-only: `server/`, `ha/` (`HAClient`/`EntityFeed`, `MockHA`,
-`RealHA`), and `reactive.ts`'s `cell` (live entity storage for the HA layer, the one remaining
-`@vue/reactivity` use). The pre-consolidation legacy core (`value.ts` Kleene helpers, `types.ts`,
-`graph.ts` and their tests) has been **removed**.
+**Server security model** (D23): the deploy/control socket **binds to loopback by default**;
+binding outside loopback without an `RW_DEPLOY_TOKEN` is refused. `connection-policy.ts` enforces
+Host and Origin allowlists (`RW_ALLOWED_HOSTS`/`RW_ALLOWED_ORIGINS`, loopback allowed by
+default), a **DNS-rebind-resistant** loopback check (only numeric `127.x` / `::1` / `localhost`
+count as loopback, so `127.attacker.example` does not), and a **timing-safe** token comparison.
+`deploy-validation.ts` (`sanitizeDeployRequest`) structurally validates every deploy graph:
+node/edge/macro/pin count caps, prototype-pollution-safe keys, bounded string/JSON depth, and
+type coercion to the known wire types. `collab.ts` applies the same class of caps to incoming
+document updates.
 
-**Verified** (`pixi run check` — 95 tests): canonical example end-to-end; re-derivation with no
-transition modeling; **offline sensor does not actuate** (Kleene `unavailable` propagates);
-determined-false still turns off; translate→core path removed; live WS deploy round-trip;
-**default-only light actuation** (sink works from inline defaults, no wiring); stateful nodes
-(edge/hold/fold) seed-at-boot and never fire/corrupt on non-`Ok`; time/duration derivations
-(`since`/`duration`) with injected clock; variadic AND/OR/SUM fold + serialized-arity round-trip;
-async `fetch` source loading/error/value through `Value<T>`; the new sinks (call/climate/cover/
-input/notify/TTS) reconcile or edge-fire and never actuate on non-`Ok`.
+**Editor — `frontend/src/`**: React + Vite + Tailwind v4 + React Flow (D5). Styling is proper
+Tailwind v4 (D21): the design's OKLCH tokens are registered in `@theme` referencing runtime
+`--rw-*` vars, across three aesthetics (IDE / Blueprint / Warm) × light/dark.
+- `App.tsx` — wires the entity feed (or offline sim) → `evaluate` → React Flow; drives deploy/
+  auto-deploy, theme, connection state, and the collaborative-document sync.
+- `server-conn.ts` — the `useServer` hook: entity feed, deploy round-trip, and the
+  `docState`/`docUpdate` collaboration transport; surfaces **LIVE** (real HA) vs **DEMO** (sim).
+- `state/editor-document.ts` — the client projection between React Flow working state and the
+  collaborative document snapshot.
+- `canvas/` — `RWNode` (custom node + typed Handles), `validation` (type + cycle), `Palette`,
+  `Inspector`, `EntityPicker`, `NodeConfigPopup`, `NodeValueEditors`, `results-context`, the
+  macro editor (`MacroEditor`, `MacroList`, `MacroBoundaryPanel`, `use-macros`, `macro-io`),
+  `flows` (per-flow tabs), `comments`, `grouping`, `problems`, and `use-value-history`
+  (inspector sparkline).
+- `components/` — `ValueChip`, `Pin`, `Badges`, `Widgets` (`PinValueEditor`/`OpSelect`/
+  `SinkPanel`), `Banner`, `Toast`, `ProblemsPanel`, `DeployGuard`, `StatusPill`, `FlowTabs`,
+  `MobileBar`, `Sparkline`, `DeviceClassIcon`, `Icon`, and `NodeView` (Storybook only).
 
-### Editor frontend (built; in-browser, step 1)
-Implemented in `frontend/` from the Claude Design handoff (`.design-bundle/`): Vite + React +
-TypeScript. **Styling is proper Tailwind v4** (D21): the design's OKLCH tokens are registered
-in `@theme` referencing the runtime `--rw-*` vars (so utilities like `bg-rw-node` follow the
-active aesthetic), and components use utility classes — arbitrary values only for the dynamic
-per-type `color-mix` tints. Three aesthetics (IDE / Blueprint / Warm) × light/dark.
+**Home Assistant adapter — `src/ha/`**: `client.ts` (`HAClient` + `EntityFeed` interfaces),
+`mock.ts` (`MockHA`), `real.ts` (`RealHA` — `subscribeEntities` + `callService`).
 
-- **Components** (`src/components/`, each with a Storybook story): `ValueChip`, `Pin`,
-  `HealthDot`, `MemBadge`, `ColorWidget`, `SinkPanel`, `NodeView`.
-- **Editor app** (`pixi run fe-dev` → localhost:5173) on **React Flow** (D5): the node visuals
-  are an RF custom node (`canvas/RWNode.tsx`) with a `Handle` per typed pin; live values come
-  from an in-browser reactive engine (`src/engine/evaluate.ts`) via a results context. Wires
-  are type-colored and animated. **Editing works**: drag pins to **connect** (with type +
-  cycle validation, `canvas/validation.ts`), **select**, **delete**, and drag — pan/zoom from
-  React Flow. The old custom canvas (`canvas/Canvas.tsx`, `Wire.tsx`) is superseded.
-- Verified: `pixi run fe-typecheck`, `pixi run build-storybook`, `pixi run fe-build`.
+**Editable pin values (D22)**: a pin may carry an editable literal (`PinDef.editable`, stored in
+`NodeData.values[pinId]`). One mechanism, three uses — an **input default** used by the engine
+when unconnected (`inEff`), a **constant's** output literal, and **compare's** operands (two
+generic `typeGroup` pins; the operator set narrows by resolved type). Editors: one
+`PinValueEditor` per type shown inline on the node and in the inspector; editable outputs always,
+editable inputs only while unconnected (`EvalResults.connected` drives that).
 
-### Engine consolidation (done)
-There is now **one engine**: the pure `evaluate` (`frontend/src/engine/evaluate.ts`), used by
-the editor for preview *and* by the server for actuation (`src/server/runtime.ts` imports it).
-`evaluate` was made **Kleene-correct** (determined `false AND unavailable = false`), matching
-the old core engine's safety semantics. The signals core `Engine`, node catalog, `translate`
-adapter, and their tests were **removed**; the editor↔server graph is now the same shape end
-to end (no translation), and every editor node type (incl. `toggle`/`sum`/`select`) deploys.
-Verified: 124 tests (incl. canonical + Kleene + safety on `evaluate`), both typechecks, and a
-live WS deploy round-trip. _Minor remaining tidy-up:_ the HA adapters keep an unused reactive
-`entity()` getter and `value.ts` keeps now-unused Kleene helpers (still unit-tested).
+**Observability & operations** *(landing in the same batch)*: a `debugState` introspection
+message on the feed WebSocket exposes the deployed graph and current pin values for tooling; a
+structured stdout logger (level via `RW_LOG_LEVEL`) replaces ad-hoc `console` calls; durable
+runtime **memory persistence** for the `Deployer` writes stateful-node memory slots to
+`RW_DATA_DIR` so `durable`-policy state (Q3a) survives restarts alongside the editor document.
 
-### Editor ↔ server (step 2, built)
-The headless server streams a **live entity feed** over WebSocket (`src/server/feed.ts`,
-default `ws://localhost:7420`): full snapshot on connect, coalesced broadcasts on change.
-Works against **real Home Assistant** (verified — streamed hundreds of live entities) or a
-built-in **simulator** (`src/server/sim.ts`) when no `HA_URL`/`HA_TOKEN`. The editor connects
-via `useServer`, and shows **LIVE** (real HA) vs **DEMO** (offline sim). **Safety:** running
-the server and the editor's preview never changes the home — the auto-started demo graph is
-dry-run; sinks actuate only when the editor deploys (also backed by the non-`Ok`→don't-actuate
-rule, D18).
+**Build & CI** *(landing in the same batch)*: pixi drives tasks; Vitest is split into an
+**engine** project (node) and a **frontend** project (jsdom); **GitHub Actions** runs typecheck +
+unit + e2e (Playwright) via pixi. The dead pre-React-Flow renderer (`Canvas`/`Wire`/`NodeView`
+canvas path) and the vestigial `@vue/reactivity` layer (`src/reactive.ts`, `src/value.ts`) are
+removed; `App.tsx` is decomposed into hooks under `frontend/src/state/`; fonts are self-hosted
+(`@fontsource`).
 
-### Editing (built)
-- **Entity nodes are generic** (`type: "entity"`, `config.entity_id`) and read the live entity
-  map — point a node at any of your HA entities. `evaluate` takes an entity map; the offline
-  sim and the server feed both supply it.
-- **Inspector** (`canvas/Inspector.tsx`): selecting a node shows its live output values, pin
-  types, and config editors (entity id, compare op/threshold, constants); edits update the
-  preview live.
-- **Deploy**: the editor sends its graph over WS; the server runs it with the same engine
-  (`evaluate`) and actuates. An explicit **Deploy** or **auto-deploy** runs it **live**;
-  editing returns to a draft (sinks dry-run) until the next deploy. Verified: a live WS
-  round-trip (deploy → `deployResult ok`).
-
-### Editing — palette & config (built)
-- **Palette** (`canvas/Palette.tsx`): searchable, category-grouped node list. **Drag** a node
-  onto the canvas (drops at the cursor via `screenToFlowPosition`); click also adds.
-- **Entity autocomplete** (`canvas/EntityPicker.tsx`): reusable input + dropdown over the live
-  entity ids, **domain-filterable** (e.g. a light sink only offers `light.*`). Used in the
-  inspector and the on-drop popup.
-- **On-drop config popup** (`canvas/NodeConfigPopup.tsx`): templates declare `requires`
-  (e.g. `{field:'entity_id', kind:'entity', domains:['light']}`); dropping such a node opens a
-  popup to set it immediately. Switches on `kind`, so new config kinds plug in with one case.
-- Background dots/zoom and node shadows tuned toward the design tokens.
-
-### Editable pin values (one mechanism)
-A pin may carry an editable literal value (`PinDef.editable`), stored per-node in
-`NodeData.values[pinId]`. One mechanism, three uses:
-- **Input default** — used by the engine when the pin is unconnected (`inEff`).
-- **Constant** — a const node is just a node with one editable *output* pin; its output is
-  the typed literal.
-- **Compare operands** — compare has two generic pins `a`/`b` (a `typeGroup`); the unconnected
-  one resolves to the connected one's type and uses its editable default. Operator set narrows
-  by resolved type (`< > <= >=` numbers only; `== !=` everywhere; lexicographic for strings).
-Editors: one `PinValueEditor` per type (number/bool/string/color), shown inline on the node
-*and* in the inspector (`NodeValueEditors`) — editable outputs always, editable inputs only
-while unconnected (`EvalResults.connected` drives that). Light sink `color`/`brightness` are
-editable inputs (set a fixed value without wiring a constant).
+**Verified** (`pixi run check`): canonical example end-to-end; re-derivation with no transition
+modeling; **offline sensor does not actuate** (Kleene `unavailable` propagates); determined-false
+still turns off; live WS deploy round-trip; **default-only light actuation** (sink works from
+inline defaults, no wiring); stateful nodes (edge/hold/fold) seed-at-boot and never fire/corrupt
+on non-`Ok`; time/duration derivations (`since`/`duration`, datetime shift/subtract) with an
+injected clock; variadic AND/OR/SUM fold + serialized-arity round-trip; async `fetch` source
+loading/error/value through `Value<T>`; the sinks (call/climate/cover/input/notify/TTS) reconcile
+or edge-fire and never actuate on non-`Ok`; collaborative-document round-trips, sanitization caps,
+and connection-policy host/origin/token rejection.
 
 ## 9. Roadmap / TODO
 
@@ -455,19 +485,77 @@ editable inputs (set a fixed value without wiring a constant).
    next persistence work is operational polish: backups/restore UI, optional multi-document routing,
    presence indicators, and server-computed pin-value streaming so the editor can become a pure view.
 
+### Collaboration & persistence — rationale and known gaps
+
+**Why Yjs.** Collaborative, restart-surviving editing was researched against Automerge, ShareDB/OT,
+and a hand-rolled op protocol. Yjs won on adoption/maintenance, a mature browser+server CRDT with
+conflict-free merge and awareness/presence, and a persistence model built on binary document
+updates that replay after a restart. Automerge's repo/network stack was smaller and moving fast;
+ShareDB adds server-authoritative OT transform complexity and weaker offline behavior; a custom
+protocol pushes every hard case (concurrent delete/edit, dangling edges, duplicate ids, reconnect
+gaps) onto us. The graph is modeled as a CRDT document (maps keyed by stable id), not a stream of
+UI commands.
+
+**Why the shipped transport diverged.** The research recommended a **dedicated collaboration
+endpoint** carrying **binary** Yjs sync frames (`y-websocket`/Hocuspocus or a `y-protocols/sync`
+adapter). The build instead multiplexes **base64-encoded Yjs updates as JSON `docState`/`docUpdate`
+frames over the existing feed WebSocket** — the minimal-change path that reuses the one socket and
+its host/origin/token policy (D23), at the cost of base64 overhead and a homegrown handshake. If
+this transport is revisited, the migration is: add binary frames, then a state-vector handshake,
+then move persistence to binary — do **not** persist the document as JSON.
+
+**Persistence approach.** The server holds the authoritative `Y.Doc` and persists a compacted
+binary snapshot (`Y.encodeStateAsUpdate`) to `RW_DATA_DIR` on each accepted update (atomic
+tmp+rename), reloading it on boot. This is the "custom store around the Yjs update APIs" option
+from the research rather than `y-leveldb` (deprecated) or a scale-out backend (`y-redis`/YHub,
+deferred until multi-instance is actually needed).
+
+**Known gaps carried forward** (recurring across review rounds; not yet fixed):
+- **Full-document work per update.** `EditorDocumentStore.applyUpdate` rebuilds a whole `Y.Doc`
+  from full state + the update, re-projects the entire snapshot to validate, then re-encodes and
+  `writeFileSync`s the whole document — O(full-doc) CPU and a full-file write per small edit.
+  Wanted: validate incrementally and batch/append-log persistence with periodic compaction.
+- **Remote-edit → auto-deploy actuation.** With `autoDeploy` on, a **remote** collaborator's edit
+  can drive a live Home Assistant actuation through another client. Needs a security regression
+  test asserting remote updates alone never call `deploy()` (only local edits do), and likely a
+  deliberate policy for who may trigger server actuation.
+- **Concurrent array clobbering.** The snapshot-diff sync recurses into plain objects but treats
+  arrays (macro `nodes`/`edges`, pin lists) as last-writer-wins scalars, so concurrent edits to
+  different elements of the same array lose one side. Wanted: id-keyed maps for nested collections.
+- **Frontend full-graph rebuilds.** Small local or remote edits stringify/rebuild the whole
+  document snapshot and replace all flows/nodes/edges, losing unchanged node identity and blowing
+  the frame budget on large graphs. Wanted: incremental application preserving identities.
+- **Update/schema validation before persist.** A syntactically valid Yjs update can set an
+  unsupported `meta.version` (or otherwise poison state) and be persisted, so a later reload
+  throws. Validate the projected document *before* applying/persisting and return `docError`.
+- **First-sync local-edit loss.** On first connect the client flushes its local working state into
+  a blank `Y.Doc` before applying server state (`App.tsx` ~325-332); that blank doc initializes its
+  own `flows["flow-1"]` entry, which collides with the server's separate `flows["flow-1"]` `Y.Map`.
+  Yjs then resolves the whole flow entry by clientID, so either the local pre-sync edits or the
+  persisted server content is lost nondeterministically. This is distinct from the array-clobbering
+  gap above (it loses a whole flow, not array elements). Wanted: reconcile against server state
+  before seeding, or merge into the server's flow map rather than a competing default.
+- **Baseline marked before server acceptance.** The client advances its "last synced" update
+  baseline optimistically, before the server has accepted/broadcast the update; a rejected update
+  or a tab close in that window drops those edits with no resend. Wanted: only advance the baseline
+  on server acknowledgement.
+
 ### Core engine / model
 
-**Built** (single shared `evaluate`; verified by `pixi run check`, 124 tests):
+**Built** (single shared `evaluate`; verified by `pixi run check`):
 - ✅ **Stateful nodes**: `edge`/`rising`/`falling`, `hold(initial)`, `fold`/`scan` (joining
   `toggle`). Each declares a **state-persistence policy** (Q3a): `seed-at-boot` (default,
-  ephemeral, restart-safe), `durable` (kept verbatim when a restored memory map is passed
-  back — for a future runtime-memory persistence layer), `reseed-from-world` (boots initial
-  state from a configured entity's live value). Editor document persistence is built; runtime
-  state memory persistence remains separate.
-- ✅ **Time / duration nodes**: `now()` + `since`/`duration` (ms/sec/min/hr). Time is an
-  explicit injected `now` (epoch ms) param — the server drives a 1s tick, the editor ticks
-  React state, tests pass fixed values. Entities expose `last_changed`/`last_updated` as
-  epoch-ms numbers, so "open for 10 min" = `since(door.last_changed) > duration(10,min)`.
+  ephemeral, restart-safe), `durable` (kept verbatim across a restored memory map),
+  `reseed-from-world` (boots initial state from a configured entity's live value). The
+  runtime-memory persistence layer that restores `durable` slots on restart
+  *(landing in the same batch)* writes the `Deployer`'s memory slots to
+  `RW_DATA_DIR/durable-memory.json` via a debounced `DurableMemoryStore`.
+- ✅ **Time / duration / datetime nodes**: `now()` + `since`/`duration` (ms/sec/min/hr), plus
+  `datetimeSubtract` (two datetimes → the `duration` between) and `datetimeShift` (a datetime ±
+  a `duration`). Time is an explicit injected `now` (epoch ms) param — the server drives a 1 s
+  tick, the editor ticks React state, tests pass fixed values. `duration` and `datetime` are
+  first-class wire types (D12, §3.1): entities expose `last_changed`/`last_updated` as
+  **`datetime`** pins, so "open for 10 min" = `since(door.last_changed) > duration(10,min)`.
 - ✅ **Variadic auto-grow pins** (D14): `AND`/`OR`/`SUM` always show one trailing empty pin;
   connecting it fills it and spawns the next, with stable pin ids that survive serialization.
   (No shrink-on-disconnect yet — a stale empty pin is harmless; the fold ignores it.)
@@ -508,13 +596,15 @@ variadic shrink-on-disconnect.
   moved to a neutral `shared/` dir both the editor and server import; the `server → frontend/src`
   dependency is severed.
 - ✅ **Removed legacy root `src/` dead code**: `ha/` `entity()` getter, the legacy `value.ts`
-  Kleene helpers, and `graph.ts`/`types.ts` (plus their now-obsolete tests). `@vue/reactivity`
-  remains only behind the HA layer's `cell` (live entity storage).
+  Kleene helpers, and `graph.ts`/`types.ts` (plus their now-obsolete tests).
+- **Dropped the vestigial `@vue/reactivity` layer** *(landing in the same batch)*: `src/reactive.ts`
+  and `src/value.ts`'s `cell` are deleted; the HA layer now holds live entity state without it
+  (see §8).
 - (Optional) Stream server-*computed* pin values so the editor is a pure view (D6/D9 refinement)
   — would let the editor drop its in-browser engine.
 
 ### Productionization (later)
 - **Ship as a Home Assistant add-on** (Supervisor Docker, ingress UI, `SUPERVISOR_TOKEN`) — Q10.
 - **Conda-package node distribution** (D8) + a community index.
-- Auth beyond the current deploy-token model (roles/users/OAuth) for exposed multi-user setups.
+- Auth beyond the current deploy-token model (D23) — roles/users/OAuth for exposed multi-user setups.
 - Error-UX completeness (D19 schema-drift ghost-pin healing; full D20).

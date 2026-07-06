@@ -1,5 +1,10 @@
 # Claude Design prompt — Reactive Wire editor UI
 
+> **Frozen historical artifact.** This is the one-time prompt used to generate the editor's
+> visual design bundle. It is kept for provenance only and is **not** maintained against the
+> current implementation — see DESIGN.md §8 for the as-built architecture and §6 for the live
+> editor requirements. Do not treat anything below as current spec.
+
 > Copy everything in the fenced block below into Claude design.
 
 ```
