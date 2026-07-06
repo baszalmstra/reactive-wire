@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Memory, ViewEdge } from "../shared/engine/evaluate.js";
@@ -123,6 +123,25 @@ describe("DurableMemoryStore", () => {
       const mem: Memory = {};
       restarted.restore([foldNode("f")], mem);
       expect(mem.f?.state).toBe(3);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("ignores a durable file written by an incompatible version and warns", () => {
+    const dir = tempDir();
+    try {
+      const write = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+      writeFileSync(join(dir, "durable-memory.json"), JSON.stringify({ version: 2, slots: { f: { type: "fold", mem: { state: 3 } } } }));
+
+      const store = new DurableMemoryStore({ dataDir: dir, debounceMs: 0 });
+      const mem: Memory = {};
+      store.restore([foldNode("f")], mem);
+      expect(mem.f).toBeUndefined();
+
+      const warnings = write.mock.calls.filter((c) => String(c[0]).includes(" warn [durable-memory]") && String(c[0]).includes("version"));
+      expect(warnings).toHaveLength(1);
+      write.mockRestore();
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

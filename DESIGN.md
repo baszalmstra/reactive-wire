@@ -340,6 +340,12 @@ variadic) · `Select`/`if` (generic). _Next:_ time/`now` + duration, stateful ed
 |---|----------|--------|-----------|
 | D18 | Errors as values | **Every behavior is `Value<T> = Ok(T) \| Unavailable \| Error(msg)`**; non-Ok values **propagate** reactively. **Boolean ops = Kleene 3-valued** (`false AND unavailable = false`; `true AND unavailable = unavailable`). **Arithmetic = strict propagation**. **SAFETY RULE: sinks NEVER actuate on a non-`Ok` desired value** — they hold/do nothing, never write a default. | Mirrors HA's own `unavailable`/`unknown`; keeps errors reactive; prevents "offline sensor turns off all lights." |
 | D19 | Schema drift / dangling refs | Reference entities & attributes by **stable id** (`entity_id` + attribute key), never pin position. Missing attr/entity → render a **ghost/error pin** (don't drop it), downstream value = `Error`. **Never auto-delete** (temporary disappearance is normal); **auto-heal** when it returns. User actions: reconnect / delete pin / leave pending. | Preserve user intent across world-flux (same principle as boot-seeding); reboots/offline devices must not shred graphs. |
+
+The same drift principle now covers **node-template drift** and is **built** as read-side def
+reconciliation (`shared/engine/reconcile-defs.ts`, see §8): a persisted node def is healed against
+the current code templates when the document is read — pins the template gained appear, pins it
+dropped become ghosts (kept while wired, dropped when unwired), entity nodes and unknown types are
+left to their own logic. This is the auto-heal that was previously roadmap.
 | D20 | Error UX | Inline red/dashed error pins + tooltips; value chips show `unavailable`/`error` **distinctly** (never blank/fake). **Node health badge** (ok/warn/error) legible zoomed-out. **"Problems" panel** (structural vs runtime, click-to-focus). Connect-time rejections **explain themselves**. **Deploy guard**: block hard errors, warn soft. **HA-disconnected banner** + stale/greyed values + **no actuation while disconnected**. | "User interaction around errors" is first-class, not an afterthought. |
 | D23 | Server security model | **Safe-by-default exposure, opt-in to expose.** The deploy/control WebSocket **binds to loopback** (`127.0.0.1`) by default; binding outside loopback **requires `RW_DEPLOY_TOKEN`** (refused otherwise). Host and Origin are checked against allowlists (`RW_ALLOWED_HOSTS`/`RW_ALLOWED_ORIGINS`), with loopback hosts/origins and local-file (`Origin: null`) connections allowed only from loopback. The loopback test is **DNS-rebind-resistant** (only numeric `127.x` / `::1` / `localhost` qualify — `127.attacker.example` does not), and the token check is **timing-safe** (`timingSafeEqual`). Every deploy graph and every collaborative-document update is **structurally sanitized** before use (`sanitizeDeployRequest`, `shared/collab.ts`): node/edge/macro/pin count caps, bounded string length and JSON depth, prototype-pollution-safe keys, and coercion to the known wire types. | A home-automation server actuates real devices, so exposure must be a deliberate act, not a default. Loopback + token + allowlists resist LAN/CSRF/DNS-rebind reach; input caps bound the blast radius of a malicious or buggy client without a full auth system (still a non-goal — see §2, §9). |
 
@@ -396,7 +402,9 @@ the sinks `sink-light`/`sink-call`/`sink-climate`/`sink-cover`/`sink-input`/`sin
   stale responses are dropped by generation + per-node sequence.
 - `doc-store.ts` — `EditorDocumentStore`: the server-side Yjs `Y.Doc`, persisted as a binary
   snapshot under `RW_DATA_DIR` (`editor-doc.ydoc`, atomic tmp+rename write) and reloaded on
-  boot — the editor document survives restarts.
+  boot — the editor document survives restarts. On load it checks the persisted schema version: a
+  current-version document loads as-is, an older one is migrated (see the migration path below), and
+  a newer one is refused with a clear error (downgrade protection).
 - `collab-deploy-adapter.ts` — projects the collaborative document to the deploy graph
   (`graphFromEditorSnapshot`) and the `AutoDeployController` that redeploys the server-selected
   `deployFlowId` when `autoDeploy` is on and the graph signature changes.
@@ -415,6 +423,35 @@ rationale in §9). `autoDeploy`/`deployFlowId` are **server-owned document setti
 server can auto-deploy the chosen flow independently of any client's active tab. Deploy remains
 an explicit act: a remote collaborator's edit only actuates Home Assistant when `autoDeploy` is
 enabled (see the safety caveat in §9).
+
+**Document migration** (`shared/collab-migrations.ts`): the document meta carries a schema
+version. A registry of pure snapshot-level migrations, keyed by the version each step upgrades from,
+lifts an older persisted snapshot stepwise up to the current version. The only registered step is
+the legacy normalization from version 0 — a document written before the schema carried a version
+reads back as version 0 and its content already matches version 1, so the step is a structural
+re-stamp; no schema-changing migration exists yet because the version is still 1. When the server
+loads a document older than current, it reads the snapshot leniently (bypassing the version guard
+the strict reader enforces for current-version docs), migrates the JSON snapshot, backs up the
+original file (`editor-doc.ydoc.v<old>.bak`, never overwriting an existing backup), rebuilds a fresh
+`Y.Doc` from the migrated snapshot, and persists it. Rebuilding drops the old CRDT edit history,
+which is acceptable for this single-server store since clients resync from scratch. A version newer
+than the build supports is refused outright.
+
+**Read-side def reconciliation** (`shared/engine/reconcile-defs.ts`): node defs are persisted in
+full inside the document, so a stored def can carry pin shapes that predate a change to the node's
+code template. `reconcileDefs` heals a stored def against the current templates as the document is
+read: pins the template gained appear at their template position (with template defaults, preserving
+stored editable values), pins the template dropped are marked as ghosts so their wires survive —
+kept while wired, dropped when unwired — and unknown node types are left untouched. Entity nodes
+keep their own live-attribute ghost logic and are skipped; a variadic node's grown pins are
+preserved rather than ghosted. Reconciliation runs on the **read** side only — where the client
+projects the collaborative document into editor state (`frontend/src/state/editor-document.ts`) and
+where the server projects a snapshot to a deploy graph before validation
+(`collab-deploy-adapter.ts`). On the client the local-edit diff baseline is set to the **reconciled**
+projection that was rendered into editor state, not the raw document snapshot, so a healed def is
+not mistaken for a local edit: opening a drifted document neither rewrites it nor broadcasts a
+CRDT update, and concurrent clients do not ping-pong healing deltas. A user edit that actually
+touches a node naturally persists its reconciled shape.
 
 **Server security model** (D23): the deploy/control socket **binds to loopback by default**;
 binding outside loopback without an `RW_DEPLOY_TOKEN` is refused. `connection-policy.ts` enforces
@@ -524,9 +561,12 @@ deferred until multi-instance is actually needed).
 - **Frontend full-graph rebuilds.** Small local or remote edits stringify/rebuild the whole
   document snapshot and replace all flows/nodes/edges, losing unchanged node identity and blowing
   the frame budget on large graphs. Wanted: incremental application preserving identities.
-- **Update/schema validation before persist.** A syntactically valid Yjs update can set an
-  unsupported `meta.version` (or otherwise poison state) and be persisted, so a later reload
-  throws. Validate the projected document *before* applying/persisting and return `docError`.
+- **Update/schema validation before persist.** *Version drift is now handled:* `applyUpdate`
+  projects the candidate document and rejects an unsupported `meta.version` before persisting, and
+  the load path migrates an older version and refuses a newer one (see §8). What remains is
+  *non-version* state poisoning — an update that stays a structurally valid current-version document
+  but is semantically undesirable is still applied and persisted; validating projected semantics
+  before persist and returning `docError` is the open work.
 - **First-sync local-edit loss.** On first connect the client flushes its local working state into
   a blank `Y.Doc` before applying server state (`App.tsx` ~325-332); that blank doc initializes its
   own `flows["flow-1"]` entry, which collides with the server's separate `flows["flow-1"]` `Y.Map`.
@@ -606,4 +646,5 @@ variadic shrink-on-disconnect.
 - **Ship as a Home Assistant add-on** (Supervisor Docker, ingress UI, `SUPERVISOR_TOKEN`) — Q10.
 - **Conda-package node distribution** (D8) + a community index.
 - Auth beyond the current deploy-token model (D23) — roles/users/OAuth for exposed multi-user setups.
-- Error-UX completeness (D19 schema-drift ghost-pin healing; full D20).
+- Error-UX completeness: node-template ghost-pin healing (D19) is built as read-side def
+  reconciliation (§8); entity live-attribute healing and full D20 error UX remain.

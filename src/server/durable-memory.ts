@@ -94,6 +94,12 @@ export class DurableMemoryStore implements DurableMemory {
     try {
       const parsed = JSON.parse(readFileSync(this.filePath, "utf8")) as PersistedFile;
       if (parsed && typeof parsed === "object" && parsed.slots && typeof parsed.slots === "object") {
+        if (parsed.version !== 1) {
+          // A file written by an incompatible format version is not corrupt, but its slots may not
+          // match what this build restores; start empty rather than trusting them.
+          log("warn", "durable-memory", "ignoring durable memory from an incompatible version", { version: parsed.version });
+          return;
+        }
         this.slots = parsed.slots;
         this.lastWritten = JSON.stringify(this.slots);
       }

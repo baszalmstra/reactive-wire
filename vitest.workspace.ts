@@ -21,6 +21,10 @@ export default defineWorkspace([
     root,
     // esbuild's automatic JSX runtime lets .tsx component tests compile without a Babel/React plugin.
     esbuild: { jsx: "automatic" },
+    // The frontend and root node_modules hold separate yjs copies; the app resolves every bare
+    // `yjs` import to one copy via its Vite root, so tests that build a Y.Doc alongside shared/collab
+    // must do the same or the two instances' constructor checks reject each other's types.
+    resolve: { dedupe: ["yjs"] },
     test: {
       name: "frontend",
       environment: "jsdom",

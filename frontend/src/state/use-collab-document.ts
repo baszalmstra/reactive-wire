@@ -97,6 +97,11 @@ export function useCollabDocument(options: {
     setSelectedIds((ids) => ids.filter((id) => applied.activeNodes.some((node) => node.id === id)));
     setPast([]);
     setFuture([]);
+    // Baseline the local-edit diff against the reconciled projection just pushed into React state,
+    // not the raw document snapshot. workingStateFromSnapshot heals stored defs to the current
+    // templates, so a raw baseline would make that healing look like a local edit and the next
+    // debounce flush would write it back into the shared document.
+    lastCollabSnapshot.current = snapshotFromWorkingState(applied);
     queueMicrotask(() => {
       applyingCollab.current = false;
     });
@@ -140,10 +145,9 @@ export function useCollabDocument(options: {
       const update = decodeUpdateBase64(server.docState.update, DEFAULT_MAX_DOC_STATE_BYTES);
       Y.applyUpdate(collabDoc.current, update, collabServerOrigin);
       sendLocalUpdatesMissingFromServerState(update);
-      const snapshot = snapshotFromEditorDoc(collabDoc.current);
-      lastCollabSnapshot.current = snapshot;
       collabReady.current = true;
-      applyRemoteDocumentSnapshot(snapshot);
+      // applyRemoteDocumentSnapshot sets the diff baseline to the reconciled projection it renders.
+      applyRemoteDocumentSnapshot(snapshotFromEditorDoc(collabDoc.current));
     } catch (err) {
       showToast(`Document sync failed: ${err instanceof Error ? err.message : String(err)}`, "error");
     }
@@ -157,9 +161,7 @@ export function useCollabDocument(options: {
       // otherwise a remote packet can replace unsent local React state and cause data loss.
       flushLocalDocumentToCollab();
       Y.applyUpdate(collabDoc.current, decodeUpdateBase64(server.docUpdate.update), collabServerOrigin);
-      const snapshot = snapshotFromEditorDoc(collabDoc.current);
-      lastCollabSnapshot.current = snapshot;
-      applyRemoteDocumentSnapshot(snapshot);
+      applyRemoteDocumentSnapshot(snapshotFromEditorDoc(collabDoc.current));
     } catch (err) {
       showToast(`Document sync failed: ${err instanceof Error ? err.message : String(err)}`, "error");
     }
