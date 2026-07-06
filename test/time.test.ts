@@ -42,9 +42,10 @@ describe("duration node", () => {
   });
   const out = (n: NodeData) => evaluate([n], [], {}, {} as Memory, 0).outputs["d:out"]!;
 
-  it("builds a Duration (seconds) from minutes / hours / seconds / ms", () => {
+  it("builds a Duration (seconds) from minutes / hours / days / seconds / ms", () => {
     expect(out(dur("min", 5)).v).toBe(300);
     expect(out(dur("hr", 2)).v).toBe(7200);
+    expect(out(dur("day", 1)).v).toBe(86400);
     expect(out(dur("sec", 30)).v).toBe(30);
     expect(out(dur("ms", 1500)).v).toBe(1.5);
   });

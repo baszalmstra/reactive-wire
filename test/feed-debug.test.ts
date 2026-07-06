@@ -87,11 +87,14 @@ describe("feed debugState introspection", () => {
       expect(nodesOut.src?.outputs.state?.value).toBe(true);
       expect(nodesOut.src?.outputs.state?.status).toBe("ok");
 
-      const sinks = state.sinks as Record<string, { desired: { domain: string; service: string; target?: { entity_id: string } } | null; status: string; inFlight: boolean }>;
+      const sinks = state.sinks as Record<string, { desired: { domain: string; service: string; target?: { entity_id: string } } | null; lastCall: { domain: string; service: string; target?: { entity_id: string } } | null; lastTriggeredAt: number | null; status: string; inFlight: boolean }>;
       // Desired on, actual off -> the sink wants to turn the helper on.
       expect(sinks.snk?.desired?.domain).toBe("input_boolean");
       expect(sinks.snk?.desired?.service).toBe("turn_on");
       expect(sinks.snk?.desired?.target?.entity_id).toBe("input_boolean.flag");
+      expect(sinks.snk?.lastCall?.domain).toBe("input_boolean");
+      expect(sinks.snk?.lastCall?.service).toBe("turn_on");
+      expect(typeof sinks.snk?.lastTriggeredAt).toBe("number");
       expect(sinks.snk?.inFlight).toBe(false);
     } finally {
       ws.close();

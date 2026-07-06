@@ -99,7 +99,7 @@ export const datetimeShift: NodeDef = {
 
 export const duration: NodeDef = {
   type: "duration",
-  description: "Builds a Duration from a count in the chosen unit (ms/sec/min/hr).",
+  description: "Builds a Duration from a count in the chosen unit (ms/sec/min/hr/day).",
   template: {
     type: "duration", category: "Time", label: "Duration", icon: "const",
     make: (id) => base(id, {
@@ -111,7 +111,7 @@ export const duration: NodeDef = {
     }),
   },
   eval: ({ cfg, inEff }) => {
-    // A Duration written in a friendlier unit (ms / sec / min / hr), carried as a number of
+    // A Duration written in a friendlier unit (ms / sec / min / hr / day), carried as a number of
     // seconds. The count may be typed inline or wired from another number.
     const count = inEff("count");
     if (!count) return UN("duration");

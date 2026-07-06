@@ -4,7 +4,7 @@ import { fetch } from "./fetch.js";
 import { compare } from "./compare.js";
 import { and, or, not } from "./logic.js";
 import { sum } from "./sum.js";
-import { constNumber, constBool, constString, constColor } from "./const.js";
+import { constNumber, constBool, constString, constColor, constDuration } from "./const.js";
 import { select } from "./select.js";
 import { toggle } from "./toggle.js";
 import { edge, rising, falling } from "./edge.js";
@@ -37,6 +37,7 @@ const PALETTE_DEFS: NodeDef[] = [
   constBool,
   constString,
   constColor,
+  constDuration,
   select,
   toggle,
   edge,

@@ -5,6 +5,10 @@ export interface SinkAction {
   call: string | null;
   note?: string;
   status: Status;
+  /** Last call observed for this sink, retained while the current action is holding. */
+  lastCall?: string;
+  /** Epoch milliseconds when the last call was triggered or newly observed. */
+  lastTriggeredAt?: number;
 }
 
 /**

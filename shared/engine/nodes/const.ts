@@ -67,3 +67,18 @@ export const constColor: NodeDef = {
   },
   eval: evalConst,
 };
+
+export const constDuration: NodeDef = {
+  type: "const-duration",
+  description: "Outputs a fixed Duration you set with a count and unit.",
+  template: {
+    type: "const-duration", category: "Constants", label: "Duration", icon: "duration",
+    make: (id) => base(id, {
+      type: "const-duration", title: "Duration", subtitle: "Constant", icon: "duration", w: 214,
+      values: { out: { count: 5, unit: "min" } },
+      inputs: [],
+      outputs: [{ id: "out", label: "duration", type: "duration", editable: true }],
+    }),
+  },
+  eval: evalConst,
+};

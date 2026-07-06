@@ -23,6 +23,15 @@ describe("node template defaults", () => {
     expect(results.outputs["color:out"]).toMatchObject({ status: "ok", type: "color", v: "#ffffff" });
   });
 
+  it("offers a Duration constant with a count and unit literal", () => {
+    const duration = REGISTRY["const-duration"]!.template.make("duration");
+
+    expect(duration.values?.out).toEqual({ count: 5, unit: "min" });
+
+    const results = evaluate([duration], [], {}, {} as Memory);
+    expect(results.outputs["duration:out"]).toMatchObject({ status: "ok", type: "duration", v: 300 });
+  });
+
   it("leaves new light sinks inert until an on/off command is wired or explicitly set", () => {
     const light = withConfig(REGISTRY["sink-light"]!.template.make("light"), { entity_id: "light.lr" });
 

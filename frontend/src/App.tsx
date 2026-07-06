@@ -52,7 +52,7 @@ import { Icon } from "./components/Icon.js";
 import { type EditorNode } from "./canvas/flows.js";
 import { useValueHistory } from "./canvas/use-value-history.js";
 import { syncMacroInstances } from "./canvas/macro-editing.js";
-import type { EvalResults } from "../../shared/results.js";
+import type { EvalResults, SinkAction } from "../../shared/results.js";
 import { useUndoRedo } from "./state/use-undo-redo.js";
 import { useFlows } from "./state/use-flows.js";
 import { useCollabDocument } from "./state/use-collab-document.js";
@@ -82,6 +82,41 @@ function staleResults(r: EvalResults): EvalResults {
 }
 
 const emptyResults = (): EvalResults => ({ outputs: {}, inputs: {}, health: {}, actions: {}, connected: {}, sinks: {} });
+
+type SinkTriggerRecord = {
+  /** The call currently desired by this sink, cleared once the sink holds. */
+  activeCall: string | null;
+  /** Most recent call text shown after the sink starts holding. */
+  lastCall?: string;
+  /** When the active/last call first appeared in the preview. */
+  lastTriggeredAt?: number;
+};
+
+function withSinkTriggerTimes(results: EvalResults, records: Record<string, SinkTriggerRecord>, at: number): EvalResults {
+  const actions: Record<string, SinkAction> = {};
+  for (const [nodeId, action] of Object.entries(results.actions)) {
+    const record = records[nodeId] ?? { activeCall: null };
+    if (action.call) {
+      if (record.activeCall !== action.call) {
+        record.activeCall = action.call;
+        record.lastCall = action.call;
+        record.lastTriggeredAt = at;
+      }
+    } else {
+      record.activeCall = null;
+    }
+    records[nodeId] = record;
+    actions[nodeId] = {
+      ...action,
+      lastCall: record.lastCall,
+      lastTriggeredAt: record.lastTriggeredAt,
+    };
+  }
+  for (const nodeId of Object.keys(records)) {
+    if (!(nodeId in results.actions)) delete records[nodeId];
+  }
+  return { ...results, actions };
+}
 
 function withInitialSize(node: EditorNode): EditorNode {
   if (node.type === "rw") {
@@ -209,6 +244,7 @@ export function App() {
   })), [edges]);
   const nodeDefs = useMemo(() => rwNodes.map((n) => n.data.def), [rwNodes]);
   const [liveResults, setLiveResults] = useState<EvalResults>(() => emptyResults());
+  const sinkTriggerRecords = useRef<Record<string, SinkTriggerRecord>>({});
   const previewCommit = useRef<{
     activeFlowId: string;
     nodeDefs: NodeData[];
@@ -230,9 +266,11 @@ export function App() {
     ) {
       return;
     }
+    if (previous && previous.activeFlowId !== activeFlowId) sinkTriggerRecords.current = {};
     previewCommit.current = { activeFlowId, nodeDefs, viewEdges, entities, now, macros: macroLib.macros };
     const flowMemory = (memories.current[activeFlowId] ??= {});
-    setLiveResults(evaluate(nodeDefs, viewEdges, entities, flowMemory, now, {}, macroLib.macros));
+    const evaluated = evaluate(nodeDefs, viewEdges, entities, flowMemory, now, {}, macroLib.macros);
+    setLiveResults(withSinkTriggerTimes(evaluated, sinkTriggerRecords.current, now));
   }, [activeFlowId, nodeDefs, viewEdges, entities, now, macroLib.macros]);
   // While a previously connected feed is down, keep the last server values greyed as stale.
   // Before any server has connected, the app remains in local demo mode with live simulated values.

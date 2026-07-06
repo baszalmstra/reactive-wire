@@ -32,6 +32,10 @@ export interface DebugSink {
   status: string;
   /** Whether an identical call is currently awaiting a service response. */
   inFlight: boolean;
+  /** The most recent call this sink attempted or dry-ran. */
+  lastCall: ServiceCall | null;
+  /** Epoch ms when the most recent call was triggered, or null if it has never triggered. */
+  lastTriggeredAt: number | null;
   /** For generic call-service sinks, the last command remembered until its desired value changes. */
   lastCommand: string | null;
 }
@@ -109,6 +113,8 @@ export class Deployer {
   private generation = 0;
   private readonly inFlight = new Map<string, string>();
   private readonly lastNonReconciling = new Map<string, string>();
+  private readonly lastTriggeredAt = new Map<string, number>();
+  private readonly lastTriggeredCall = new Map<string, ServiceCall>();
   private readonly tick: ReturnType<typeof setInterval>;
   private readonly poller: Poller;
   private lastResults: EvalResults | null = null;
@@ -139,6 +145,8 @@ export class Deployer {
     this.generation += 1;
     this.inFlight.clear();
     this.lastNonReconciling.clear();
+    this.lastTriggeredAt.clear();
+    this.lastTriggeredCall.clear();
     this.graph = { nodes: flat.nodes, edges: flat.edges };
     this.actuate = actuate;
     this.mem = {};
@@ -154,6 +162,8 @@ export class Deployer {
     this.generation += 1;
     this.inFlight.clear();
     this.lastNonReconciling.clear();
+    this.lastTriggeredAt.clear();
+    this.lastTriggeredCall.clear();
     clearInterval(this.tick);
     this.poller.stop();
     this.durable?.stop();
@@ -181,11 +191,14 @@ export class Deployer {
         if (isSink(n.type)) {
           const action = results.actions[n.id];
           const desired = results.sinks[n.id];
+          const lastCall = this.lastTriggeredCall.get(n.id) ?? null;
           sinks[n.id] = {
             desired: desired ? debugCall(desired) : null,
             note: action?.note,
             status: action?.status ?? "ok",
             inFlight: this.inFlight.has(n.id),
+            lastCall: lastCall ? debugCall(lastCall) : null,
+            lastTriggeredAt: this.lastTriggeredAt.get(n.id) ?? null,
             lastCommand: this.lastNonReconciling.get(n.id) ?? null,
           };
         }
@@ -199,6 +212,11 @@ export class Deployer {
       nodes,
       sinks,
     };
+  }
+
+  private recordTriggered(nodeId: string, call: ServiceCall): void {
+    this.lastTriggeredAt.set(nodeId, Date.now());
+    this.lastTriggeredCall.set(nodeId, call);
   }
 
   private run(): void {
@@ -225,6 +243,7 @@ export class Deployer {
       if (this.inFlight.get(nodeId) === key) continue;
       if (rememberUntilChange && this.lastNonReconciling.get(nodeId) === key) continue;
       this.inFlight.set(nodeId, key);
+      this.recordTriggered(nodeId, call);
       if (this.actuate) {
         void this.executeCall(generation, nodeId, key, call, rememberUntilChange);
       } else {

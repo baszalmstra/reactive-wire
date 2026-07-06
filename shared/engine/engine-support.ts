@@ -1,6 +1,7 @@
 import type { NodeData } from "../node-types.js";
 import type { ValueType } from "../theme.js";
 import type { RWValue, Status } from "../value.js";
+export { durationSeconds } from "../duration.js";
 
 /**
  * Per-node internal state for stateful nodes. One map keyed by node id is shared by every
@@ -147,17 +148,6 @@ export function instantDiffSeconds(aMs: number, bMs: number): number {
  */
 export function shiftInstant(instantMs: number, seconds: number, dir: 1 | -1): number {
   return instantMs + dir * seconds * 1000;
-}
-
-/** Seconds expressed by a duration count under the given unit. */
-export function durationSeconds(count: number, unit: unknown): number {
-  switch (String(unit)) {
-    case "ms": return count / 1000;
-    case "min": return count * 60;
-    case "hr": return count * 3600;
-    case "sec":
-    default: return count;
-  }
 }
 
 /** The value type a configured input-helper sink expects, taken from its target entity's domain. */

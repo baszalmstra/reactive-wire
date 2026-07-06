@@ -1,3 +1,4 @@
+import { durationLiteralSeconds } from "./duration.js";
 import type { ValueType } from "./theme.js";
 
 export type Status = "ok" | "unavailable" | "error" | "stale";
@@ -61,8 +62,8 @@ function fmtNum(n: unknown): string {
 
 /**
  * A duration's magnitude is carried internally as a number of seconds. Render it in the largest
- * unit that keeps the number readable: sub-second as milliseconds, then seconds, minutes, and
- * hours, rounded to one decimal (e.g. 600 -> "10 min", 5400 -> "1.5 h", 0.25 -> "250 ms").
+ * unit that keeps the number readable: sub-second as milliseconds, then seconds, minutes, hours,
+ * and days, rounded to one decimal (e.g. 600 -> "10 min", 5400 -> "1.5 h", 0.25 -> "250 ms").
  */
 export function formatDuration(secondsValue: unknown): string {
   const s = Number(secondsValue);
@@ -72,7 +73,8 @@ export function formatDuration(secondsValue: unknown): string {
   if (abs < 1) return `${round(s * 1000)} ms`;
   if (abs < 60) return `${round(s)} s`;
   if (abs < 3600) return `${round(s / 60)} min`;
-  return `${round(s / 3600)} h`;
+  if (abs < 86400) return `${round(s / 3600)} h`;
+  return `${round(s / 86400)} d`;
 }
 
 /**
@@ -194,9 +196,10 @@ export function parseEntityValue(raw: unknown, type: ValueType): RWValue {
       return Number.isFinite(n) ? V("num", n) : UN("num");
     }
     case "duration": {
-      // A duration's magnitude is a number of seconds.
-      const n = Number(raw);
-      return Number.isFinite(n) ? V("duration", n) : UN("duration");
+      // A duration's magnitude is carried as a number of seconds. Editable literals may keep
+      // the count and display unit they were written with; normalize them before they flow.
+      const n = durationLiteralSeconds(raw);
+      return n === null ? UN("duration") : V("duration", n);
     }
     case "datetime": {
       // An instant is carried as epoch milliseconds. A raw number is taken as that instant

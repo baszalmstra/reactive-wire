@@ -1,21 +1,9 @@
+import { durationSeconds } from "../../duration.js";
 import { V, UN, ER, parseEntityValue, entityStateType } from "../../value.js";
 import type { ValueType } from "../../theme.js";
 import type { EntityState } from "../../entities.js";
 import type { NodeDef } from "../node-def.js";
 import { base } from "./template-base.js";
-
-// Seconds expressed by a duration count under a Home Assistant duration unit. HA reports these as
-// 'ms', 's', 'min', 'h', or 'd'; anything unrecognized is read as seconds.
-function durationUnitSeconds(count: number, unit: unknown): number {
-  switch (String(unit)) {
-    case "ms": return count / 1000;
-    case "min": return count * 60;
-    case "h": return count * 3600;
-    case "d": return count * 86400;
-    case "s":
-    default: return count;
-  }
-}
 
 /**
  * The state pin's value, typed from the entity's metadata so its type stays fixed even while the
@@ -26,7 +14,7 @@ function stateValue(entityId: string, e: EntityState) {
   if (type === "duration") {
     const parsed = parseEntityValue(e.state, "num");
     if (parsed.status !== "ok") return UN("duration");
-    return V("duration", durationUnitSeconds(parsed.v as number, e.attributes.unit_of_measurement));
+    return V("duration", durationSeconds(parsed.v as number, e.attributes.unit_of_measurement));
   }
   return parseEntityValue(e.state, type);
 }
