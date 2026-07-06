@@ -103,6 +103,7 @@ function WirePreview({ sample, variant }: { sample: Sample; variant: Variant }) 
       <svg viewBox="0 0 260 64" aria-hidden="true">
         <path className="wire-halo" d={d} />
         <path className="wire-main" d={d} style={{ opacity }} />
+        {glow && <path className="wire-flow" d={d} />}
         {recommended && sample.value.status === "ok" && (
           <>
             <circle className="wire-port" cx="18" cy="32" r="4.3" />
@@ -195,7 +196,7 @@ function Playground() {
     <section className="wire-playground">
       <div className="wire-playground-head">
         <h2>Interactive playground</h2>
-        <p>Type is color only. Status changes line treatment. Boolean true gets a glow/pulse; false stays quiet.</p>
+        <p>Type is color only. Status changes line treatment. Boolean true gets a subtle traveling glow; false stays quiet.</p>
       </div>
       <div className="wire-controls">
         <Field label="Type">
@@ -210,9 +211,7 @@ function Playground() {
         </Field>
         <ValueControl state={state} setState={setState} />
       </div>
-      <div className="wire-playground-grid">
-        <WirePreview sample={sample} variant="color" />
-        <WirePreview sample={sample} variant="value" />
+      <div className="wire-playground-preview">
         <WirePreview sample={sample} variant="recommended" />
       </div>
     </section>
@@ -237,8 +236,6 @@ function WireRow({ sample }: { sample: Sample }) {
         <strong>{TYPE_LABEL[sample.type]}</strong>
         <small>{sample.note}</small>
       </div>
-      <WirePreview sample={sample} variant="color" />
-      <WirePreview sample={sample} variant="value" />
       <WirePreview sample={sample} variant="recommended" />
     </div>
   );
@@ -253,19 +250,13 @@ function WireStylePrototype() {
           <h1>Wire style prototype</h1>
           <p>
             Updated direction: <b>type is carried by color only</b>. Line pattern/opacity is reserved for status,
-            and the recommended style adds a compact live value badge plus a slight pulsing glow only for boolean true.
+            and the recommended style adds a compact live value badge plus a subtle traveling glow only for boolean true.
           </p>
         </div>
       </header>
 
       <Playground />
 
-      <div className="wire-grid-head">
-        <span />
-        <span>Type color only</span>
-        <span>Color + value</span>
-        <span>Recommended</span>
-      </div>
       <div className="wire-table">
         {SAMPLES.map((sample) => <WireRow key={sample.type} sample={sample} />)}
       </div>
@@ -279,7 +270,7 @@ function WireStylePrototype() {
             <li>Color always means value type.</li>
             <li>No per-type texture — avoid noisy dense graphs.</li>
             <li>Status owns line treatment: solid, muted dashed, faint dotted, red dashed.</li>
-            <li>Boolean true glows/pulses; boolean false does not.</li>
+            <li>Boolean true gets a subtle traveling glow; boolean false does not.</li>
           </ul>
         </Column>
       </div>
@@ -302,9 +293,8 @@ const css = `
 .wire-field input, .wire-field select { height: 31px; border: 1px solid var(--rw-line); border-radius: 8px; background: var(--rw-panel2); color: var(--rw-text); padding: 0 9px; font: 12px var(--font-mono); outline: none; }
 .wire-field input:focus, .wire-field select:focus { border-color: var(--rw-accent); }
 .wire-muted { color: var(--rw-faint); font-size: 12px; margin: 0 0 7px; }
-.wire-playground-grid { display: grid; grid-template-columns: repeat(3, minmax(220px, 1fr)); gap: 14px; }
-.wire-grid-head, .wire-row { display: grid; grid-template-columns: 180px repeat(3, minmax(210px, 1fr)); gap: 14px; align-items: center; }
-.wire-grid-head { color: var(--rw-faint); font-size: 10px; text-transform: uppercase; letter-spacing: .08em; padding: 0 14px 8px; }
+.wire-playground-preview { max-width: 520px; }
+.wire-row { display: grid; grid-template-columns: 180px minmax(260px, 1fr); gap: 14px; align-items: center; }
 .wire-table { display: flex; flex-direction: column; gap: 10px; }
 .wire-row { padding: 11px 14px; border: 1px solid var(--rw-line-soft); border-radius: 14px; background: color-mix(in oklab, var(--rw-panel) 70%, transparent); }
 .wire-row-label { display: grid; grid-template-columns: 12px 1fr; column-gap: 9px; row-gap: 3px; align-items: center; }
@@ -316,9 +306,10 @@ const css = `
 .wire-main { fill: none; stroke: var(--wire); stroke-width: 3.25; stroke-linecap: round; filter: drop-shadow(0 0 2px color-mix(in oklab, var(--wire) 28%, transparent)); }
 .wire-demo.value .wire-main { stroke-width: 3.35; }
 .wire-demo.recommended .wire-main { stroke-width: 3.5; }
-.wire-demo.recommended.bool-on .wire-main { stroke-width: 4; animation: wirePulse 1.65s ease-in-out infinite; filter: drop-shadow(0 0 8px color-mix(in oklab, var(--wire) 64%, transparent)); }
+.wire-demo.recommended.bool-on .wire-main { stroke-width: 3.6; filter: drop-shadow(0 0 3px color-mix(in oklab, var(--wire) 32%, transparent)); }
+.wire-flow { fill: none; stroke: color-mix(in oklab, var(--wire) 84%, white 16%); stroke-width: 5.5; stroke-linecap: round; stroke-dasharray: 26 222; stroke-dashoffset: 0; opacity: .32; filter: drop-shadow(0 0 5px color-mix(in oklab, var(--wire) 42%, transparent)); animation: wireFlow 2.15s linear infinite; }
 .wire-port { fill: var(--rw-canvas); stroke: var(--wire); stroke-width: 2; }
-.wire-demo.recommended.bool-on .wire-port { animation: portPulse 1.65s ease-in-out infinite; }
+.wire-demo.recommended.bool-on .wire-port { filter: drop-shadow(0 0 3px color-mix(in oklab, var(--wire) 38%, transparent)); }
 .wire-value { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); display: inline-flex; align-items: center; gap: 6px; max-width: 118px; padding: 4px 8px; border-radius: 999px; border: 1px solid color-mix(in oklab, var(--wire) 58%, var(--rw-line)); background: color-mix(in oklab, var(--rw-panel) 92%, transparent); color: var(--rw-text); font: 500 10.5px var(--font-mono); white-space: nowrap; box-shadow: 0 5px 14px -12px rgba(0,0,0,.45); }
 .wire-value.stale { border-style: dashed; color: var(--rw-faint); }
 .wire-value.unavailable { border-style: dashed; color: var(--rw-faint); background: color-mix(in oklab, var(--rw-panel2) 78%, transparent); }
@@ -335,18 +326,13 @@ const css = `
 .wire-column p { margin: 0 0 14px; color: var(--rw-faint); font-size: 12px; line-height: 1.45; }
 .wire-stack { display: grid; grid-template-columns: repeat(2, minmax(220px, 1fr)); gap: 10px; }
 .wire-rules { margin: 0; padding-left: 18px; color: var(--rw-dim); line-height: 1.8; }
-@keyframes wirePulse {
-  0%, 100% { stroke-width: 3.8; opacity: .92; }
-  50% { stroke-width: 4.7; opacity: 1; }
-}
-@keyframes portPulse {
-  0%, 100% { filter: drop-shadow(0 0 2px color-mix(in oklab, var(--wire) 42%, transparent)); }
-  50% { filter: drop-shadow(0 0 7px color-mix(in oklab, var(--wire) 70%, transparent)); }
+@keyframes wireFlow {
+  to { stroke-dashoffset: -248; }
 }
 @media (max-width: 920px) {
-  .wire-grid-head { display: none; }
   .wire-row { grid-template-columns: 1fr; }
-  .wire-columns, .wire-controls, .wire-playground-grid { grid-template-columns: 1fr; }
+  .wire-columns, .wire-controls { grid-template-columns: 1fr; }
+  .wire-playground-preview { max-width: none; }
 }
 `;
 
