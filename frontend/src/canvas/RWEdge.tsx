@@ -47,11 +47,16 @@ function isBooleanOn(value: RWValue): boolean {
   return value.type === "bool" && value.status === "ok" && value.v === true;
 }
 
+function isBooleanOff(value: RWValue): boolean {
+  return value.type === "bool" && value.status === "ok" && value.v === false;
+}
+
 function EdgeValueBadge({ value }: { value: RWValue }) {
   const formatted = formatValue(value);
   const swatch = value.status === "ok" && value.type === "color" ? String(value.v) : null;
+  const boolTone = value.status === "ok" && value.type === "bool" ? (value.v ? "bool-true" : "bool-false") : "";
   return (
-    <span className={`rw-edge-value ${edgeStatus(value)}`}>
+    <span className={`rw-edge-value ${edgeStatus(value)} ${boolTone}`}>
       {swatch && <span className="rw-edge-swatch" style={{ background: swatch }} />}
       {value.type === "bool" && value.status === "ok" && <span className={`rw-edge-bool ${value.v ? "on" : "off"}`} />}
       {formatted.text}
@@ -95,9 +100,11 @@ export function RWEdge({
   const valueType = data?.valueType ?? data?.value?.type ?? "any";
   const value = data?.value ?? UN(valueType);
   const status = edgeStatus(value);
-  const wireColor = status === "error" ? "var(--rw-h-error)" : TYPE_VAR[value.type];
-  const style = { "--wire": wireColor } as CSSProperties;
   const active = isBooleanOn(value);
+  const off = isBooleanOff(value);
+  const wireBase = TYPE_VAR[value.type];
+  const wireColor = status === "error" ? "var(--rw-h-error)" : off ? `color-mix(in oklab, ${wireBase} 58%, var(--rw-line) 42%)` : wireBase;
+  const style = { "--wire": wireColor } as CSSProperties;
   const pathStyle = doomed
     ? ({
         ...style,
@@ -110,8 +117,8 @@ export function RWEdge({
     : ({
         ...style,
         stroke: wireColor,
-        strokeWidth: selected ? 4.2 : active ? 3.6 : 3.5,
-        opacity: status === "unavailable" ? 0.36 : status === "stale" ? 0.56 : 1,
+        strokeWidth: selected ? 4.2 : active ? 3.8 : off ? 3.25 : 3.5,
+        opacity: status === "unavailable" ? 0.36 : status === "stale" ? 0.56 : off ? 0.86 : 1,
         strokeDasharray: status === "error" ? "8 5" : status === "unavailable" ? "3 8" : status === "stale" ? "12 7" : undefined,
         filter: selected
           ? "drop-shadow(0 0 4px color-mix(in oklab, var(--rw-accent) 70%, transparent))"
@@ -119,8 +126,10 @@ export function RWEdge({
             ? "drop-shadow(0 0 4px color-mix(in oklab, var(--rw-h-error) 55%, transparent))"
             : status === "ok"
               ? active
-                ? "drop-shadow(0 0 3px color-mix(in oklab, var(--wire) 32%, transparent))"
-                : "drop-shadow(0 0 2px color-mix(in oklab, var(--wire) 26%, transparent))"
+                ? "drop-shadow(0 0 4px color-mix(in oklab, var(--wire) 54%, transparent)) drop-shadow(0 0 9px color-mix(in oklab, var(--wire) 24%, transparent))"
+                : off
+                  ? "drop-shadow(0 0 1px color-mix(in oklab, var(--wire) 16%, transparent))"
+                  : "drop-shadow(0 0 2px color-mix(in oklab, var(--wire) 26%, transparent))"
               : "none",
       } as CSSProperties);
 
@@ -133,7 +142,7 @@ export function RWEdge({
         markerStart={markerStart}
         markerEnd={markerEnd}
         interactionWidth={interactionWidth ?? 20}
-        className={`rw-edge-main ${status} ${active ? "bool-on" : ""} ${doomed ? "doomed" : ""}`}
+        className={`rw-edge-main ${status} ${active ? "bool-on" : off ? "bool-off" : ""} ${doomed ? "doomed" : ""}`}
         style={pathStyle}
       />
       {active && <path className="rw-edge-flow" d={edgePath} pathLength={1} style={style} />}

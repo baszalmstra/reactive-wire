@@ -281,8 +281,8 @@
 .rw-connecting, .rw-connecting * { cursor: crosshair !important; }
 
 /* ── Wires ───────────────────────────────────────────────────────────────
-   Type is encoded by colour. Runtime status owns the line treatment, and a
-   boolean true carries a subtle travelling highlight along the line. */
+   Type is encoded by colour. Runtime status owns the line treatment; false
+   booleans are quieter, while true booleans carry a travelling glow. */
 .react-flow__edge { outline: none; }
 .rw-edge-halo {
   fill: none;
@@ -300,17 +300,22 @@
   filter: drop-shadow(0 0 2px color-mix(in oklab, var(--wire) 26%, transparent));
 }
 .rw-edge-main.bool-on {
-  stroke-width: 3.6;
-  filter: drop-shadow(0 0 3px color-mix(in oklab, var(--wire) 32%, transparent));
+  stroke-width: 3.8;
+  filter: drop-shadow(0 0 4px color-mix(in oklab, var(--wire) 54%, transparent)) drop-shadow(0 0 9px color-mix(in oklab, var(--wire) 24%, transparent));
+}
+.rw-edge-main.bool-off {
+  stroke-width: 3.25;
+  opacity: .86;
+  filter: drop-shadow(0 0 1px color-mix(in oklab, var(--wire) 16%, transparent));
 }
 .rw-edge-flow {
   fill: none;
-  stroke: color-mix(in oklab, var(--wire) 82%, white 18%);
-  stroke-width: 5.4;
+  stroke: color-mix(in oklab, var(--wire) 86%, white 14%);
+  stroke-width: 5.8;
   stroke-linecap: round;
-  stroke-dasharray: .12 .88;
-  opacity: .28;
-  filter: drop-shadow(0 0 5px color-mix(in oklab, var(--wire) 42%, transparent));
+  stroke-dasharray: .14 .86;
+  opacity: .36;
+  filter: drop-shadow(0 0 7px color-mix(in oklab, var(--wire) 50%, transparent));
   animation: rw-edge-flow 2.15s linear infinite;
   pointer-events: none;
 }
@@ -350,9 +355,19 @@
 .rw-edge-value.stale { border-style: dashed; color: var(--rw-faint); }
 .rw-edge-value.unavailable { border-style: dashed; color: var(--rw-faint); background: color-mix(in oklab, var(--rw-panel2) 78%, transparent); }
 .rw-edge-value.error { border-color: var(--rw-h-error); color: var(--rw-h-error); }
+.rw-edge-value.bool-true {
+  border-color: color-mix(in oklab, var(--wire) 68%, var(--rw-line));
+  box-shadow: 0 8px 18px -14px rgba(0, 0, 0, .55), 0 0 14px -8px color-mix(in oklab, var(--wire) 58%, transparent);
+}
+.rw-edge-value.bool-false {
+  border-color: color-mix(in oklab, var(--wire) 42%, var(--rw-line));
+  background: color-mix(in oklab, var(--rw-panel) 88%, transparent);
+  color: color-mix(in oklab, var(--rw-text) 74%, var(--rw-faint));
+}
 .rw-edge-swatch { width: 12px; height: 12px; border-radius: 4px; border: 1px solid var(--rw-line); flex: none; }
 .rw-edge-bool { width: 8px; height: 8px; border-radius: 50%; background: var(--rw-line); flex: none; }
-.rw-edge-bool.on { background: var(--rw-h-ok); box-shadow: 0 0 0 3px color-mix(in oklab, var(--rw-h-ok) 18%, transparent), 0 0 7px color-mix(in oklab, var(--rw-h-ok) 38%, transparent); }
+.rw-edge-bool.off { background: color-mix(in oklab, var(--wire) 58%, var(--rw-line)); box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--rw-panel) 70%, transparent); }
+.rw-edge-bool.on { background: var(--rw-h-ok); box-shadow: 0 0 0 3px color-mix(in oklab, var(--rw-h-ok) 22%, transparent), 0 0 9px color-mix(in oklab, var(--rw-h-ok) 50%, transparent); }
 @media (prefers-reduced-motion: reduce) {
   .rw-edge-flow { animation: none; opacity: .22; }
   .rw-edge-main.doomed { animation: none; }
