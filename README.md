@@ -1,8 +1,16 @@
+<p align="center">
+  <img src="./docs/assets/reactive-wire-logo.svg" alt="Reactive Wire — typed reactive automations for Home Assistant" width="760">
+</p>
+
 # Reactive Wire
 
 A node-based **reactive** automation system for Home Assistant. Instead of scripting
 transitions, you wire a typed graph where an entity's desired state is *derived* from the
 combined current state of other entities. Any input change re-derives the output.
+
+<p align="center">
+  <img src="./docs/assets/reactive-wire-screenshot.png" alt="Reactive Wire editor showing a typed Home Assistant automation graph" width="920">
+</p>
 
 See [DESIGN.md](./DESIGN.md) for the full design and rationale.
 

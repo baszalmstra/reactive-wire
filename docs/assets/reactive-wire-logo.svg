@@ -1,0 +1,111 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="920" height="240" viewBox="0 0 920 240" role="img" aria-labelledby="title desc">
+  <title id="title">Reactive Wire</title>
+  <desc id="desc">Logo for Reactive Wire: a typed node graph carrying colored reactive values into the Reactive Wire wordmark.</desc>
+  <defs>
+    <linearGradient id="panelLight" x1="0" y1="0" x2="920" y2="240" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#f3f6fb"/>
+    </linearGradient>
+    <linearGradient id="panelDark" x1="0" y1="0" x2="920" y2="240" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#20242d"/>
+      <stop offset="1" stop-color="#191c23"/>
+    </linearGradient>
+    <linearGradient id="wireGradient" x1="54" y1="74" x2="250" y2="146" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#4fc9bf"/>
+      <stop offset="0.45" stop-color="#6f8cff"/>
+      <stop offset="1" stop-color="#d86ee8"/>
+    </linearGradient>
+    <linearGradient id="wordGradient" x1="292" y1="0" x2="690" y2="0" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#4fc9bf"/>
+      <stop offset="0.55" stop-color="#7c8cff"/>
+      <stop offset="1" stop-color="#d86ee8"/>
+    </linearGradient>
+    <filter id="softShadow" x="-8%" y="-18%" width="116%" height="136%" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="14" stdDeviation="18" flood-color="#111827" flood-opacity="0.16"/>
+    </filter>
+    <filter id="wireGlow" x="-35%" y="-90%" width="170%" height="280%" color-interpolation-filters="sRGB">
+      <feGaussianBlur stdDeviation="3.4" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <style>
+      .panel { fill: url(#panelLight); stroke: #dce3ee; }
+      .canvas { fill: #f8fafc; stroke: #dfe6f0; }
+      .grid-dot { fill: #c8d1de; opacity: .72; }
+      .wire { fill: none; stroke-linecap: round; stroke-linejoin: round; }
+      .wire.back { stroke: #cfd7e4; stroke-width: 9; opacity: .64; }
+      .wire.main { stroke: url(#wireGradient); stroke-width: 4.8; filter: url(#wireGlow); }
+      .wire.stale { stroke: #a8b0bf; stroke-width: 3.2; stroke-dasharray: 10 8; opacity: .9; }
+      .node { stroke-width: 2.5; }
+      .node-shell { fill: #ffffff; stroke: #dbe3ee; }
+      .node-bool { fill: #4fc9bf; stroke: #319d96; }
+      .node-num { fill: #6f8cff; stroke: #4f6ed6; }
+      .node-str { fill: #d4b94f; stroke: #a98d2c; }
+      .node-out { fill: #d86ee8; stroke: #ad49bd; }
+      .spark { fill: #ffffff; opacity: .95; }
+      .wordmark { fill: #222837; font: 800 58px ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; letter-spacing: -1.8px; }
+      .wordmark .wire-word { fill: url(#wordGradient); }
+      .tagline { fill: #647084; font: 500 19px ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; letter-spacing: -.15px; }
+      .chip { fill: #eef3f9; stroke: #dbe4ef; }
+      .chip-text { fill: #586477; font: 700 13px ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; letter-spacing: .25px; }
+      @media (prefers-color-scheme: dark) {
+        .panel { fill: url(#panelDark); stroke: #333946; }
+        .canvas { fill: #242a34; stroke: #373f4d; }
+        .grid-dot { fill: #596273; opacity: .54; }
+        .wire.back { stroke: #3a4352; opacity: .8; }
+        .wire.stale { stroke: #788292; opacity: .74; }
+        .node-shell { fill: #1d222b; stroke: #3a4351; }
+        .wordmark { fill: #eef3f8; }
+        .tagline { fill: #a9b3c2; }
+        .chip { fill: #252c37; stroke: #3b4554; }
+        .chip-text { fill: #b9c3d1; }
+      }
+    </style>
+  </defs>
+
+  <rect class="panel" x="10" y="10" width="900" height="220" rx="36" filter="url(#softShadow)"/>
+
+  <g transform="translate(48 38)">
+    <rect class="canvas" x="0" y="0" width="188" height="164" rx="28"/>
+    <g>
+      <circle class="grid-dot" cx="28" cy="28" r="1.8"/><circle class="grid-dot" cx="62" cy="28" r="1.8"/><circle class="grid-dot" cx="96" cy="28" r="1.8"/><circle class="grid-dot" cx="130" cy="28" r="1.8"/><circle class="grid-dot" cx="164" cy="28" r="1.8"/>
+      <circle class="grid-dot" cx="28" cy="62" r="1.8"/><circle class="grid-dot" cx="62" cy="62" r="1.8"/><circle class="grid-dot" cx="96" cy="62" r="1.8"/><circle class="grid-dot" cx="130" cy="62" r="1.8"/><circle class="grid-dot" cx="164" cy="62" r="1.8"/>
+      <circle class="grid-dot" cx="28" cy="96" r="1.8"/><circle class="grid-dot" cx="62" cy="96" r="1.8"/><circle class="grid-dot" cx="96" cy="96" r="1.8"/><circle class="grid-dot" cx="130" cy="96" r="1.8"/><circle class="grid-dot" cx="164" cy="96" r="1.8"/>
+      <circle class="grid-dot" cx="28" cy="130" r="1.8"/><circle class="grid-dot" cx="62" cy="130" r="1.8"/><circle class="grid-dot" cx="96" cy="130" r="1.8"/><circle class="grid-dot" cx="130" cy="130" r="1.8"/><circle class="grid-dot" cx="164" cy="130" r="1.8"/>
+    </g>
+
+    <path class="wire back" d="M44 50 C76 50 83 73 112 73 C141 73 146 82 166 82"/>
+    <path class="wire back" d="M44 113 C78 113 82 92 112 92 C141 92 146 82 166 82"/>
+    <path class="wire main" d="M44 50 C76 50 83 73 112 73 C141 73 146 82 166 82"/>
+    <path class="wire main" d="M44 113 C78 113 82 92 112 92 C141 92 146 82 166 82"/>
+    <path class="wire stale" d="M55 140 C88 140 100 128 126 118"/>
+
+    <circle class="node node-shell" cx="44" cy="50" r="18"/>
+    <circle class="node node-bool" cx="44" cy="50" r="10"/>
+    <circle class="node node-shell" cx="44" cy="113" r="18"/>
+    <circle class="node node-num" cx="44" cy="113" r="10"/>
+    <rect class="node node-shell" x="96" y="62" width="38" height="38" rx="12"/>
+    <path d="M108 81h14m-7-7v14" stroke="#7c8cff" stroke-width="3" stroke-linecap="round"/>
+    <circle class="node node-shell" cx="166" cy="82" r="18"/>
+    <circle class="node node-out" cx="166" cy="82" r="10"/>
+
+    <circle class="spark" cx="83" cy="65" r="3.2"/>
+    <circle class="spark" cx="128" cy="78" r="2.6"/>
+    <circle class="spark" cx="91" cy="101" r="2.8"/>
+  </g>
+
+  <g transform="translate(278 72)">
+    <text class="wordmark" x="0" y="55">Reactive <tspan class="wire-word">Wire</tspan></text>
+    <text class="tagline" x="3" y="88">Typed reactive automations for Home Assistant</text>
+    <g transform="translate(3 112)">
+      <rect class="chip" x="0" y="0" width="101" height="28" rx="14"/>
+      <text class="chip-text" x="16" y="19">TYPE SAFE</text>
+      <rect class="chip" x="115" y="0" width="116" height="28" rx="14"/>
+      <text class="chip-text" x="131" y="19">LIVE PREVIEW</text>
+      <rect class="chip" x="245" y="0" width="104" height="28" rx="14"/>
+      <text class="chip-text" x="261" y="19">SAFE DEPLOY</text>
+    </g>
+  </g>
+</svg>
