@@ -9,7 +9,7 @@ LABEL \
   io.hass.type="addon" \
   io.hass.version="${BUILD_VERSION}"
 
-ENV PIXI_NO_PROGRESS=1
+ENV PIXI_NO_PROGRESS=true
 
 WORKDIR /app
 COPY app/pixi.toml app/pixi.lock ./
