@@ -3,11 +3,14 @@ name = "reactive-wire"
 version = "0.1.0"
 description = "Node-based reactive automation system for Home Assistant"
 channels = ["conda-forge"]
-platforms = ["win-64", "linux-64"]
+platforms = ["win-64", "linux-64", "linux-aarch64"]
 
 [dependencies]
 nodejs = ">=21,<23"
 playwright = "1.55.1.*"
+
+[feature.runtime.dependencies]
+nodejs = ">=21,<23"
 
 # ── Core (engine + server) ───────────────────────────────────────────────────
 [tasks]
@@ -73,3 +76,6 @@ depends-on = ["install", "fe-install"]
 
 [tasks.check]
 depends-on = ["typecheck", "test", "fe-typecheck"]
+
+[environments]
+runtime = { features = ["runtime"], no-default-feature = true }

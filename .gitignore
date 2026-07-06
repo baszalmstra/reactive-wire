@@ -11,6 +11,7 @@ node_modules/
 dist/
 storybook-static/
 build/
+/reactive_wire/app/
 test-results/
 playwright-report/
 *.log

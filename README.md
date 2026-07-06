@@ -75,18 +75,26 @@ through Supervisor Ingress, stores the editor document in `/data`, and uses the 
 Home Assistant API token instead of a long-lived token.
 
 Install it by adding this repository to **Settings → Add-ons → Add-on Store → ⋮ → Repositories**,
-then install and start **Reactive Wire**. For local development or before publishing a fresh checkout,
-prepare the add-on build context first:
+then install and start **Reactive Wire**. The add-on metadata points at a prebuilt multi-architecture
+GHCR image (`amd64` and `aarch64`); the image itself is built with Pixi from the checked-in
+`pixi.lock`.
+
+For local image development, generate the ignored Docker build context first:
 
 ```sh
 pixi run install-all
 pixi run addon-build
 ```
 
-The packaging step compiles the server and builds the editor with same-origin WebSocket support, then
-copies the runtime artifacts into `reactive_wire/app/` so Supervisor can build the add-on from that
-folder. After starting the add-on, open **Reactive Wire** from the Home Assistant sidebar. It still
-starts safe: nothing actuates until you press **Deploy** or enable auto-deploy.
+The packaging step compiles the server, builds the editor with same-origin WebSocket support, writes
+a runtime-only npm lockfile, and copies the Pixi manifest/lock plus runtime artifacts into
+`reactive_wire/app/`. After starting the add-on, open **Reactive Wire** from the Home Assistant
+sidebar. It still starts safe: nothing actuates until you press **Deploy** or enable auto-deploy.
+
+Release flow: run the **Prepare release PR** GitHub Action with the target semver and changelog
+notes. The generated PR bumps `package.json`, Pixi/add-on metadata, and the add-on changelog. When
+that PR lands on `main`, the **Release add-on image** workflow builds and pushes the multi-arch image,
+then tags the repository only after the image push succeeds.
 
 ## Running against Home Assistant manually
 

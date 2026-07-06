@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { cpSync, existsSync, mkdirSync, rmSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 
@@ -22,6 +22,35 @@ function copy(from, to) {
   cpSync(from, to, { recursive: true });
 }
 
+function readJson(path) {
+  return JSON.parse(readFileSync(path, "utf8"));
+}
+
+function writeJson(path, value) {
+  writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`);
+}
+
+function runtimePackage() {
+  const rootPackage = readJson(join(root, "package.json"));
+  const rootLock = readJson(join(root, "package-lock.json"));
+  const dependencies = {};
+  for (const name of Object.keys(rootPackage.dependencies ?? {}).sort()) {
+    const locked = rootLock.packages?.[`node_modules/${name}`]?.version;
+    dependencies[name] = locked ?? rootPackage.dependencies[name];
+  }
+  return {
+    name: rootPackage.name,
+    version: rootPackage.version,
+    description: rootPackage.description,
+    type: rootPackage.type,
+    private: true,
+    scripts: {
+      start: "node server/src/server/index.js",
+    },
+    dependencies,
+  };
+}
+
 rmSync(serverOut, { recursive: true, force: true });
 rmSync(addonApp, { recursive: true, force: true });
 mkdirSync(addonApp, { recursive: true });
@@ -35,8 +64,10 @@ run("npm", ["run", "build"], {
   },
 });
 
-copy(join(root, "package.json"), join(addonApp, "package.json"));
-copy(join(root, "package-lock.json"), join(addonApp, "package-lock.json"));
+writeJson(join(addonApp, "package.json"), runtimePackage());
+run("npm", ["install", "--package-lock-only", "--omit=dev", "--ignore-scripts", "--no-audit", "--no-fund"], { cwd: addonApp });
+copy(join(root, "pixi.toml"), join(addonApp, "pixi.toml"));
+copy(join(root, "pixi.lock"), join(addonApp, "pixi.lock"));
 copy(serverOut, join(addonApp, "server"));
 copy(join(root, "frontend", "dist"), join(addonApp, "frontend"));
 

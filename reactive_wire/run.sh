@@ -1,13 +1,27 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [ -f /usr/lib/bashio/bashio ]; then
-  # shellcheck disable=SC1091
-  . /usr/lib/bashio/bashio
-  LOG_LEVEL="$(bashio::config 'log_level')"
-else
-  LOG_LEVEL="${RW_LOG_LEVEL:-info}"
-fi
+read_option() {
+  local key="$1"
+  local fallback="$2"
+  if [ ! -f /data/options.json ]; then
+    printf '%s' "$fallback"
+    return
+  fi
+  node --input-type=module -e '
+    import { readFileSync } from "node:fs";
+    const [key, fallback] = process.argv.slice(1);
+    try {
+      const options = JSON.parse(readFileSync("/data/options.json", "utf8"));
+      const value = options?.[key];
+      process.stdout.write(typeof value === "string" && value.length ? value : fallback);
+    } catch {
+      process.stdout.write(fallback);
+    }
+  ' "$key" "$fallback"
+}
+
+LOG_LEVEL="$(read_option log_level "${RW_LOG_LEVEL:-info}")"
 
 export HA_URL="${HA_URL:-ws://supervisor/core/websocket}"
 export HA_TOKEN="${HA_TOKEN:-${SUPERVISOR_TOKEN:-}}"

@@ -1,0 +1,62 @@
+name: Prepare release PR
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Semver version to release, for example 0.2.0
+        required: true
+        type: string
+      release_notes:
+        description: Changelog bullet(s) for the release PR
+        required: false
+        type: string
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: prepare-release-${{ github.event.inputs.version }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: Prepare release PR
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up pixi
+        uses: prefix-dev/setup-pixi@v0.9.4
+        with:
+          pixi-version: v0.71.0
+          cache: true
+          locked: true
+
+      - name: Bump version metadata and changelog
+        env:
+          RELEASE_NOTES: ${{ github.event.inputs.release_notes }}
+        run: node scripts/prepare-release.mjs "${{ github.event.inputs.version }}"
+
+      - name: Validate release build context
+        run: pixi run --locked addon-build
+
+      - name: Run checks
+        run: pixi run --locked check
+
+      - name: Create release preparation PR
+        uses: peter-evans/create-pull-request@v7
+        with:
+          branch: release/v${{ github.event.inputs.version }}
+          title: Prepare release v${{ github.event.inputs.version }}
+          commit-message: Prepare release v${{ github.event.inputs.version }}
+          body: |
+            Prepares Reactive Wire v${{ github.event.inputs.version }}.
+
+            After this PR merges to `main`, the add-on image release workflow builds and pushes the multi-arch GHCR image, then tags the repository if the image push succeeds.
+          delete-branch: true

@@ -1,0 +1,132 @@
+name: Release add-on image
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/release-addon.yml
+      - package.json
+      - package-lock.json
+      - pixi.toml
+      - pixi.lock
+      - tsconfig.addon.json
+      - scripts/build-addon-context.mjs
+      - scripts/extract-release-notes.mjs
+      - src/**
+      - shared/**
+      - frontend/**
+      - reactive_wire/**
+      - '!reactive_wire/app/**'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  packages: write
+
+concurrency:
+  group: release-addon-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Build, push, and tag add-on image
+    runs-on: ubuntu-latest
+
+    env:
+      IMAGE_NAME: ghcr.io/baszalmstra/reactive-wire-addon
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Read release version
+        id: version
+        run: |
+          set -euo pipefail
+          VERSION=$(node - <<'NODE'
+          const fs = require('node:fs');
+          const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+          const cfg = fs.readFileSync('reactive_wire/config.yaml', 'utf8');
+          const addon = cfg.match(/^version: "([^"]+)"/m)?.[1];
+          if (!addon) throw new Error('reactive_wire/config.yaml has no version');
+          if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(addon)) throw new Error(`Add-on version ${addon} is not a Docker-tag-safe semver`);
+          if (pkg.version !== addon) throw new Error(`package.json (${pkg.version}) and add-on (${addon}) versions differ`);
+          process.stdout.write(addon);
+          NODE
+          )
+          TAG="v${VERSION}"
+          if git ls-remote --exit-code --tags origin "refs/tags/${TAG}" >/dev/null 2>&1; then
+            echo "tag_exists=true" >> "$GITHUB_OUTPUT"
+            echo "Tag ${TAG} already exists; skipping release."
+          else
+            echo "tag_exists=false" >> "$GITHUB_OUTPUT"
+          fi
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up pixi
+        if: steps.version.outputs.tag_exists == 'false'
+        uses: prefix-dev/setup-pixi@v0.9.4
+        with:
+          pixi-version: v0.71.0
+          cache: true
+          locked: true
+
+      - name: Run checks
+        if: steps.version.outputs.tag_exists == 'false'
+        run: pixi run --locked check
+
+      - name: Prepare add-on Docker build context
+        if: steps.version.outputs.tag_exists == 'false'
+        run: pixi run --locked addon-build
+
+      - name: Extract release notes
+        if: steps.version.outputs.tag_exists == 'false'
+        run: node scripts/extract-release-notes.mjs "${{ steps.version.outputs.version }}" /tmp/release-notes.md
+
+      - name: Set up QEMU
+        if: steps.version.outputs.tag_exists == 'false'
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        if: steps.version.outputs.tag_exists == 'false'
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        if: steps.version.outputs.tag_exists == 'false'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push multi-arch add-on image
+        if: steps.version.outputs.tag_exists == 'false'
+        uses: docker/build-push-action@v6
+        with:
+          context: reactive_wire
+          file: reactive_wire/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          build-args: |
+            BUILD_VERSION=${{ steps.version.outputs.version }}
+          tags: |
+            ${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }}
+            ${{ env.IMAGE_NAME }}:latest
+          labels: |
+            org.opencontainers.image.title=Reactive Wire Home Assistant add-on
+            org.opencontainers.image.description=Typed reactive automations for Home Assistant
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.version=${{ steps.version.outputs.version }}
+            org.opencontainers.image.revision=${{ github.sha }}
+
+      - name: Tag repository
+        if: steps.version.outputs.tag_exists == 'false'
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "${{ steps.version.outputs.tag }}" -F /tmp/release-notes.md
+          git push origin "${{ steps.version.outputs.tag }}"

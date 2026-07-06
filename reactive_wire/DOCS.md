@@ -1,6 +1,6 @@
 # Reactive Wire add-on
 
-Reactive Wire runs the existing Node backend inside Home Assistant and serves the editor through Supervisor Ingress. No long-lived Home Assistant token is required: the add-on uses the Supervisor-provided Home Assistant API token.
+Reactive Wire runs the existing Node backend inside Home Assistant and serves the editor through Supervisor Ingress. No long-lived Home Assistant token is required: the add-on uses the Supervisor-provided Home Assistant API token. Published installs pull a prebuilt GHCR image for `amd64` or `aarch64`; that image is built with Pixi from the repository lockfile.
 
 ## First start
 
