@@ -116,15 +116,9 @@ test.describe.serial("Graph building against the mock server", () => {
     await expect(notNode).toContainText("unavailable");
   });
 
-  // KNOWN APP BUG — undo does not remove a freshly added node. Adding a node checkpoints history,
-  // but pushHistory (frontend/src/state/use-undo-redo.ts) builds its snapshot lazily inside the
-  // setPast updater, reading nodesRef.current — which App.tsx has already reassigned to the
-  // post-add array by the time React runs the updater. So the "before" checkpoint captures the
-  // after-state, and Ctrl+Z restores a canvas that still contains the node (and disables Undo,
-  // its one checkpoint spent). Undo of a node DELETE works, because React Flow applies the removal
-  // in a later commit than onBeforeDelete's pushHistory. This test asserts the intended behavior
-  // and is marked fixme until the checkpoint is captured before the mutation.
-  test.fixme("undo and redo a node add", async ({ page }) => {
+  // Adding a node checkpoints the empty canvas before the add, so a single undo returns to empty
+  // and redo brings the node back.
+  test("undo and redo a node add", async ({ page }) => {
     await addNode(page, "Boolean");
     await expect(nodes(page)).toHaveCount(1);
 
@@ -135,16 +129,9 @@ test.describe.serial("Graph building against the mock server", () => {
     await expect(nodes(page)).toHaveCount(1);
   });
 
-  // KNOWN APP BUG (same root cause as "undo and redo a node add" above) — undoing a node deletion
-  // intermittently fails to bring the node and its wire back, leaving the already-deleted graph in
-  // place. The checkpoint is still on the stack (the Undo control stays enabled) but it captured the
-  // POST-delete graph, so undo restores nothing. It reproduces mid-suite (~1 in 3 runs) but never in
-  // isolation: a fresh server document leaves clearCanvas with nothing to delete, so the delete
-  // commit is uncontended and pushHistory happens to snapshot the pre-delete graph; under the busier
-  // mid-suite React commit the removal folds into the same commit as the checkpoint. This test
-  // asserts the intended behavior and is marked fixme until pushHistory captures its snapshot before
-  // the mutation rather than lazily during the following render.
-  test.fixme("undo restores a deleted node together with its wire", async ({ page }) => {
+  // Deleting a node checkpoints the graph before the removal, so a single undo brings back both the
+  // node and the wire that connected it regardless of how React batches the delete commit.
+  test("undo restores a deleted node together with its wire", async ({ page }) => {
     const boolNode = await addNode(page, "Boolean");
     await moveNodeTo(page, boolNode, LEFT.x, LEFT.y);
     const notNode = await addNode(page, "NOT");

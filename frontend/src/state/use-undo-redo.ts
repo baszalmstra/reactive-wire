@@ -28,31 +28,44 @@ export function useUndoRedo(options: {
   const canUndo = past.length > 0;
   const canRedo = future.length > 0;
 
-  // Record a checkpoint of the current canvas before a mutation, clearing the redo branch.
+  // Read the live canvas into a standalone snapshot. Copies the arrays so the entry keeps the
+  // membership it had at read time; the node/edge objects are treated as immutable elsewhere.
+  const snapshot = useCallback(
+    (): CanvasSnapshot => ({ nodes: [...nodesRef.current], edges: [...edgesRef.current] }),
+    [nodesRef, edgesRef],
+  );
+
+  // Record a checkpoint of the current canvas before a mutation, clearing the redo branch. The
+  // snapshot is taken eagerly here, while the refs still point at the pre-mutation arrays; a
+  // setPast updater would instead run during the mutating render, after nodesRef/edgesRef have
+  // been reassigned to the post-mutation arrays, and would capture the wrong state.
   const pushHistory = useCallback(() => {
-    setPast((p) => [...p.slice(-40), { nodes: nodesRef.current, edges: edgesRef.current }]);
+    const before = snapshot();
+    setPast((p) => [...p.slice(-40), before]);
     setFuture([]);
-  }, [nodesRef, edgesRef]);
+  }, [snapshot]);
   const undo = useCallback(() => {
+    const current = snapshot();
     setPast((p) => {
       if (!p.length) return p;
       const prev = p[p.length - 1];
-      setFuture((f) => [{ nodes: nodesRef.current, edges: edgesRef.current }, ...f]);
+      setFuture((f) => [current, ...f]);
       setNodes(prev.nodes);
       setEdges(prev.edges);
       return p.slice(0, -1);
     });
-  }, [nodesRef, edgesRef, setNodes, setEdges]);
+  }, [snapshot, setNodes, setEdges]);
   const redo = useCallback(() => {
+    const current = snapshot();
     setFuture((f) => {
       if (!f.length) return f;
       const next = f[0];
-      setPast((p) => [...p, { nodes: nodesRef.current, edges: edgesRef.current }]);
+      setPast((p) => [...p, current]);
       setNodes(next.nodes);
       setEdges(next.edges);
       return f.slice(1);
     });
-  }, [nodesRef, edgesRef, setNodes, setEdges]);
+  }, [snapshot, setNodes, setEdges]);
 
   // React Flow's own Delete/Backspace handler removes selected nodes and edges by feeding "remove"
   // changes into the stores. Checkpoint the canvas here, before those changes land, so the deletion
