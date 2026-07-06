@@ -1,13 +1,7 @@
-/** A snapshot of one Home Assistant entity. */
-export interface EntityState {
-  readonly entity_id: string;
-  readonly state: string;
-  readonly attributes: Readonly<Record<string, unknown>>;
-  /** Epoch milliseconds when the state last changed, if Home Assistant reported it. */
-  readonly last_changed?: number;
-  /** Epoch milliseconds when the entity was last updated, if Home Assistant reported it. */
-  readonly last_updated?: number;
-}
+// The engine and the streaming feed share one entity-state shape (keyed by entity id in the
+// snapshot map), so the HA layer produces that canonical type directly rather than a parallel one.
+import type { EntityState } from "../../shared/entities.js";
+export type { EntityState };
 
 // The actuation call shape is owned by the engine, the single source of truth for what a
 // sink wants to do; re-export it here so the HA layer and the engine agree on one type.

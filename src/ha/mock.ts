@@ -1,5 +1,3 @@
-import { type Cell, cell } from "../reactive.js";
-import { ok, unavailable, type Value } from "../value.js";
 import { type EntityFeed, type EntityState, type HAClient, type ServiceCall } from "./client.js";
 
 /**
@@ -7,30 +5,16 @@ import { type EntityFeed, type EntityState, type HAClient, type ServiceCall } fr
  * service calls are recorded rather than executed so tests can assert on them.
  */
 export class MockHA implements HAClient, EntityFeed {
-  private readonly entities = new Map<string, Cell<Value<EntityState>>>();
+  private readonly entities = new Map<string, EntityState>();
   private readonly listeners = new Set<() => void>();
   readonly calls: ServiceCall[] = [];
-
-  private cellFor(entityId: string): Cell<Value<EntityState>> {
-    let c = this.entities.get(entityId);
-    if (!c) {
-      c = cell<Value<EntityState>>(unavailable());
-      this.entities.set(entityId, c);
-    }
-    return c;
-  }
 
   callService(call: ServiceCall): void {
     this.calls.push(call);
   }
 
   entitiesSnapshot(): Record<string, EntityState> {
-    const out: Record<string, EntityState> = {};
-    for (const [id, c] of this.entities) {
-      const v = c.get();
-      if (v.kind === "ok") out[id] = v.value;
-    }
-    return out;
+    return Object.fromEntries(this.entities);
   }
 
   onEntities(cb: () => void): () => void {
@@ -40,13 +24,13 @@ export class MockHA implements HAClient, EntityFeed {
 
   /** Set an entity's state and attributes, as if Home Assistant reported a change. */
   setState(entityId: string, state: string, attributes: Record<string, unknown> = {}): void {
-    this.cellFor(entityId).set(ok({ entity_id: entityId, state, attributes }));
+    this.entities.set(entityId, { state, attributes });
     this.listeners.forEach((cb) => cb());
   }
 
   /** Remove an entity entirely, as if it were deleted from Home Assistant. */
   remove(entityId: string): void {
-    this.cellFor(entityId).set(unavailable());
+    this.entities.delete(entityId);
     this.listeners.forEach((cb) => cb());
   }
 

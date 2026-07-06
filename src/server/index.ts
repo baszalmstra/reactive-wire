@@ -5,6 +5,7 @@ import { type EntityFeed, type HAClient } from "../ha/client.js";
 import { startFeed } from "./feed.js";
 import { startSimulator } from "./sim.js";
 import { Deployer } from "./runtime.js";
+import { DurableMemoryStore } from "./durable-memory.js";
 import { EditorDocumentStore } from "./doc-store.js";
 import { AutoDeployController } from "./collab-deploy-adapter.js";
 
@@ -53,7 +54,8 @@ if (url && token) {
 // No graph runs until the editor deploys one. Sinks actuate only on deploy (an explicit act),
 // so just launching the server can't change anything. Async data-source nodes fetch over HTTP
 // using the platform fetch, driven by the deployer's poller after a graph is deployed.
-const deployer = new Deployer(ha, 1000, (url) => fetch(url));
+const durableMemory = new DurableMemoryStore({ dataDir });
+const deployer = new Deployer(ha, 1000, (url) => fetch(url), durableMemory);
 const documentStore = new EditorDocumentStore({ dataDir });
 
 const autoDeploy = new AutoDeployController((graph) => deployer.deploy(graph.nodes, graph.edges, true, graph.macros ?? {}));

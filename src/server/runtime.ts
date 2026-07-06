@@ -10,6 +10,19 @@ import { Poller, type FetchFn } from "./poller.js";
 const noFetch: FetchFn = () => Promise.reject(new Error("no fetch configured"));
 
 /**
+ * Persistence for the memory slots of nodes declaring the "durable" state policy: restored into a
+ * fresh memory on deploy and captured after each tick, so accumulated history survives a restart.
+ */
+export interface DurableMemory {
+  /** Seed durable slots into a freshly cleared memory for the given graph. */
+  restore(nodes: NodeData[], mem: Memory): void;
+  /** Record the current durable slots after a recompute. */
+  capture(nodes: NodeData[], mem: Memory): void;
+  /** Flush any pending write and release resources. */
+  stop(): void;
+}
+
+/**
  * Runs a deployed graph with the same engine the editor previews with: on every entity
  * change it re-evaluates and reconciles each sink, calling a service whenever the actual
  * state differs from the desired state. Sinks whose command input is not a concrete value are skipped, so an offline
@@ -33,6 +46,7 @@ export class Deployer {
     private readonly ha: HAClient & EntityFeed,
     tickMs = 1000,
     fetchFn: FetchFn = noFetch,
+    private readonly durable?: DurableMemory,
   ) {
     ha.onEntities(() => this.run());
     this.poller = new Poller(fetchFn, () => this.run());
@@ -56,6 +70,9 @@ export class Deployer {
     this.graph = { nodes: flat.nodes, edges: flat.edges };
     this.actuate = actuate;
     this.mem = {};
+    // Durable slots are restored before the first run so an accumulated fold/scan resumes from its
+    // persisted history rather than reseeding; stale slots for departed nodes are dropped here.
+    this.durable?.restore(flat.nodes, this.mem);
     this.poller.start(flat.nodes);
     this.run();
   }
@@ -67,12 +84,16 @@ export class Deployer {
     this.lastNonReconciling.clear();
     clearInterval(this.tick);
     this.poller.stop();
+    this.durable?.stop();
   }
 
   private run(): void {
     if (!this.graph) return;
-    const entities = this.ha.entitiesSnapshot() as unknown as EntityMap;
+    const entities: EntityMap = this.ha.entitiesSnapshot();
     const results = evaluate(this.graph.nodes, this.graph.edges, entities, this.mem, Date.now(), this.poller.sources());
+    // The evaluate above mutated durable nodes' slots in place; persist them (debounced) so the
+    // latest accumulated history is on disk before any restart.
+    this.durable?.capture(this.graph.nodes, this.mem);
     const byId = new Map(this.graph.nodes.map((n) => [n.id, n]));
     const generation = this.generation;
     for (const { nodeId, call } of sinkCalls(this.graph.nodes, results)) {

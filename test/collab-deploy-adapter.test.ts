@@ -1,8 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { CollabNode, EditorDocumentSnapshot } from "../shared/collab.js";
 import type { NodeData } from "../shared/node-types.js";
 import { AutoDeployController, graphFromEditorSnapshot } from "../src/server/collab-deploy-adapter.js";
 import type { DeployRequest } from "../src/server/deploy-validation.js";
+import { Deployer } from "../src/server/runtime.js";
+import { MockHA } from "../src/ha/mock.js";
 
 function def(id: string): NodeData {
   return {
@@ -20,6 +22,16 @@ function def(id: string): NodeData {
 
 function rw(id: string): CollabNode {
   return { id, type: "rw", position: { x: 0, y: 0 }, data: { def: def(id) } };
+}
+
+/** A collab node whose def carries no input/output arrays, as an unfinished editor node can. */
+function partialRw(id: string): CollabNode {
+  return { id, type: "rw", position: { x: 0, y: 0 }, data: { def: { id, type: "const-number" } } };
+}
+
+/** A collab node whose def has an invalid input field the sanitizer must reject. */
+function invalidRw(id: string): CollabNode {
+  return { id, type: "rw", position: { x: 0, y: 0 }, data: { def: { id, type: "const-number", inputs: "nope" } } };
 }
 
 function comment(id: string): CollabNode {
@@ -81,5 +93,51 @@ describe("collab deploy adapter", () => {
     controller.maybeDeploy(snapshot({ settings: { autoDeploy: false, deployFlowId: "flow-a" } }));
     expect(controller.maybeDeploy(enabled)).toEqual({ ok: true, unsupported: [] });
     expect(deployed).toHaveLength(2);
+  });
+
+  it("auto-deploys a node whose def omits input/output arrays without crashing the runtime tick", () => {
+    const ha = new MockHA();
+    const deployer = new Deployer(ha, 100_000);
+    const controller = new AutoDeployController((graph) => deployer.deploy(graph.nodes, graph.edges, true, graph.macros ?? {}));
+    const snap = snapshot({
+      flows: [{ id: "flow-a", name: "A", nodes: [partialRw("a")], edges: [] }],
+      settings: { autoDeploy: true, deployFlowId: "flow-a" },
+    });
+
+    // Before the fix this def reached evaluate() with `inputs`/`outputs` undefined and threw inside
+    // the deployer's run(); the sanitization gate now fills them so the deploy and tick are safe.
+    expect(() => controller.maybeDeploy(snap)).not.toThrow();
+    deployer.stop();
+  });
+
+  it("skips and logs an invalid def instead of deploying it", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const deployed: DeployRequest[] = [];
+    const controller = new AutoDeployController((graph) => deployed.push(graph));
+    const snap = snapshot({
+      flows: [{ id: "flow-a", name: "A", nodes: [invalidRw("a")], edges: [] }],
+      settings: { autoDeploy: true, deployFlowId: "flow-a" },
+    });
+
+    const result = controller.maybeDeploy(snap);
+    expect(result?.ok).toBe(false);
+    expect(deployed).toHaveLength(0);
+    expect(warn).toHaveBeenCalledOnce();
+    warn.mockRestore();
+  });
+
+  it("warns only once while a document stays invalid", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const controller = new AutoDeployController(() => {});
+    const snap = snapshot({
+      flows: [{ id: "flow-a", name: "A", nodes: [invalidRw("a")], edges: [] }],
+      settings: { autoDeploy: true, deployFlowId: "flow-a" },
+    });
+
+    controller.maybeDeploy(snap);
+    controller.maybeDeploy(snap);
+    controller.maybeDeploy(snap);
+    expect(warn).toHaveBeenCalledOnce();
+    warn.mockRestore();
   });
 });

@@ -2,7 +2,7 @@ import type { ViewEdge } from "../../shared/engine/evaluate.js";
 import type { MacroMap } from "../../shared/macros.js";
 import type { NodeData } from "../../shared/node-types.js";
 import type { CollabEdge, CollabNode, EditorDocumentSnapshot } from "../../shared/collab.js";
-import type { DeployRequest } from "./deploy-validation.js";
+import { sanitizeDeployRequest, type DeployRequest } from "./deploy-validation.js";
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);
@@ -44,8 +44,23 @@ export class AutoDeployController {
       this.lastSignature = "";
       return;
     }
-    const graph = graphFromEditorSnapshot(snapshot);
-    if (!graph) return { ok: false, unsupported: [], error: "No flow is available to auto-deploy" };
+    const raw = graphFromEditorSnapshot(snapshot);
+    if (!raw) return { ok: false, unsupported: [], error: "No flow is available to auto-deploy" };
+    // A collaborative snapshot can carry node defs the editor never fully populated (missing or
+    // malformed input/output arrays). Pass them through the same gate the WebSocket deploy path
+    // uses so a bad def is rejected here instead of throwing inside the engine's tick.
+    const validated = sanitizeDeployRequest(raw);
+    if (!validated.ok) {
+      // Record the failed document's signature so a doc that stays invalid warns only once, not on
+      // every subsequent editor change; a later valid or differently-invalid doc warns afresh.
+      const signature = JSON.stringify({ flowId: snapshot.settings.deployFlowId, invalid: raw });
+      if (signature !== this.lastSignature) {
+        this.lastSignature = signature;
+        console.warn(`Skipping auto-deploy of an invalid graph: ${validated.error}`);
+      }
+      return { ok: false, unsupported: [], error: validated.error };
+    }
+    const graph = validated.graph;
     const signature = JSON.stringify({ flowId: snapshot.settings.deployFlowId, nodes: graph.nodes, edges: graph.edges, macros: graph.macros ?? {} });
     if (signature === this.lastSignature) return;
     this.lastSignature = signature;
