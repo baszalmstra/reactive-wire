@@ -7,7 +7,7 @@ import { base } from "./template-base.js";
  * so an offline input doesn't fire an edge. `edge` fires on any change, `rising` on false→true,
  * `falling` on true→false.
  */
-function evalTransition(kind: "edge" | "rising" | "falling", { n, inVal, mem }: EvalCtx) {
+function evalTransition(kind: "edge" | "rising" | "falling", { inVal, mem }: EvalCtx) {
   const v = inVal("in");
   const m = mem();
   if (m.seeded === undefined) m.seeded = true;

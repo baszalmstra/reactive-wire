@@ -1,4 +1,4 @@
-import { isMacroInstance, newMacroId, type MacroDef, type MacroMap } from "../../../shared/macros.js";
+import { isMacroInstance, newMacroId, type MacroMap } from "../../../shared/macros.js";
 
 /** A self-contained macro bundle: the macro plus every macro it transitively depends on. */
 export interface MacroBundle {

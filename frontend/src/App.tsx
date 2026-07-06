@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent } from "react";
-import * as Y from "yjs";
 import {
   ReactFlow,
   Background,
@@ -32,16 +31,8 @@ import { PALETTE, growVariadic, type NodeTemplate, type RequiredConfig } from ".
 import { ResultsProvider } from "./canvas/results-context.js";
 import { connectionReason, connectionValid, edgeStyle, type RWNodeType } from "./canvas/validation.js";
 import { CommentNode } from "./canvas/CommentNode.js";
-import { CommentCtx, type CommentOps } from "./canvas/comments-context.js";
-import {
-  COMMENT_COLOR_KEYS,
-  nodeCenterInside,
-  resizeFrame,
-  type CommentColor,
-  type CommentData,
-  type CommentNodeType,
-  type ResizeDir,
-} from "./canvas/comments.js";
+import { CommentCtx } from "./canvas/comments-context.js";
+import { type CommentNodeType } from "./canvas/comments.js";
 import { MobileBar } from "./components/MobileBar.js";
 import { useIsMobile } from "./use-is-mobile.js";
 import { useMacros } from "./canvas/use-macros.js";
@@ -58,23 +49,14 @@ import { DeployGuard } from "./components/DeployGuard.js";
 import { StatusPill, deriveStatus } from "./components/StatusPill.js";
 import { FlowTabs } from "./components/FlowTabs.js";
 import { Icon } from "./components/Icon.js";
-import { emptyFlow, type EditorNode, type Flow } from "./canvas/flows.js";
+import { type EditorNode } from "./canvas/flows.js";
 import { useValueHistory } from "./canvas/use-value-history.js";
 import { syncMacroInstances } from "./canvas/macro-editing.js";
 import type { EvalResults } from "../../shared/results.js";
-import {
-  DEFAULT_MAX_DOC_STATE_BYTES,
-  applyEditorSnapshotDiff,
-  decodeUpdateBase64,
-  snapshotFromEditorDoc,
-  type EditorDocumentSnapshot,
-} from "../../shared/collab.js";
-import {
-  editorSnapshotHasUserContent,
-  editorSnapshotsEqual,
-  snapshotFromWorkingState,
-  workingStateFromSnapshot,
-} from "./state/editor-document.js";
+import { useUndoRedo } from "./state/use-undo-redo.js";
+import { useFlows } from "./state/use-flows.js";
+import { useCollabDocument } from "./state/use-collab-document.js";
+import { useCommentFrames } from "./state/use-comment-frames.js";
 
 const nodeTypes = { rw: RWNode, comment: CommentNode };
 const DEFAULT_AESTHETIC: Aesthetic = "ide";
@@ -99,8 +81,6 @@ function staleResults(r: EvalResults): EvalResults {
 }
 
 const emptyResults = (): EvalResults => ({ outputs: {}, inputs: {}, health: {}, actions: {}, connected: {}, sinks: {} });
-const collabServerOrigin = { source: "server" };
-const collabLocalOrigin = { source: "local" };
 
 function withInitialSize(node: EditorNode): EditorNode {
   if (node.type === "rw") {
@@ -131,12 +111,10 @@ export function App() {
   const [mode, setMode] = useState<Mode>("dark");
   const [nodes, setNodes, onNodesChange] = useNodesState<EditorNode>(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
-  // The document holds several independent flows; the live node/edge stores above are the active
-  // flow's working copy. Switching tabs stashes the working copy back into its flow and loads the
-  // next one. Inactive flows keep their nodes/edges here.
-  const [flows, setFlows] = useState<Flow[]>(() => [{ ...emptyFlow("Flow 1"), nodes: initialNodes, edges: initialEdges }]);
-  const [activeFlowId, setActiveFlowId] = useState(() => flows[0].id);
-  const flowTabs = useMemo(() => flows.map((f) => ({ id: f.id, name: f.name })), [flows]);
+  const nodesRef = useRef(nodes);
+  nodesRef.current = nodes;
+  const edgesRef = useRef(edges);
+  edgesRef.current = edges;
   // Graph nodes only — comment frames live in the same store but are filtered out of evaluation.
   const rwNodes = useMemo(() => nodes.filter(isRWNode), [nodes]);
   const [selected, setSelected] = useState<string | null>(null);
@@ -156,12 +134,33 @@ export function App() {
   const [navOpen, setNavOpen] = useState(false);
   const [sheetOpen, setSheetOpen] = useState(false);
 
-  // Undo/redo over canvas snapshots. A checkpoint captures nodes + edges before a mutation.
-  type Snapshot = { nodes: EditorNode[]; edges: Edge[] };
-  const [past, setPast] = useState<Snapshot[]>([]);
-  const [future, setFuture] = useState<Snapshot[]>([]);
-  const canUndo = past.length > 0;
-  const canRedo = future.length > 0;
+  const clientId = useRef(globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2, 10));
+  // Stateful-node memory is kept per flow so identical node ids in different flows never share state.
+  // It is advanced from a committed effect, not during React render, so StrictMode/aborted
+  // renders cannot consume edge pulses or toggle transitions.
+  const memories = useRef<Record<string, Memory>>({});
+
+  const { canUndo, canRedo, pushHistory, undo, redo, onBeforeDelete, setPast, setFuture } = useUndoRedo({
+    nodesRef,
+    edgesRef,
+    setNodes,
+    setEdges,
+  });
+
+  // The document holds several independent flows; the live node/edge stores above are the active
+  // flow's working copy. Switching tabs stashes the working copy back into its flow and loads the
+  // next one. Inactive flows keep their nodes/edges inside the hook.
+  const { flows, setFlows, activeFlowId, setActiveFlowId, flowTabs, switchFlow, addFlow, renameFlow, closeFlow } = useFlows({
+    nodesRef,
+    edgesRef,
+    setNodes,
+    setEdges,
+    setSelected,
+    setSelectedIds,
+    setPast,
+    setFuture,
+    memories,
+  });
 
   // Offline simulated entities, used when not connected to the server's live feed.
   const [simEntities, setSimEntities] = useState<EntityMap>(() => simulate(0));
@@ -175,17 +174,6 @@ export function App() {
   }, []);
 
   const server = useServer();
-  const collabDoc = useRef(new Y.Doc());
-  const collabReady = useRef(false);
-  const applyingCollab = useRef(false);
-  const lastCollabSnapshot = useRef<EditorDocumentSnapshot | null>(null);
-  const appliedDocStateNonce = useRef<number | null>(null);
-  const appliedDocUpdateNonce = useRef<number | null>(null);
-  const clientId = useRef(globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2, 10));
-  // Stateful-node memory is kept per flow so identical node ids in different flows never share state.
-  // It is advanced from a committed effect, not during React render, so StrictMode/aborted
-  // renders cannot consume edge pulses or toggle transitions.
-  const memories = useRef<Record<string, Memory>>({});
   const hasSeenServer = server.connected || lastSync !== null;
   const entities = server.connected ? server.entities : hasSeenServer ? server.entities : simEntities;
   const paletteTemplates = PALETTE;
@@ -255,210 +243,30 @@ export function App() {
   // The graph is actuating the home only when connected and either auto-deploying or freshly deployed.
   const actuating = (autoDeploy || liveDeployed) && server.connected;
 
-  const nodesRef = useRef(nodes);
-  nodesRef.current = nodes;
-  const edgesRef = useRef(edges);
-  edgesRef.current = edges;
   const deploy = server.deploy;
 
-  const localDocumentSnapshot = useCallback((): EditorDocumentSnapshot => snapshotFromWorkingState({
+  useCollabDocument({
+    server,
     flows,
+    setFlows,
     activeFlowId,
-    activeNodes: nodesRef.current,
-    activeEdges: edgesRef.current,
+    setActiveFlowId,
+    nodes,
+    edges,
+    nodesRef,
+    edgesRef,
     macros: macroLib.macros,
+    replaceMacros: macroLib.replace,
     autoDeploy,
-  }), [activeFlowId, autoDeploy, flows, macroLib.macros]);
-
-  const applyRemoteDocumentSnapshot = useCallback((snapshot: EditorDocumentSnapshot) => {
-    applyingCollab.current = true;
-    const applied = workingStateFromSnapshot(snapshot, activeFlowId);
-    setFlows(applied.flows);
-    setActiveFlowId(applied.activeFlowId);
-    setNodes(applied.activeNodes);
-    setEdges(applied.activeEdges);
-    macroLib.replace(applied.macros);
-    setAutoDeploy(applied.autoDeploy);
-    setSelected((id) => (id && applied.activeNodes.some((node) => node.id === id) ? id : null));
-    setSelectedIds((ids) => ids.filter((id) => applied.activeNodes.some((node) => node.id === id)));
-    setPast([]);
-    setFuture([]);
-    queueMicrotask(() => {
-      applyingCollab.current = false;
-    });
-  }, [activeFlowId, macroLib.replace, setEdges, setNodes]);
-
-  const flushLocalDocumentToCollab = useCallback((allowBeforeReady = false) => {
-    if ((!allowBeforeReady && !collabReady.current) || applyingCollab.current) return;
-    const next = localDocumentSnapshot();
-    if (allowBeforeReady && !collabReady.current && !editorSnapshotHasUserContent(next)) return;
-    if (editorSnapshotsEqual(lastCollabSnapshot.current, next)) return;
-    const previous = lastCollabSnapshot.current ?? snapshotFromEditorDoc(collabDoc.current);
-    applyEditorSnapshotDiff(collabDoc.current, previous, next, collabLocalOrigin);
-    lastCollabSnapshot.current = snapshotFromEditorDoc(collabDoc.current);
-  }, [localDocumentSnapshot]);
-
-  const sendLocalUpdatesMissingFromServerState = useCallback((serverState: Uint8Array) => {
-    const serverDoc = new Y.Doc();
-    Y.applyUpdate(serverDoc, serverState);
-    const missing = Y.encodeStateAsUpdate(collabDoc.current, Y.encodeStateVector(serverDoc));
-    // Yjs encodes an empty diff as [0, 0]. Anything larger contains local/offline edits the
-    // server has not seen yet, so upload it after reconnecting instead of silently diverging.
-    if (missing.length > 2) server.sendDocUpdate(missing);
-    serverDoc.destroy();
-  }, [server.sendDocUpdate]);
-
-  useEffect(() => {
-    const doc = collabDoc.current;
-    const onUpdate = (update: Uint8Array, origin: unknown) => {
-      if (origin === collabServerOrigin || !collabReady.current) return;
-      server.sendDocUpdate(update);
-    };
-    doc.on("update", onUpdate);
-    return () => doc.off("update", onUpdate);
-  }, [server.sendDocUpdate]);
-
-  useEffect(() => {
-    if (!server.docState || appliedDocStateNonce.current === server.docState.nonce) return;
-    appliedDocStateNonce.current = server.docState.nonce;
-    try {
-      flushLocalDocumentToCollab(true);
-      const update = decodeUpdateBase64(server.docState.update, DEFAULT_MAX_DOC_STATE_BYTES);
-      Y.applyUpdate(collabDoc.current, update, collabServerOrigin);
-      sendLocalUpdatesMissingFromServerState(update);
-      const snapshot = snapshotFromEditorDoc(collabDoc.current);
-      lastCollabSnapshot.current = snapshot;
-      collabReady.current = true;
-      applyRemoteDocumentSnapshot(snapshot);
-    } catch (err) {
-      showToast(`Document sync failed: ${err instanceof Error ? err.message : String(err)}`, "error");
-    }
-  }, [server.docState, applyRemoteDocumentSnapshot, flushLocalDocumentToCollab, sendLocalUpdatesMissingFromServerState, showToast]);
-
-  useEffect(() => {
-    if (!server.docUpdate || appliedDocUpdateNonce.current === server.docUpdate.nonce) return;
-    appliedDocUpdateNonce.current = server.docUpdate.nonce;
-    try {
-      // Preserve any local edit waiting in the debounce window before rendering the remote update;
-      // otherwise a remote packet can replace unsent local React state and cause data loss.
-      flushLocalDocumentToCollab();
-      Y.applyUpdate(collabDoc.current, decodeUpdateBase64(server.docUpdate.update), collabServerOrigin);
-      const snapshot = snapshotFromEditorDoc(collabDoc.current);
-      lastCollabSnapshot.current = snapshot;
-      applyRemoteDocumentSnapshot(snapshot);
-    } catch (err) {
-      showToast(`Document sync failed: ${err instanceof Error ? err.message : String(err)}`, "error");
-    }
-  }, [server.docUpdate, applyRemoteDocumentSnapshot, flushLocalDocumentToCollab, showToast]);
-
-  useEffect(() => {
-    if (!server.docError) return;
-    showToast(`Document sync failed: ${server.docError}`, "error");
-  }, [server.docError, showToast]);
-
-  useEffect(() => {
-    if (!collabReady.current || applyingCollab.current) return;
-    const timer = setTimeout(() => flushLocalDocumentToCollab(), 180);
-    return () => clearTimeout(timer);
-  }, [nodes, edges, flows, activeFlowId, macroLib.macros, flushLocalDocumentToCollab]);
-
-  // Record a checkpoint of the current canvas before a mutation, clearing the redo branch.
-  const pushHistory = useCallback(() => {
-    setPast((p) => [...p.slice(-40), { nodes: nodesRef.current, edges: edgesRef.current }]);
-    setFuture([]);
-  }, []);
-  const undo = useCallback(() => {
-    setPast((p) => {
-      if (!p.length) return p;
-      const prev = p[p.length - 1];
-      setFuture((f) => [{ nodes: nodesRef.current, edges: edgesRef.current }, ...f]);
-      setNodes(prev.nodes);
-      setEdges(prev.edges);
-      return p.slice(0, -1);
-    });
-  }, [setNodes, setEdges]);
-  const redo = useCallback(() => {
-    setFuture((f) => {
-      if (!f.length) return f;
-      const next = f[0];
-      setPast((p) => [...p, { nodes: nodesRef.current, edges: edgesRef.current }]);
-      setNodes(next.nodes);
-      setEdges(next.edges);
-      return f.slice(1);
-    });
-  }, [setNodes, setEdges]);
-
-  // React Flow's own Delete/Backspace handler removes selected nodes and edges by feeding "remove"
-  // changes into the stores. Checkpoint the canvas here, before those changes land, so the deletion
-  // is undoable. Returning true lets the deletion proceed unchanged.
-  const onBeforeDelete = useCallback(async () => {
-    pushHistory();
-    return true;
-  }, [pushHistory]);
-
-  // ── Flows (tabs) ────────────────────────────────────────────────────────────
-  // Switch to another flow: stash the active working store into its flow entry, then load the
-  // target flow's nodes and edges into the working store. Undo history is per session, not per
-  // flow, so it is cleared on switch to avoid restoring a snapshot into the wrong flow.
-  const switchFlow = useCallback(
-    (id: string) => {
-      if (id === activeFlowId) return;
-      setFlows((fs) => {
-        const target = fs.find((f) => f.id === id);
-        if (!target) return fs;
-        const stashed = fs.map((f) => (f.id === activeFlowId ? { ...f, nodes: nodesRef.current, edges: edgesRef.current } : f));
-        setNodes(target.nodes);
-        setEdges(target.edges);
-        return stashed;
-      });
-      setActiveFlowId(id);
-      setSelected(null);
-      setSelectedIds([]);
-      setPast([]);
-      setFuture([]);
-    },
-    [activeFlowId, setNodes, setEdges],
-  );
-
-  const addFlow = useCallback(() => {
-    const f = emptyFlow(`Flow ${flows.length + 1}`);
-    setFlows((fs) => fs.map((x) => (x.id === activeFlowId ? { ...x, nodes: nodesRef.current, edges: edgesRef.current } : x)).concat(f));
-    setNodes([]);
-    setEdges([]);
-    setActiveFlowId(f.id);
-    setSelected(null);
-    setSelectedIds([]);
-    setPast([]);
-    setFuture([]);
-  }, [flows.length, activeFlowId, setNodes, setEdges]);
-
-  const renameFlow = useCallback((id: string, name: string) => {
-    setFlows((fs) => fs.map((f) => (f.id === id ? { ...f, name } : f)));
-  }, []);
-
-  const closeFlow = useCallback(
-    (id: string) => {
-      setFlows((fs) => {
-        if (fs.length <= 1) return fs;
-        const idx = fs.findIndex((f) => f.id === id);
-        const rest = fs.filter((f) => f.id !== id);
-        delete memories.current[id];
-        // When closing the active flow, fall to a neighbour and load its store.
-        if (id === activeFlowId) {
-          const next = rest[Math.max(0, idx - 1)];
-          setNodes(next.nodes);
-          setEdges(next.edges);
-          setActiveFlowId(next.id);
-          setSelected(null);
-          setSelectedIds([]);
-          setPast([]);
-          setFuture([]);
-        }
-        return rest;
-      });
-    },
-    [activeFlowId, setNodes, setEdges],
-  );
+    setAutoDeploy,
+    setNodes,
+    setEdges,
+    setSelected,
+    setSelectedIds,
+    setPast,
+    setFuture,
+    showToast,
+  });
 
   // Signature of the deployable graph: structure + config + wiring, ignoring node positions.
   // Changes only on meaningful edits — not on entity-feed re-renders or node drags.
@@ -746,119 +554,16 @@ export function App() {
     setConnectColor(TYPE_VAR[pin?.type ?? "any"]);
   }, []);
 
-  // ── Comment frames ──────────────────────────────────────────────────────────
-  const updateComment = useCallback(
-    (id: string, patch: Partial<CommentData>) => {
-      pushHistory();
-      setNodes((ns) => ns.map((n) => (n.id === id && isCommentNode(n) ? { ...n, data: { ...n.data, ...patch } } : n)));
-    },
-    [setNodes, pushHistory],
-  );
-  const deleteComment = useCallback(
-    (id: string) => {
-      pushHistory();
-      setNodes((ns) => ns.filter((n) => n.id !== id));
-    },
-    [setNodes, pushHistory],
-  );
-
-  // A resize handle drags a frame edge or corner in flow space; the matching opposite edge stays put.
-  const resizeState = useRef<{ id: string; dir: ResizeDir; start: { x: number; y: number; w: number; h: number }; px: number; py: number } | null>(null);
-  const onResizeStart = useCallback(
-    (id: string, dir: ResizeDir, e: React.PointerEvent) => {
-      const node = nodesRef.current.find((n) => n.id === id);
-      if (!node || !isCommentNode(node)) return;
-      pushHistory();
-      resizeState.current = { id, dir, start: { x: node.position.x, y: node.position.y, w: node.data.w, h: node.data.h }, px: e.clientX, py: e.clientY };
-      const zoom = rf.current?.getZoom() ?? 1;
-      const onMove = (ev: PointerEvent) => {
-        const s = resizeState.current;
-        if (!s) return;
-        const dx = (ev.clientX - s.px) / zoom;
-        const dy = (ev.clientY - s.py) / zoom;
-        const r = resizeFrame(s.start, s.dir, dx, dy);
-        setNodes((ns) => ns.map((n) => (n.id === s.id && isCommentNode(n) ? { ...n, position: { x: r.x, y: r.y }, data: { ...n.data, w: r.w, h: r.h } } : n)));
-      };
-      const onUp = () => {
-        resizeState.current = null;
-        window.removeEventListener("pointermove", onMove);
-        window.removeEventListener("pointerup", onUp);
-      };
-      window.addEventListener("pointermove", onMove);
-      window.addEventListener("pointerup", onUp);
-    },
-    [setNodes, pushHistory],
-  );
-
-  const commentOps: CommentOps = useMemo(
-    () => ({
-      onRename: (id, title) => updateComment(id, { title }),
-      onRecolor: (id, color: CommentColor) => updateComment(id, { color }),
-      onDelete: deleteComment,
-      onResizeStart,
-    }),
-    [updateComment, deleteComment, onResizeStart],
-  );
-
-  // Add a frame around the selected node (if any), else at the centre of the current view.
-  const cmtc = useRef(0);
-  const addComment = useCallback(() => {
-    pushHistory();
-    cmtc.current += 1;
-    const id = `comment-${clientId.current}-${cmtc.current}`;
-    const sel = nodesRef.current.find((n) => n.id === selected && isRWNode(n)) as RWNodeType | undefined;
-    let position: { x: number; y: number };
-    let data: CommentData;
-    const color = COMMENT_COLOR_KEYS[cmtc.current % COMMENT_COLOR_KEYS.length];
-    if (sel) {
-      const g = nodeGeom(sel.data.def);
-      const pad = 38;
-      position = { x: sel.position.x - pad, y: sel.position.y - pad - 8 };
-      data = { title: "Comment", color, w: g.w + pad * 2, h: g.h + pad * 2 + 8 };
-    } else {
-      const center = rf.current?.screenToFlowPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 }) ?? { x: 0, y: 0 };
-      position = { x: Math.round(center.x - 170), y: Math.round(center.y - 110) };
-      data = { title: "Comment", color, w: 340, h: 220 };
-    }
-    // A low z-index keeps the frame behind the graph nodes it groups.
-    setNodes((ns) => ns.concat(withInitialSize({ id, type: "comment", position, dragHandle: ".rw-drag", zIndex: 0, data } as EditorNode)));
-    setSelected(id);
-    setNodes((ns) => ns.map((n) => ({ ...n, selected: n.id === id })));
-    showToast("Comment added — drag its bar to move the group", "info");
-  }, [selected, setNodes, showToast, pushHistory]);
-
-  // Dragging a comment bar carries the nodes whose centre sits inside the frame at drag start.
-  const dragCarry = useRef<{ id: string; sx: number; sy: number; members: { id: string; x: number; y: number }[] } | null>(null);
-  const onNodeDragStart = useCallback(
-    (_e: unknown, node: EditorNode) => {
-      // One checkpoint for the whole drag gesture.
-      pushHistory();
-      if (!isCommentNode(node)) return;
-      const frame = { x: node.position.x, y: node.position.y, w: node.data.w, h: node.data.h };
-      const members = nodesRef.current
-        .filter((n): n is RWNodeType => isRWNode(n) && nodeCenterInside(n, frame))
-        .map((n) => ({ id: n.id, x: n.position.x, y: n.position.y }));
-      dragCarry.current = { id: node.id, sx: node.position.x, sy: node.position.y, members };
-    },
-    [pushHistory],
-  );
-  const onNodeDrag = useCallback(
-    (_e: unknown, node: EditorNode) => {
-      const carry = dragCarry.current;
-      if (!carry || carry.id !== node.id) return;
-      const dx = node.position.x - carry.sx;
-      const dy = node.position.y - carry.sy;
-      const byId = new Map(carry.members.map((m) => [m.id, m]));
-      setNodes((ns) => ns.map((n) => {
-        const m = byId.get(n.id);
-        return m ? { ...n, position: { x: m.x + dx, y: m.y + dy } } : n;
-      }));
-    },
-    [setNodes],
-  );
-  const onNodeDragStop = useCallback(() => {
-    dragCarry.current = null;
-  }, []);
+  const { commentOps, addComment, onNodeDragStart, onNodeDrag, onNodeDragStop } = useCommentFrames({
+    nodesRef,
+    setNodes,
+    setSelected,
+    pushHistory,
+    selected,
+    showToast,
+    rf,
+    clientId,
+  });
 
   // Keyboard shortcuts: undo/redo and add-comment, ignored while typing in a field.
   useEffect(() => {

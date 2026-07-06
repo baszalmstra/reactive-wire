@@ -5,8 +5,11 @@ canvas running the canonical graph with live values) plus a Storybook component 
 
 **Styling is Tailwind v4.** The design's OKLCH tokens (from the Claude Design handoff) are
 registered in `@theme` in `src/index.css`, referencing the runtime `--rw-*` variables that
-`src/theme.ts` sets per aesthetic × mode — so utility classes like `bg-rw-node` /
+`../shared/theme.ts` sets per aesthetic × mode — so utility classes like `bg-rw-node` /
 `text-rw-text` follow the active theme. Three aesthetics (IDE / Blueprint / Warm) × light/dark.
+
+Typefaces are self-hosted (no CDN): Hanken Grotesk for the UI and IBM Plex Mono for values
+and identifiers, pulled in from `@fontsource` in `src/main.tsx`.
 
 ## Commands
 
@@ -32,17 +35,22 @@ by the theme decorator.
   Handles `any` (unresolved), `ghost` (missing attribute), variadic, and hot-target states.
 - `Badges` — `HealthDot` (ok / warn / error) and `MemBadge` (has internal state).
 - `Widgets` — `ColorWidget` (inline color picker) and `SinkPanel` (dry-run vs live).
-- `NodeView` — a complete node assembled from the above, driven by resolved pin values.
 
 ## Layout
 
 ```
 src/
+  App.tsx             editor shell; wires the toolbar, canvas, and inspector together
+  main.tsx            app entry; loads fonts + index.css and mounts <App>
+  index.css           Tailwind v4 setup, @theme tokens, and component styles
+  canvas/             React Flow nodes, inspector, palette, macros, validation
+  components/         presentational components + a *.stories.tsx per component
+  state/              editor-document, collab, undo/redo, flows, and comment-frame hooks
+  example/            seed graph and the offline entity simulation
+../shared/            model code shared with the server:
   theme.ts            design tokens; buildThemeVars(aesthetic, mode)
   value.ts            view-side value model + formatting
   node-types.ts       node/pin data model and geometry
   results.ts          resolved pin values + per-node health
-  styles/editor.css   ported component stylesheet
-  components/         components + a *.stories.tsx per component
 .storybook/           Storybook config + theme decorator
 ```
