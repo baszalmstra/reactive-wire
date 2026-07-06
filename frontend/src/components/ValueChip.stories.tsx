@@ -1,6 +1,8 @@
+import { useState } from "react";
 import type { Meta, StoryObj } from "@storybook/react";
 import { ValueChip } from "./ValueChip.js";
-import { V, UN, ER, ST } from "../../../shared/value.js";
+import { PinValueEditor } from "./Widgets.js";
+import { parseEntityValue, V, UN, ER, ST } from "../../../shared/value.js";
 
 const meta: Meta<typeof ValueChip> = {
   title: "Nodes/ValueChip",
@@ -27,6 +29,35 @@ export const AllTypes: Story = {
       <ValueChip value={V("datetime", Date.UTC(2026, 5, 15, 12, 3, 0))} />
     </Row>
   ),
+};
+
+export const Durations: Story = {
+  render: () => {
+    const [literal, setLiteral] = useState<unknown>({ count: 9.8, unit: "min" });
+    const value = parseEntityValue(literal, "duration");
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+        <div style={{ color: "var(--rw-faint)", fontSize: 12, maxWidth: 520 }}>
+          Duration chips avoid fractional larger units. A value like 9.8 minutes is shown as a compact compound duration.
+        </div>
+        <Row>
+          <ValueChip value={V("duration", 588)} />
+          <span style={{ color: "var(--rw-dim)", fontSize: 11 }}>588s → 9 min 48 s</span>
+        </Row>
+        <Row>
+          <ValueChip value={V("duration", 90)} />
+          <ValueChip value={V("duration", 5400)} />
+          <ValueChip value={V("duration", 172800)} />
+          <ValueChip value={V("duration", 0.25)} />
+        </Row>
+        <div style={{ display: "grid", gridTemplateColumns: "120px minmax(220px, 320px) auto", gap: 10, alignItems: "center" }}>
+          <span style={{ color: "var(--rw-faint)", fontSize: 11 }}>constant editor</span>
+          <PinValueEditor value={literal} type="duration" onChange={setLiteral} />
+          <ValueChip value={value} />
+        </div>
+      </div>
+    );
+  },
 };
 
 export const NonOkStates: Story = {

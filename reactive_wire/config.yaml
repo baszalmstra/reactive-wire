@@ -1,5 +1,5 @@
 name: Reactive Wire
-version: "0.1.0"
+version: "0.2.0"
 slug: reactive_wire
 description: Typed reactive automations for Home Assistant
 url: https://github.com/baszalmstra/reactive-wire
