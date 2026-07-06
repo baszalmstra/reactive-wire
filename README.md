@@ -59,7 +59,28 @@ pixi run fe-typecheck    # type-check the editor
 pixi run fe-dev          # Vite dev server
 ```
 
-## Running against Home Assistant
+## Home Assistant add-on
+
+For Home Assistant OS/Supervised installs, the preferred deployment is the add-on in
+[`reactive_wire/`](./reactive_wire). It runs the existing Node backend, serves the built editor
+through Supervisor Ingress, stores the editor document in `/data`, and uses the Supervisor-provided
+Home Assistant API token instead of a long-lived token.
+
+Install it by adding this repository to **Settings → Add-ons → Add-on Store → ⋮ → Repositories**,
+then install and start **Reactive Wire**. For local development or before publishing a fresh checkout,
+prepare the add-on build context first:
+
+```sh
+pixi run install-all
+pixi run addon-build
+```
+
+The packaging step compiles the server and builds the editor with same-origin WebSocket support, then
+copies the runtime artifacts into `reactive_wire/app/` so Supervisor can build the add-on from that
+folder. After starting the add-on, open **Reactive Wire** from the Home Assistant sidebar. It still
+starts safe: nothing actuates until you press **Deploy** or enable auto-deploy.
+
+## Running against Home Assistant manually
 
 Copy `.env.example` to `.env` and fill in your instance URL and a long-lived access token:
 

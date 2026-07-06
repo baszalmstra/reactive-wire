@@ -83,4 +83,8 @@ describe("deploy WebSocket connection guards", () => {
     expect(rejected?.status).toBe(401);
     expect(rejected?.message).toContain("RW_DEPLOY_TOKEN");
   });
+
+  it("can trust Home Assistant ingress as the external auth boundary", () => {
+    expect(validateConnection(req("homeassistant.local", "https://homeassistant.local"), { host: "0.0.0.0", trustedIngress: true })).toBeNull();
+  });
 });

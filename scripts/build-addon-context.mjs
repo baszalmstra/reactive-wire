@@ -26,7 +26,7 @@ rmSync(serverOut, { recursive: true, force: true });
 rmSync(addonApp, { recursive: true, force: true });
 mkdirSync(addonApp, { recursive: true });
 
-run("npx", ["tsc", "-p", "tsconfig.addon.json"]);
+run("npx", ["--no-install", "tsc", "-p", "tsconfig.addon.json"]);
 run("npm", ["run", "build"], {
   cwd: join(root, "frontend"),
   env: {

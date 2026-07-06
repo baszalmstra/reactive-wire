@@ -3,6 +3,7 @@ import {
   createLongLivedTokenAuth,
   subscribeEntities,
   callService as haCallService,
+  type Auth,
   type Connection,
   type HassEntities,
   type HassEntity,
@@ -16,6 +17,17 @@ import { type EntityFeed, type EntityState, type HAClient, type ServiceCall } fr
  *
  * Requires a global WebSocket implementation, which Node provides natively from v21.
  */
+function authFor(url: string, token: string): Auth {
+  const trimmed = url.replace(/\/$/, "");
+  if (!trimmed.startsWith("ws://") && !trimmed.startsWith("wss://")) return createLongLivedTokenAuth(trimmed, token);
+  return {
+    get wsUrl() { return trimmed; },
+    get accessToken() { return token; },
+    get expired() { return false; },
+    refreshAccessToken: async () => {},
+  } as unknown as Auth;
+}
+
 export class RealHA implements HAClient, EntityFeed {
   private latest = new Map<string, EntityState>();
   private lastRaw = new Map<string, HassEntity>();
@@ -24,7 +36,7 @@ export class RealHA implements HAClient, EntityFeed {
   private constructor(private readonly connection: Connection) {}
 
   static async connect(url: string, token: string): Promise<RealHA> {
-    const auth = createLongLivedTokenAuth(url, token);
+    const auth = authFor(url, token);
     const connection = await createConnection({ auth });
     const ha = new RealHA(connection);
     subscribeEntities(connection, (entities) => ha.apply(entities));

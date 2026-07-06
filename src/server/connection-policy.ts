@@ -11,6 +11,8 @@ export interface ConnectionPolicyOptions {
   allowedOrigins?: string[];
   /** Optional deploy/control token; when set, clients must provide it as a `token` query parameter. */
   deployToken?: string;
+  /** Trust an upstream Home Assistant/Supervisor ingress proxy as the auth boundary. */
+  trustedIngress?: boolean;
 }
 
 function header(req: IncomingMessage, name: string): string {
@@ -47,6 +49,7 @@ export function isLoopbackHost(host: string | null): boolean {
 }
 
 function isAllowedHost(req: IncomingMessage, options: ConnectionPolicyOptions): boolean {
+  if (options.trustedIngress) return true;
   const host = hostName(header(req, "host"));
   const allowed = (options.allowedHosts ?? []).map((h) => normalizeAllowedHost(h));
   return allowed.includes("*") || isLoopbackHost(host) || (host ? allowed.includes(host) : false);
@@ -57,6 +60,7 @@ function normalizeOrigin(origin: string): string {
 }
 
 function isAllowedOrigin(req: IncomingMessage, options: ConnectionPolicyOptions): boolean {
+  if (options.trustedIngress) return true;
   const origin = header(req, "origin");
   if (!origin) return true;
   const host = hostName(header(req, "host"));
@@ -93,7 +97,7 @@ export function tokenMatches(provided: string | null | undefined, expected: stri
 
 export function validateConnection(req: IncomingMessage, options: ConnectionPolicyOptions): { status: number; message: string } | null {
   const bindHost = normalizeAllowedHost(options.host ?? "127.0.0.1");
-  if (!options.deployToken && !isLoopbackHost(bindHost)) {
+  if (!options.deployToken && !options.trustedIngress && !isLoopbackHost(bindHost)) {
     return { status: 401, message: "RW_DEPLOY_TOKEN is required when binding outside loopback" };
   }
   if (!isAllowedHost(req, options)) return { status: 403, message: "WebSocket Host is not allowed" };

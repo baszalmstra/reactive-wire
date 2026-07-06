@@ -1,0 +1,23 @@
+name: Reactive Wire
+version: "0.1.0"
+slug: reactive_wire
+description: Typed reactive automations for Home Assistant
+url: https://github.com/baszalmstra/reactive-wire
+arch:
+  - aarch64
+  - amd64
+  - armv7
+startup: application
+boot: auto
+init: false
+ingress: true
+ingress_port: 7420
+ingress_stream: true
+panel_icon: mdi:graph-outline
+panel_title: Reactive Wire
+homeassistant_api: true
+stage: experimental
+options:
+  log_level: info
+schema:
+  log_level: list(debug|info|warn|error)

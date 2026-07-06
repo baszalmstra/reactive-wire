@@ -63,6 +63,10 @@ cmd = "npm run build"
 cwd = "frontend"
 depends-on = ["fe-install"]
 
+[tasks.addon-build]
+cmd = "npm run addon:build"
+depends-on = ["install", "fe-install"]
+
 # ── Aggregates ────────────────────────────────────────────────────────────────
 [tasks.install-all]
 depends-on = ["install", "fe-install"]

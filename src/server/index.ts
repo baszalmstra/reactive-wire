@@ -24,6 +24,8 @@ const listEnv = (name: string): string[] | undefined => {
 const allowedHosts = listEnv("RW_ALLOWED_HOSTS");
 const allowedOrigins = listEnv("RW_ALLOWED_ORIGINS");
 const dataDir = process.env.RW_DATA_DIR?.trim() || ".rw-data";
+const staticDir = process.env.RW_STATIC_DIR?.trim() || undefined;
+const trustedIngress = /^(1|true|yes)$/i.test(process.env.RW_TRUSTED_INGRESS?.trim() ?? "");
 
 let ha: HAClient & EntityFeed;
 let stopSim = () => {};
@@ -61,7 +63,7 @@ const documentStore = new EditorDocumentStore({ dataDir });
 
 const autoDeploy = new AutoDeployController((graph) => deployer.deploy(graph.nodes, graph.edges, true, graph.macros ?? {}));
 
-const stopFeed = startFeed(ha, { port, host, allowedHosts, allowedOrigins, deployToken }, {
+const stopFeed = startFeed(ha, { port, host, allowedHosts, allowedOrigins, deployToken, staticDir, trustedIngress }, {
   onDeploy: (req) => {
     deployer.deploy(req.nodes, req.edges, true, req.macros ?? {});
     return { ok: true, unsupported: [] };
@@ -75,6 +77,8 @@ autoDeploy.maybeDeploy(documentStore.snapshot());
 
 log("info", "server", "listening", { url: `ws://${host}:${port}` });
 if (deployToken) log("info", "server", "deploy/control WebSocket requires RW_DEPLOY_TOKEN");
+if (trustedIngress && !deployToken) log("info", "server", "trusting upstream ingress authentication for deploy/control WebSocket");
+if (staticDir) log("info", "server", "serving editor frontend", { path: staticDir });
 log("info", "server", "collaborative editor document persistence", { path: documentStore.filePath });
 log("info", "server", "no graph deployed yet — build one in the editor and Deploy to actuate Home Assistant");
 

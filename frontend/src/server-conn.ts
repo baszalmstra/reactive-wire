@@ -33,8 +33,26 @@ export interface Server {
   sendDocUpdate: (update: Uint8Array) => boolean;
 }
 
-const DEFAULT_URL = (import.meta.env.VITE_RW_WS as string | undefined) ?? "ws://127.0.0.1:7420";
-const DEPLOY_TOKEN = (import.meta.env.VITE_RW_DEPLOY_TOKEN as string | undefined)?.trim() || "";
+function runtimeParam(name: string): string | undefined {
+  if (typeof window === "undefined") return undefined;
+  const searchValue = new URLSearchParams(window.location.search).get(name)?.trim();
+  if (searchValue) return searchValue;
+  const hash = window.location.hash.startsWith("#") ? window.location.hash.slice(1) : window.location.hash;
+  return new URLSearchParams(hash).get(name)?.trim() || undefined;
+}
+
+function sameOriginWsUrl(): string | undefined {
+  if (typeof window === "undefined" || import.meta.env.VITE_RW_SAME_ORIGIN !== "1") return undefined;
+  if (window.location.protocol !== "http:" && window.location.protocol !== "https:") return undefined;
+  const url = new URL(window.location.href);
+  url.protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+  url.hash = "";
+  url.search = "";
+  return url.toString();
+}
+
+const DEFAULT_URL = runtimeParam("rw_ws") ?? (import.meta.env.VITE_RW_WS as string | undefined) ?? sameOriginWsUrl() ?? "ws://127.0.0.1:7420";
+const DEPLOY_TOKEN = runtimeParam("rw_token") ?? (import.meta.env.VITE_RW_DEPLOY_TOKEN as string | undefined)?.trim() ?? "";
 
 function encodeUpdateBase64(update: Uint8Array): string {
   let binary = "";
