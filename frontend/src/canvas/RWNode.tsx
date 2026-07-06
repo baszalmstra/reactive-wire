@@ -1,13 +1,13 @@
 import { useEffect } from "react";
 import { Handle, Position, useUpdateNodeInternals, type NodeProps } from "@xyflow/react";
 import { nodeGeom } from "../../../shared/node-types.js";
-import { TYPE_VAR } from "../../../shared/theme.js";
 import { cn } from "../cn.js";
 import { Icon } from "../components/Icon.js";
 import { DeviceClassIcon } from "../components/DeviceClassIcon.js";
 import { HealthDot, MemBadge } from "../components/Badges.js";
 import { ValueChip } from "../components/ValueChip.js";
 import { DirSelect, LightGlyph, OpSelect, PinValueEditor, SinkPanel, UnitSelect } from "../components/Widgets.js";
+import { portTone } from "../components/port-style.js";
 import { useResults } from "./results-context.js";
 import type { PinDef } from "../../../shared/node-types.js";
 import type { RWNodeType } from "./validation.js";
@@ -18,8 +18,8 @@ const ROW = 28;
 const pinTop = (i: number) => HEADER + PAD_T + ROW * i + ROW / 2;
 
 // The visual dot inside the (larger, transparent) handle hit area.
-function knobClass(pin: PinDef): string {
-  return cn("rw-knob", pin.type === "any" && !pin.ghost && "rw-knob-any", pin.ghost && "rw-knob-ghost");
+function knobClass(pin: PinDef, toneClass: string): string {
+  return cn("rw-knob", toneClass, pin.type === "any" && !pin.ghost && "rw-knob-any", pin.ghost && "rw-knob-ghost");
 }
 
 /** A graph node rendered on the React Flow canvas, with a Handle per typed pin. */
@@ -60,30 +60,36 @@ export function RWNode({ id, data, selected }: NodeProps<RWNodeType>) {
       // value chips (capped) so long labels or values are never clipped.
       style={{ width: "max-content", minWidth: g.w, maxWidth: g.w + 160 }}
     >
-      {def.inputs.map((p, i) => (
-        <Handle
-          key={`in-${p.id}`}
-          type="target"
-          position={Position.Left}
-          id={p.id}
-          className="rw-port"
-          style={{ top: pinTop(i), ["--tc" as string]: p.ghost ? "var(--rw-h-error)" : TYPE_VAR[p.type] }}
-        >
-          <span className={knobClass(p)} />
-        </Handle>
-      ))}
-      {def.outputs.map((p, i) => (
-        <Handle
-          key={`out-${p.id}`}
-          type="source"
-          position={Position.Right}
-          id={p.id}
-          className="rw-port"
-          style={{ top: pinTop(i), ["--tc" as string]: p.ghost ? "var(--rw-h-error)" : TYPE_VAR[p.type] }}
-        >
-          <span className={knobClass(p)} />
-        </Handle>
-      ))}
+      {def.inputs.map((p, i) => {
+        const tone = portTone(p, results.inputs[`${id}:${p.id}`]);
+        return (
+          <Handle
+            key={`in-${p.id}`}
+            type="target"
+            position={Position.Left}
+            id={p.id}
+            className="rw-port"
+            style={{ top: pinTop(i), ["--tc" as string]: tone.color }}
+          >
+            <span className={knobClass(p, tone.className)} />
+          </Handle>
+        );
+      })}
+      {def.outputs.map((p, i) => {
+        const tone = portTone(p, results.outputs[`${id}:${p.id}`]);
+        return (
+          <Handle
+            key={`out-${p.id}`}
+            type="source"
+            position={Position.Right}
+            id={p.id}
+            className="rw-port"
+            style={{ top: pinTop(i), ["--tc" as string]: tone.color }}
+          >
+            <span className={knobClass(p, tone.className)} />
+          </Handle>
+        );
+      })}
 
       <div
         className={cn(

@@ -53,6 +53,14 @@
 @keyframes rw-dash { to { stroke-dashoffset: -14.5; } }
 @keyframes rw-edge-flow { to { stroke-dashoffset: -1; } }
 @keyframes rw-edge-doomed { to { stroke-dashoffset: -12; } }
+@keyframes rw-port-pulse {
+  0%, 100% { opacity: .26; transform: scale(.92); }
+  50% { opacity: .62; transform: scale(1.38); }
+}
+@keyframes rw-port-glow {
+  0%, 100% { box-shadow: 0 0 0 1px var(--tc), 0 0 0 4px color-mix(in oklab, var(--tc) 24%, transparent), 0 0 10px color-mix(in oklab, var(--tc) 52%, transparent); }
+  50% { box-shadow: 0 0 0 1px var(--tc), 0 0 0 5px color-mix(in oklab, var(--tc) 32%, transparent), 0 0 15px color-mix(in oklab, var(--tc) 68%, transparent); }
+}
 @keyframes rw-toast-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
 
 .rw-grid-dots {
@@ -271,10 +279,35 @@
   box-shadow: 0 0 0 1px var(--tc);
   pointer-events: none;
 }
+.rw-port-bool-on {
+  animation: rw-port-glow 1.8s ease-in-out infinite;
+}
+.rw-port-bool-on::after {
+  content: "";
+  position: absolute;
+  inset: -5px;
+  border-radius: inherit;
+  border: 1px solid color-mix(in oklab, var(--tc) 72%, transparent);
+  animation: rw-port-pulse 1.8s ease-in-out infinite;
+  pointer-events: none;
+}
+.rw-port-bool-off {
+  opacity: .86;
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--tc) 82%, transparent);
+}
 .rw-knob-any { background: var(--rw-canvas); border: 2px dashed var(--rw-t-any); box-shadow: none; }
 .rw-knob-ghost { background: var(--rw-canvas); border: 2px dashed var(--rw-h-error); box-shadow: none; }
 .react-flow__handle.rw-port:hover .rw-knob {
   box-shadow: 0 0 0 1px var(--tc), 0 0 0 5px color-mix(in oklab, var(--tc) 28%, transparent);
+}
+.react-flow__handle.rw-port:hover .rw-knob.rw-port-bool-on,
+.rw-pin-knob.rw-port-bool-on:hover {
+  box-shadow: 0 0 0 1px var(--tc), 0 0 0 5px color-mix(in oklab, var(--tc) 36%, transparent), 0 0 16px color-mix(in oklab, var(--tc) 72%, transparent);
+}
+.react-flow__handle.rw-port:hover .rw-knob.rw-port-bool-off,
+.rw-pin-knob.rw-port-bool-off:hover {
+  opacity: .9;
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--tc) 88%, transparent), 0 0 0 4px color-mix(in oklab, var(--tc) 16%, transparent);
 }
 
 /* While dragging an edge, keep the connect cursor everywhere (don't flip to node-grab). */
@@ -371,6 +404,8 @@
 @media (prefers-reduced-motion: reduce) {
   .rw-edge-flow { animation: none; opacity: .22; }
   .rw-edge-main.doomed { animation: none; }
+  .rw-port-bool-on { animation: none; }
+  .rw-port-bool-on::after { animation: none; opacity: .26; transform: scale(1.1); }
 }
 
 /* The rubber-band selection box drawn while drag-selecting on the pane. */

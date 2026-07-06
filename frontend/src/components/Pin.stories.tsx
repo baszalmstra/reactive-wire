@@ -41,6 +41,7 @@ export const Outputs: Story = {
     <NodeBox>
       <Pin side="out" nodeId="n" pin={{ id: "e", label: "elevation", type: "num", unit: "°" }} value={V("num", -4.2)} />
       <Pin side="out" nodeId="n" pin={{ id: "s", label: "sun is down", type: "bool" }} value={V("bool", true)} />
+      <Pin side="out" nodeId="n" pin={{ id: "m", label: "motion", type: "bool" }} value={V("bool", false)} />
       <Pin side="out" nodeId="n" pin={{ id: "c", label: "color", type: "color" }} value={V("color", "#ff3b30")} />
     </NodeBox>
   ),
