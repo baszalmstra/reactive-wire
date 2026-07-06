@@ -10,8 +10,8 @@ import { debugState, nodeOfType, onlySink, queryServer, stateToBool } from "./de
  * end to end, not just that the editor rendered a result.
  *
  * Wiring mechanics (pin-drag) are owned by a sibling spec; per the task's latitude to keep wiring
- * minimal, the actuating graph here uses the Light sink's editable `on` command input (default
- * false) rather than dragging a wire. light.bedroom is seeded "on" by the simulator and the MockHA
+ * minimal, the actuating graph here uses the Light sink's editable `on` command input set explicitly
+ * to off rather than dragging a wire. light.bedroom is seeded "on" by the simulator and the MockHA
  * records service calls without mutating state, so the sink deterministically and stably wants to
  * turn it off — a fixed target for the cross-layer assertions.
  */
@@ -33,6 +33,12 @@ async function addLightSink(page: Page, lightId: string): Promise<void> {
   await page.getByRole("option", { name: new RegExp(lightId.replace(/\./g, "\\.")) }).click();
   await page.getByRole("button", { name: "Add" }).click();
   await expect(page.getByText("Choose light entity", { exact: true })).toHaveCount(0);
+}
+
+async function setLightCommand(page: Page, value: "off" | "on"): Promise<void> {
+  const sink = page.locator(".react-flow__node", { hasText: "Light · reconciling sink" }).last();
+  await expect(sink).toBeVisible();
+  await sink.getByRole("button", { name: value }).click();
 }
 
 /** Push the current graph through the deploy guard and wait for the UI to flip to LIVE. */
@@ -70,6 +76,7 @@ test.describe.serial("Deploy depth: cross-layer against server debugState", () =
   test("deploys an actuating graph and the server runtime reflects it end to end", async ({ page }) => {
     await addEntity(page, "binary_sensor.room_presence");
     await addLightSink(page, "light.bedroom");
+    await setLightCommand(page, "off");
 
     const deployGroup = page.locator(".rw-deploy-group");
     await expect(deployGroup).toContainText("DRAFT");
@@ -95,9 +102,9 @@ test.describe.serial("Deploy depth: cross-layer against server debugState", () =
     expect(stateOut.type).toBe("bool");
     expect(typeof stateOut.value).toBe("boolean");
 
-    // The reconciling Light sink wants to turn light.bedroom off (its command input defaults to off
-    // while the light is on) — a real desired ServiceCall. Its health is not in error; the optional
-    // color/brightness inputs are simply unset.
+    // The reconciling Light sink wants to turn light.bedroom off (its command input is explicitly
+    // set to off while the light is on) — a real desired ServiceCall. Its health is not in error;
+    // the optional color/brightness inputs are simply unset.
     const sinkNode = nodeOfType(debug, "sink-light");
     expect(sinkNode, "a sink-light node should be present in the server's deployed graph").toBeDefined();
     expect(sinkNode!.health).not.toBe("error");

@@ -18,7 +18,7 @@ import type { NodeData } from "../../../shared/node-types.js";
 import { RWNode } from "./RWNode.js";
 import { Palette } from "./Palette.js";
 import { ResultsProvider } from "./results-context.js";
-import { connectionValid, edgeStyle, type RWNodeType } from "./validation.js";
+import { connectionValid, type RWNodeType } from "./validation.js";
 import { PALETTE, growVariadic, type NodeTemplate } from "./node-templates.js";
 import { boundaryTemplates } from "./boundary-templates.js";
 import { MACRO_IN, MACRO_OUT, type MacroDef, type MacroMap } from "../../../shared/macros.js";
@@ -26,8 +26,10 @@ import { Icon } from "../components/Icon.js";
 import { MacroBoundaryPanel, type BoundaryPin } from "./MacroBoundaryPanel.js";
 import type { ValueType } from "../../../shared/theme.js";
 import { macroDefFromFlow, macroDefToFlow } from "./macro-editing.js";
+import { RWEdge, withRWEdgeData } from "./RWEdge.js";
 
 const nodeTypes = { rw: RWNode };
+const edgeTypes = { rw: RWEdge };
 
 /**
  * A full-screen editor for a macro's definition canvas. It hosts the same node canvas as the main
@@ -68,16 +70,17 @@ export function MacroEditor({
   }));
   const nodeDefs = nodes.map((n) => n.data.def);
   const results = evaluate(nodeDefs, viewEdges, {}, memory.current, Date.now(), {}, macros);
+  const displayEdges = useMemo(() => withRWEdgeData(edges, nodes, results), [edges, nodes, results]);
 
   const onConnect = useCallback(
     (c: Connection) => {
-      setEdges((eds) => addEdge({ ...c, animated: true, style: edgeStyle(nodes, c.source, c.sourceHandle) }, eds));
+      setEdges((eds) => addEdge({ ...c, type: "rw" }, eds));
       if (c.target && c.targetHandle) {
         const handle = c.targetHandle;
         setNodes((ns) => ns.map((n) => (n.id === c.target ? { ...n, data: { def: growVariadic(n.data.def, handle) } } : n)));
       }
     },
-    [nodes, setEdges, setNodes],
+    [setEdges, setNodes],
   );
   const isValidConnection: IsValidConnection = useCallback((c) => connectionValid(nodes, edges, c as Connection), [nodes, edges]);
 
@@ -224,18 +227,19 @@ export function MacroEditor({
         <Palette onAdd={addNode} extra={boundaryTemplates} />
         <div className="relative flex-1 min-h-0" onDrop={onDrop} onDragOver={onDragOver}>
           <ResultsProvider value={{ results, actuating: false, entities: {}, onConfig, onSetValue }}>
-            <ReactFlow
+            <ReactFlow<RWNodeType, Edge>
               onInit={(inst) => {
                 rf.current = inst;
               }}
               nodes={nodes}
-              edges={edges}
+              edges={displayEdges}
               onNodesChange={onNodesChange}
               onEdgesChange={onEdgesChange}
               onConnect={onConnect}
               connectionLineStyle={{ stroke: TYPE_VAR.any, strokeWidth: 2.2 }}
               isValidConnection={isValidConnection}
               nodeTypes={nodeTypes}
+              edgeTypes={edgeTypes}
               colorMode={mode}
               deleteKeyCode={["Backspace", "Delete"]}
               multiSelectionKeyCode={["Control", "Meta", "Shift"]}

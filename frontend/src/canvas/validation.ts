@@ -1,7 +1,7 @@
 import type { Node, Edge, Connection } from "@xyflow/react";
 import type { NodeData } from "../../../shared/node-types.js";
 import type { ValueType } from "../../../shared/theme.js";
-import { TYPE_VAR, TYPE_LABEL } from "../../../shared/theme.js";
+import { TYPE_LABEL } from "../../../shared/theme.js";
 
 export type RWNodeData = { def: NodeData };
 export type RWNodeType = Node<RWNodeData, "rw">;
@@ -71,9 +71,3 @@ export function connectionReason(nodes: RWNodeType[], edges: Edge[], c: Connecti
   return null;
 }
 
-/** Edge style colored by the source pin's value type. */
-export function edgeStyle(nodes: RWNodeType[], source: string, sourceHandle: string | null | undefined) {
-  const s = nodes.find((n) => n.id === source);
-  const t = (s && sourceHandle && pinTypeOf(s, sourceHandle, "source")) || "any";
-  return { stroke: TYPE_VAR[t], strokeWidth: 2.2 };
-}

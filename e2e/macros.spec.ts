@@ -144,11 +144,13 @@ test.describe.serial("Macros and grouping against the mock server", () => {
     await macroPaletteRow(page, "Macro 1").click();
     const first = placements(page, "Macro 1").last();
     await moveNode(page, first, 480, 300);
+    await first.getByRole("button", { name: /set/ }).click();
     await first.locator("input.rw-num").fill("3");
 
     await macroPaletteRow(page, "Macro 1").click();
     const second = placements(page, "Macro 1").last();
     await moveNode(page, second, 480, 520);
+    await second.getByRole("button", { name: /set/ }).click();
     await second.locator("input.rw-num").fill("8");
 
     // Two placements, two distinct outputs — the instances do not share state.
