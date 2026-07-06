@@ -1,10 +1,14 @@
 import { rmSync, mkdirSync } from "node:fs";
 import { spawn } from "node:child_process";
-import { dirname, resolve } from "node:path";
+import { dirname, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const dataDir = resolve(root, ".rw-data-e2e");
+const dataDirName = process.env.E2E_DATA_DIR?.trim() ?? ".rw-data-e2e";
+const dataDir = resolve(root, dataDirName);
+if (dataDir === root || !dataDir.startsWith(root + sep)) {
+  throw new Error(`E2E_DATA_DIR must resolve to a path strictly inside ${root}; got "${dataDirName}" -> "${dataDir}". Refusing to wipe.`);
+}
 const frontendPort = process.env.E2E_FRONTEND_PORT ?? "5175";
 const serverPort = process.env.E2E_RW_PORT ?? "7421";
 rmSync(dataDir, { recursive: true, force: true });
