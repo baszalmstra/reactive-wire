@@ -52,6 +52,7 @@
 @keyframes rw-blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
 @keyframes rw-dash { to { stroke-dashoffset: -14.5; } }
 @keyframes rw-edge-flow { to { stroke-dashoffset: -1; } }
+@keyframes rw-edge-doomed { to { stroke-dashoffset: -12; } }
 @keyframes rw-toast-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
 
 .rw-grid-dots {
@@ -316,6 +317,10 @@
 .rw-edge-main.stale { stroke-dasharray: 12 7; opacity: .56; filter: none; }
 .rw-edge-main.unavailable { stroke-dasharray: 3 8; opacity: .36; filter: none; }
 .rw-edge-main.error { stroke: var(--rw-h-error); stroke-dasharray: 8 5; filter: drop-shadow(0 0 4px color-mix(in oklab, var(--rw-h-error) 55%, transparent)); }
+/* A wire about to be replaced by the connection being dragged onto its input: destructive, with the
+   dashes marching so it reads as doomed rather than merely errored. The dash colour and pattern are
+   set inline on the path; here we only add the motion. */
+.rw-edge-main.doomed { animation: rw-edge-doomed 0.5s linear infinite; }
 .react-flow__edge.selected .rw-edge-main,
 .react-flow__edge:focus .rw-edge-main,
 .react-flow__edge:focus-visible .rw-edge-main {
@@ -350,6 +355,7 @@
 .rw-edge-bool.on { background: var(--rw-h-ok); box-shadow: 0 0 0 3px color-mix(in oklab, var(--rw-h-ok) 18%, transparent), 0 0 7px color-mix(in oklab, var(--rw-h-ok) 38%, transparent); }
 @media (prefers-reduced-motion: reduce) {
   .rw-edge-flow { animation: none; opacity: .22; }
+  .rw-edge-main.doomed { animation: none; }
 }
 
 /* The rubber-band selection box drawn while drag-selecting on the pane. */

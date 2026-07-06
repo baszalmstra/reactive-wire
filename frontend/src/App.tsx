@@ -4,7 +4,6 @@ import {
   Background,
   BackgroundVariant,
   Controls,
-  addEdge,
   useNodesState,
   useEdgesState,
   type Connection,
@@ -29,6 +28,7 @@ import { NodeConfigPopup } from "./canvas/NodeConfigPopup.js";
 import { PALETTE, growVariadic, type NodeTemplate, type RequiredConfig } from "./canvas/node-templates.js";
 import { ResultsProvider } from "./canvas/results-context.js";
 import { connectionReason, connectionValid, type RWNodeType } from "./canvas/validation.js";
+import { connectionAlreadyWired, replaceInputEdge } from "./canvas/wire-replace.js";
 import { CommentNode } from "./canvas/CommentNode.js";
 import { RWEdge, withRWEdgeData } from "./canvas/RWEdge.js";
 import { CommentCtx } from "./canvas/comments-context.js";
@@ -326,8 +326,13 @@ export function App() {
 
   const onConnect = useCallback(
     (c: Connection) => {
+      // Redrawing the identical wire onto its own input replaces nothing, so skip it rather than
+      // record a no-op undo checkpoint and churn state.
+      if (connectionAlreadyWired(edgesRef.current, c)) return;
       pushHistory();
-      setEdges((eds) => addEdge({ ...c, type: "rw" }, eds));
+      // An input pin holds at most one wire; wiring an already-occupied input replaces the old wire
+      // in the same edit, so the checkpoint above makes the whole replace one undo step.
+      setEdges((eds) => replaceInputEdge(eds, c));
       // Connecting a variadic node's trailing empty pin fills it and grows the next one.
       if (c.target && c.targetHandle) {
         const handle = c.targetHandle;

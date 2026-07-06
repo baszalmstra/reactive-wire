@@ -4,7 +4,6 @@ import {
   Background,
   BackgroundVariant,
   Controls,
-  addEdge,
   useNodesState,
   useEdgesState,
   type Connection,
@@ -19,6 +18,7 @@ import { RWNode } from "./RWNode.js";
 import { Palette } from "./Palette.js";
 import { ResultsProvider } from "./results-context.js";
 import { connectionValid, type RWNodeType } from "./validation.js";
+import { replaceInputEdge } from "./wire-replace.js";
 import { PALETTE, growVariadic, type NodeTemplate } from "./node-templates.js";
 import { boundaryTemplates } from "./boundary-templates.js";
 import { MACRO_IN, MACRO_OUT, type MacroDef, type MacroMap } from "../../../shared/macros.js";
@@ -74,7 +74,8 @@ export function MacroEditor({
 
   const onConnect = useCallback(
     (c: Connection) => {
-      setEdges((eds) => addEdge({ ...c, type: "rw" }, eds));
+      // Same single-source rule as the main canvas: a new wire into an occupied input replaces it.
+      setEdges((eds) => replaceInputEdge(eds, c));
       if (c.target && c.targetHandle) {
         const handle = c.targetHandle;
         setNodes((ns) => ns.map((n) => (n.id === c.target ? { ...n, data: { def: growVariadic(n.data.def, handle) } } : n)));

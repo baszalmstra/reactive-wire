@@ -1,4 +1,4 @@
-import { BaseEdge, EdgeLabelRenderer, getBezierPath, type Edge, type EdgeProps } from "@xyflow/react";
+import { BaseEdge, EdgeLabelRenderer, getBezierPath, useConnection, type Edge, type EdgeProps } from "@xyflow/react";
 import type { CSSProperties } from "react";
 import { TYPE_VAR, type ValueType } from "../../../shared/theme.js";
 import { UN, formatValue, type RWValue, type Status } from "../../../shared/value.js";
@@ -61,6 +61,10 @@ function EdgeValueBadge({ value }: { value: RWValue }) {
 
 export function RWEdge({
   id,
+  source,
+  target,
+  sourceHandleId,
+  targetHandleId,
   sourceX,
   sourceY,
   targetX,
@@ -74,28 +78,51 @@ export function RWEdge({
   selected,
 }: EdgeProps<RWEdgeType>) {
   const [edgePath, labelX, labelY] = getBezierPath({ sourceX, sourceY, sourcePosition, targetX, targetY, targetPosition });
+  // While a new connection is being dragged onto this edge's own input pin, this wire is the one the
+  // single-source rule will drop on drop. Signal that by rendering it destructive so the user sees
+  // what they are about to replace. The selector returns a bare boolean, so only this wire (and the
+  // previously-doomed one) re-render as the hover moves, not every edge on each pointer move.
+  const doomed = useConnection((conn) => {
+    if (!conn.inProgress || conn.isValid === false || !conn.toHandle) return false;
+    // The connection can be dragged from either side; its input end is whichever handle is a target.
+    const input = conn.fromHandle?.type === "target" ? conn.fromHandle : conn.toHandle.type === "target" ? conn.toHandle : null;
+    const output = conn.fromHandle?.type === "source" ? conn.fromHandle : conn.toHandle.type === "source" ? conn.toHandle : null;
+    if (!input || !output) return false;
+    if (input.nodeId !== target || (input.id ?? null) !== (targetHandleId ?? null)) return false;
+    // Dragging this very wire back onto its own input replaces nothing.
+    return !(output.nodeId === source && (output.id ?? null) === (sourceHandleId ?? null));
+  });
   const valueType = data?.valueType ?? data?.value?.type ?? "any";
   const value = data?.value ?? UN(valueType);
   const status = edgeStatus(value);
   const wireColor = status === "error" ? "var(--rw-h-error)" : TYPE_VAR[value.type];
   const style = { "--wire": wireColor } as CSSProperties;
   const active = isBooleanOn(value);
-  const pathStyle = {
-    ...style,
-    stroke: wireColor,
-    strokeWidth: selected ? 4.2 : active ? 3.6 : 3.5,
-    opacity: status === "unavailable" ? 0.36 : status === "stale" ? 0.56 : 1,
-    strokeDasharray: status === "error" ? "8 5" : status === "unavailable" ? "3 8" : status === "stale" ? "12 7" : undefined,
-    filter: selected
-      ? "drop-shadow(0 0 4px color-mix(in oklab, var(--rw-accent) 70%, transparent))"
-      : status === "error"
-        ? "drop-shadow(0 0 4px color-mix(in oklab, var(--rw-h-error) 55%, transparent))"
-        : status === "ok"
-          ? active
-            ? "drop-shadow(0 0 3px color-mix(in oklab, var(--wire) 32%, transparent))"
-            : "drop-shadow(0 0 2px color-mix(in oklab, var(--wire) 26%, transparent))"
-          : "none",
-  } as CSSProperties;
+  const pathStyle = doomed
+    ? ({
+        ...style,
+        stroke: "var(--rw-h-error)",
+        strokeWidth: 3.6,
+        opacity: 0.95,
+        strokeDasharray: "7 5",
+        filter: "drop-shadow(0 0 5px color-mix(in oklab, var(--rw-h-error) 60%, transparent))",
+      } as CSSProperties)
+    : ({
+        ...style,
+        stroke: wireColor,
+        strokeWidth: selected ? 4.2 : active ? 3.6 : 3.5,
+        opacity: status === "unavailable" ? 0.36 : status === "stale" ? 0.56 : 1,
+        strokeDasharray: status === "error" ? "8 5" : status === "unavailable" ? "3 8" : status === "stale" ? "12 7" : undefined,
+        filter: selected
+          ? "drop-shadow(0 0 4px color-mix(in oklab, var(--rw-accent) 70%, transparent))"
+          : status === "error"
+            ? "drop-shadow(0 0 4px color-mix(in oklab, var(--rw-h-error) 55%, transparent))"
+            : status === "ok"
+              ? active
+                ? "drop-shadow(0 0 3px color-mix(in oklab, var(--wire) 32%, transparent))"
+                : "drop-shadow(0 0 2px color-mix(in oklab, var(--wire) 26%, transparent))"
+              : "none",
+      } as CSSProperties);
 
   return (
     <>
@@ -106,7 +133,7 @@ export function RWEdge({
         markerStart={markerStart}
         markerEnd={markerEnd}
         interactionWidth={interactionWidth ?? 20}
-        className={`rw-edge-main ${status} ${active ? "bool-on" : ""}`}
+        className={`rw-edge-main ${status} ${active ? "bool-on" : ""} ${doomed ? "doomed" : ""}`}
         style={pathStyle}
       />
       {active && <path className="rw-edge-flow" d={edgePath} pathLength={1} style={style} />}
