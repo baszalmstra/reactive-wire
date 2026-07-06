@@ -4,7 +4,10 @@ export default defineConfig({
   testDir: "./e2e",
   timeout: 30_000,
   expect: { timeout: 5_000 },
+  // Every spec drives the same mock server and its single shared collaborative document, so specs
+  // must run one at a time — one worker serializes across files, not just within a file.
   fullyParallel: false,
+  workers: 1,
   reporter: process.env.CI ? "github" : "list",
   use: {
     baseURL: "http://127.0.0.1:5175",

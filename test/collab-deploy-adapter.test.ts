@@ -111,7 +111,7 @@ describe("collab deploy adapter", () => {
   });
 
   it("skips and logs an invalid def instead of deploying it", () => {
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const write = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
     const deployed: DeployRequest[] = [];
     const controller = new AutoDeployController((graph) => deployed.push(graph));
     const snap = snapshot({
@@ -122,12 +122,13 @@ describe("collab deploy adapter", () => {
     const result = controller.maybeDeploy(snap);
     expect(result?.ok).toBe(false);
     expect(deployed).toHaveLength(0);
-    expect(warn).toHaveBeenCalledOnce();
-    warn.mockRestore();
+    const warnings = write.mock.calls.filter((c) => String(c[0]).includes(" warn [auto-deploy]"));
+    expect(warnings).toHaveLength(1);
+    write.mockRestore();
   });
 
   it("warns only once while a document stays invalid", () => {
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const write = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
     const controller = new AutoDeployController(() => {});
     const snap = snapshot({
       flows: [{ id: "flow-a", name: "A", nodes: [invalidRw("a")], edges: [] }],
@@ -137,7 +138,8 @@ describe("collab deploy adapter", () => {
     controller.maybeDeploy(snap);
     controller.maybeDeploy(snap);
     controller.maybeDeploy(snap);
-    expect(warn).toHaveBeenCalledOnce();
-    warn.mockRestore();
+    const warnings = write.mock.calls.filter((c) => String(c[0]).includes(" warn [auto-deploy]"));
+    expect(warnings).toHaveLength(1);
+    write.mockRestore();
   });
 });

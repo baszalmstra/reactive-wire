@@ -64,12 +64,3 @@ export function nodeGeom(n: NodeData) {
     outputs: n.outputs.map((p, i) => ({ ...p, cx: w, cy: cy(i) })),
   };
 }
-
-/** Absolute canvas-space position of a pin, plus its declared type. */
-export function pinPos(node: NodeData, side: "in" | "out", pinId: string) {
-  const g = nodeGeom(node);
-  const arr = side === "in" ? g.inputs : g.outputs;
-  const p = arr.find((x) => x.id === pinId);
-  if (!p) return null;
-  return { x: node.x + p.cx, y: node.y + p.cy, type: p.type };
-}

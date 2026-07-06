@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Typecheck and unit tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up pixi
+        uses: prefix-dev/setup-pixi@v0.9.4
+        with:
+          pixi-version: v0.71.0
+          cache: true
+          locked: true
+
+      - name: Install npm dependencies through pixi tasks
+        run: pixi run install-all
+
+      - name: Run typechecks and unit tests
+        run: pixi run check
+
+      # Frontend lint runs once the eslint config and a `lint` pixi task land in the repo.
+      # - name: Run lint
+      #   run: pixi run lint

@@ -3,6 +3,7 @@ import { dirname, join } from "node:path";
 import { statePolicy, type Memory, type NodeMemory } from "../../shared/engine/engine-support.js";
 import type { NodeData } from "../../shared/node-types.js";
 import type { DurableMemory } from "./runtime.js";
+import { log } from "./log.js";
 
 /** A persisted memory slot, tagged with the node type it belonged to so a type change invalidates it. */
 interface StoredSlot {
@@ -133,7 +134,7 @@ function toPersistable(id: string, slot: NodeMemory): NodeMemory | null {
     JSON.stringify(copy);
     return copy;
   } catch {
-    console.warn(`Skipping durable memory for node ${id}: state is not JSON-serializable`);
+    log("warn", "durable-memory", "skipping slot: state is not JSON-serializable", { node: id });
     return null;
   }
 }

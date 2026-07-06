@@ -7,6 +7,7 @@ platforms = ["win-64", "linux-64"]
 
 [dependencies]
 nodejs = ">=21,<23"
+playwright = "1.55.1.*"
 
 # ── Core (engine + server) ───────────────────────────────────────────────────
 [tasks]
@@ -21,6 +22,16 @@ e2e = "npm run e2e"
 cmd = "npm install"
 inputs = ["package.json", "package-lock.json"]
 outputs = ["node_modules/.package-lock.json"]
+
+# Browser binaries for Playwright e2e tests. The Playwright CLI itself comes from the
+# conda-forge playwright package above; the CI variant also installs Linux system libraries.
+[tasks.playwright-install]
+cmd = "playwright install chromium"
+depends-on = ["install"]
+
+[tasks.playwright-install-ci]
+cmd = "playwright install --with-deps chromium"
+depends-on = ["install"]
 
 # ── Editor frontend (runs in ./frontend with the same Node toolchain) ─────────
 [tasks.fe-install]

@@ -1,6 +1,13 @@
 import type { CSSProperties } from "react";
 import type { Preview, Decorator } from "@storybook/react";
 import { buildThemeVars, type Aesthetic, type Mode } from "../../shared/theme.js";
+import "@fontsource/hanken-grotesk/400.css";
+import "@fontsource/hanken-grotesk/500.css";
+import "@fontsource/hanken-grotesk/600.css";
+import "@fontsource/hanken-grotesk/700.css";
+import "@fontsource/ibm-plex-mono/400.css";
+import "@fontsource/ibm-plex-mono/500.css";
+import "@fontsource/ibm-plex-mono/600.css";
 import "../src/index.css";
 
 const withTheme: Decorator = (Story, ctx) => {

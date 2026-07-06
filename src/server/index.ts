@@ -8,6 +8,7 @@ import { Deployer } from "./runtime.js";
 import { DurableMemoryStore } from "./durable-memory.js";
 import { EditorDocumentStore } from "./doc-store.js";
 import { AutoDeployController } from "./collab-deploy-adapter.js";
+import { log } from "./log.js";
 
 const url = process.env.HA_URL;
 const token = process.env.HA_TOKEN;
@@ -38,17 +39,17 @@ function describeHaConnectError(err: unknown): string {
 if (url && token) {
   try {
     ha = await RealHA.connect(url, token);
-    console.log(`Connected to Home Assistant at ${url}.`);
+    log("info", "ha", "connected to Home Assistant", { url });
   } catch (err) {
-    console.error(`Failed to connect to Home Assistant at ${url}: ${describeHaConnectError(err)}.`);
-    console.error("Unset HA_URL/HA_TOKEN to run in mock mode, or fix the Home Assistant URL/token and network route.");
+    log("error", "ha", "failed to connect to Home Assistant", { url, error: describeHaConnectError(err) });
+    log("error", "ha", "unset HA_URL/HA_TOKEN to run in mock mode, or fix the Home Assistant URL/token and network route");
     process.exit(1);
   }
 } else {
   const mock = new MockHA();
   stopSim = startSimulator(mock);
   ha = mock;
-  console.log("No HA_URL/HA_TOKEN set — running in mock mode with simulated entities.");
+  log("info", "server", "no HA_URL/HA_TOKEN set — running in mock mode with simulated entities");
 }
 
 // No graph runs until the editor deploys one. Sinks actuate only on deploy (an explicit act),
@@ -67,14 +68,15 @@ const stopFeed = startFeed(ha, { port, host, allowedHosts, allowedOrigins, deplo
   },
   documentStore,
   onDocumentChange: (snapshot) => autoDeploy.maybeDeploy(snapshot),
+  inspect: () => ({ ...deployer.inspect(), autoDeploy: documentStore.snapshot().settings.autoDeploy }),
 });
 
 autoDeploy.maybeDeploy(documentStore.snapshot());
 
-console.log(`Reactive Wire running: live entity feed on ws://${host}:${port}.`);
-if (deployToken) console.log("Deploy/control WebSocket requires RW_DEPLOY_TOKEN.");
-console.log(`Collaborative editor document persistence: ${documentStore.filePath}.`);
-console.log("No graph deployed yet. Build one in the editor and Deploy to actuate Home Assistant.");
+log("info", "server", "listening", { url: `ws://${host}:${port}` });
+if (deployToken) log("info", "server", "deploy/control WebSocket requires RW_DEPLOY_TOKEN");
+log("info", "server", "collaborative editor document persistence", { path: documentStore.filePath });
+log("info", "server", "no graph deployed yet — build one in the editor and Deploy to actuate Home Assistant");
 
 const shutdown = () => {
   stopFeed();

@@ -21,9 +21,10 @@
     "yjs": "^13.6.31"
   },
   "devDependencies": {
-    "@playwright/test": "^1.61.0",
+    "@playwright/test": "1.55.1",
     "@types/node": "^22.10.0",
     "@types/ws": "^8.5.13",
+    "jsdom": "^25.0.1",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2",
     "vitest": "^2.1.8"

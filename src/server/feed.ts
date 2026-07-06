@@ -17,6 +17,7 @@ import {
   type ConnectionPolicyOptions,
 } from "./connection-policy.js";
 import { sanitizeDeployRequest, type DeployRequest } from "./deploy-validation.js";
+import type { DeployerSnapshot } from "./runtime.js";
 
 export { sanitizeDeployRequest, type DeployRequest } from "./deploy-validation.js";
 export { validateConnection } from "./connection-policy.js";
@@ -34,6 +35,11 @@ export interface EditorDocSyncStore {
   snapshot?: () => EditorDocumentSnapshot;
 }
 
+/** The read-only runtime snapshot answered to a debugState query, plus the server's auto-deploy setting. */
+export interface DebugStateSnapshot extends DeployerSnapshot {
+  autoDeploy?: boolean;
+}
+
 export interface FeedHandlers {
   /** Called when an editor deploys a graph; returns a result to send back. */
   onDeploy?: (graph: DeployRequest) => { ok: boolean; unsupported: string[]; error?: string };
@@ -41,6 +47,8 @@ export interface FeedHandlers {
   documentStore?: EditorDocSyncStore;
   /** Called after a collaborative document update is accepted. Return a deploy result to broadcast. */
   onDocumentChange?: (snapshot: EditorDocumentSnapshot) => { ok: boolean; unsupported?: string[]; error?: string } | void;
+  /** Returns a read-only snapshot of runtime state, answering a debugState query. When absent, introspection is disabled. */
+  inspect?: () => DebugStateSnapshot;
 }
 
 function isRecord(v: unknown): v is Record<string, unknown> {
@@ -147,6 +155,25 @@ export function startFeed(ha: EntityFeed, portOrOptions: number | FeedOptions, h
           }
         } catch (err) {
           sendDocError(ws, err instanceof Error ? err.message : String(err));
+        }
+        return;
+      }
+
+      if (msg.type === "debugState") {
+        // A read-only introspection query. The connection policy already restricts who can reach
+        // the feed at all, so no deploy token is required; the answer goes only to the asker.
+        if (ws.readyState !== WebSocket.OPEN) return;
+        if (ws.bufferedAmount > maxPayload) {
+          ws.close(1009, "client is too far behind");
+          return;
+        }
+        try {
+          const snapshot = handlers.inspect
+            ? handlers.inspect()
+            : { deployed: false, error: "Introspection is not enabled on this server" };
+          ws.send(JSON.stringify({ type: "debugState", timestamp: Date.now(), ...snapshot }));
+        } catch (err) {
+          ws.send(JSON.stringify({ type: "debugState", deployed: false, error: err instanceof Error ? err.message : String(err) }));
         }
         return;
       }

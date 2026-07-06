@@ -91,19 +91,20 @@ describe("DurableMemoryStore", () => {
   it("skips and warns on a slot that cannot round-trip through JSON", () => {
     const dir = tempDir();
     try {
-      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const write = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
       const store = new DurableMemoryStore({ dataDir: dir, debounceMs: 0 });
       const circular: Record<string, unknown> = {};
       circular.self = circular;
       store.capture([foldNode("f")], { f: { state: circular } });
       store.flush();
-      expect(warn).toHaveBeenCalledOnce();
+      const warnings = write.mock.calls.filter((c) => String(c[0]).includes(" warn [durable-memory]"));
+      expect(warnings).toHaveLength(1);
 
       const restarted = new DurableMemoryStore({ dataDir: dir, debounceMs: 0 });
       const mem: Memory = {};
       restarted.restore([foldNode("f")], mem);
       expect(mem.f).toBeUndefined();
-      warn.mockRestore();
+      write.mockRestore();
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

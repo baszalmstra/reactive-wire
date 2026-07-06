@@ -3,6 +3,7 @@ import type { MacroMap } from "../../shared/macros.js";
 import type { NodeData } from "../../shared/node-types.js";
 import type { CollabEdge, CollabNode, EditorDocumentSnapshot } from "../../shared/collab.js";
 import { sanitizeDeployRequest, type DeployRequest } from "./deploy-validation.js";
+import { log } from "./log.js";
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);
@@ -56,7 +57,7 @@ export class AutoDeployController {
       const signature = JSON.stringify({ flowId: snapshot.settings.deployFlowId, invalid: raw });
       if (signature !== this.lastSignature) {
         this.lastSignature = signature;
-        console.warn(`Skipping auto-deploy of an invalid graph: ${validated.error}`);
+        log("warn", "auto-deploy", "skipping deploy of an invalid graph", { error: validated.error });
       }
       return { ok: false, unsupported: [], error: validated.error };
     }

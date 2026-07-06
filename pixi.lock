@@ -1,7 +1,15 @@
 version: 7
 platforms:
 - name: linux-64
+  virtual-packages:
+  - __unix=0=0
+  - __linux=4.18
+  - __glibc=2.28
+  - __archspec=0=x86_64
 - name: win-64
+  virtual-packages:
+  - __win=10.0
+  - __archspec=0=x86_64
 environments:
   default:
     channels:
@@ -17,9 +25,11 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/linux-64/libzlib-1.3.2-h25fd6f3_2.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/nodejs-22.22.3-h273caaf_0.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/openssl-3.6.3-h35e630c_0.conda
+      - conda: https://conda.anaconda.org/conda-forge/linux-64/playwright-1.55.1-h0bd9c3d_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/ca-certificates-2026.5.20-hbd8a1cb_0.conda
       win-64:
       - conda: https://conda.anaconda.org/conda-forge/win-64/nodejs-22.22.3-h80d1838_0.conda
+      - conda: https://conda.anaconda.org/conda-forge/win-64/playwright-1.55.1-h9acf6c7_0.conda
 packages:
 - conda: https://conda.anaconda.org/conda-forge/linux-64/_openmp_mutex-4.5-20_gnu.conda
   build_number: 20
@@ -126,6 +136,17 @@ packages:
   license_family: Apache
   size: 3159683
   timestamp: 1781069855778
+- conda: https://conda.anaconda.org/conda-forge/linux-64/playwright-1.55.1-h0bd9c3d_0.conda
+  sha256: 79aadadf7a8a017da6b677b3eaaf48f161e8a9e7cdde62c3c7e2540291a8c40d
+  md5: 6e5dbb4be7bf84e583d01bb2508001a7
+  depends:
+  - nodejs
+  - nodejs >=22.19.0,<23.0a0
+  license: Apache-2.0
+  license_family: APACHE
+  run_exports: {}
+  size: 2221832
+  timestamp: 1758651308375
 - conda: https://conda.anaconda.org/conda-forge/noarch/ca-certificates-2026.5.20-hbd8a1cb_0.conda
   sha256: 9812a303a1395e1dafbd92e5bc8a1ff6013bcbba0a09c7f03a8d23e43560aa9b
   md5: 489b8e97e666c93f68fdb35c3c9b957f
@@ -141,3 +162,14 @@ packages:
   license_family: MIT
   size: 30033129
   timestamp: 1779566014324
+- conda: https://conda.anaconda.org/conda-forge/win-64/playwright-1.55.1-h9acf6c7_0.conda
+  sha256: 3591938f53f40c3b7428f5646a83e9b5cf8668415c128f2a3458ff690c341613
+  md5: 87029a6d2858d0650305a1a53cc99098
+  depends:
+  - nodejs
+  - nodejs >=22.19.0,<23.0a0
+  license: Apache-2.0
+  license_family: APACHE
+  run_exports: {}
+  size: 2225037
+  timestamp: 1758651341743
