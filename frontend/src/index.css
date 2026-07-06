@@ -51,6 +51,8 @@
 /* Animations and the dynamic canvas grid can't be expressed as utilities. */
 @keyframes rw-blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
 @keyframes rw-dash { to { stroke-dashoffset: -14.5; } }
+@keyframes rw-edge-flow { to { stroke-dashoffset: -1; } }
+@keyframes rw-edge-doomed { to { stroke-dashoffset: -12; } }
 @keyframes rw-toast-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
 
 .rw-grid-dots {
@@ -278,16 +280,83 @@
 /* While dragging an edge, keep the connect cursor everywhere (don't flip to node-grab). */
 .rw-connecting, .rw-connecting * { cursor: crosshair !important; }
 
-/* Edges carry an inline type colour, so React Flow's default selected stroke is overridden by it.
-   Give a selected (or keyboard-focused) edge its own visible highlight — a glow plus a thicker
-   stroke — so it is clear which wire Delete will remove. */
-.react-flow__edge.selected .react-flow__edge-path,
-.react-flow__edge:focus .react-flow__edge-path,
-.react-flow__edge:focus-visible .react-flow__edge-path {
-  stroke-width: 3.4;
+/* ── Wires ───────────────────────────────────────────────────────────────
+   Type is encoded by colour. Runtime status owns the line treatment, and a
+   boolean true carries a subtle travelling highlight along the line. */
+.react-flow__edge { outline: none; }
+.rw-edge-halo {
+  fill: none;
+  stroke: color-mix(in oklab, var(--rw-line-soft) 70%, transparent);
+  stroke-width: 8;
+  stroke-linecap: round;
+  opacity: .68;
+  pointer-events: none;
+}
+.rw-edge-main {
+  fill: none;
+  stroke: var(--wire);
+  stroke-width: 3.5;
+  stroke-linecap: round;
+  filter: drop-shadow(0 0 2px color-mix(in oklab, var(--wire) 26%, transparent));
+}
+.rw-edge-main.bool-on {
+  stroke-width: 3.6;
+  filter: drop-shadow(0 0 3px color-mix(in oklab, var(--wire) 32%, transparent));
+}
+.rw-edge-flow {
+  fill: none;
+  stroke: color-mix(in oklab, var(--wire) 82%, white 18%);
+  stroke-width: 5.4;
+  stroke-linecap: round;
+  stroke-dasharray: .12 .88;
+  opacity: .28;
+  filter: drop-shadow(0 0 5px color-mix(in oklab, var(--wire) 42%, transparent));
+  animation: rw-edge-flow 2.15s linear infinite;
+  pointer-events: none;
+}
+.rw-edge-main.stale { stroke-dasharray: 12 7; opacity: .56; filter: none; }
+.rw-edge-main.unavailable { stroke-dasharray: 3 8; opacity: .36; filter: none; }
+.rw-edge-main.error { stroke: var(--rw-h-error); stroke-dasharray: 8 5; filter: drop-shadow(0 0 4px color-mix(in oklab, var(--rw-h-error) 55%, transparent)); }
+/* A wire about to be replaced by the connection being dragged onto its input: destructive, with the
+   dashes marching so it reads as doomed rather than merely errored. The dash colour and pattern are
+   set inline on the path; here we only add the motion. */
+.rw-edge-main.doomed { animation: rw-edge-doomed 0.5s linear infinite; }
+.react-flow__edge.selected .rw-edge-main,
+.react-flow__edge:focus .rw-edge-main,
+.react-flow__edge:focus-visible .rw-edge-main {
+  stroke-width: 4.2;
   filter: drop-shadow(0 0 4px color-mix(in oklab, var(--rw-accent) 70%, transparent));
 }
-.react-flow__edge { outline: none; }
+.rw-edge-label {
+  position: absolute;
+  pointer-events: none;
+  z-index: 2;
+}
+.rw-edge-value {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 128px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in oklab, var(--wire) 55%, var(--rw-line));
+  background: color-mix(in oklab, var(--rw-panel) 92%, transparent);
+  color: var(--rw-text);
+  font: 500 10.5px var(--font-mono);
+  white-space: nowrap;
+  box-shadow: 0 8px 18px -14px rgba(0, 0, 0, .55);
+  backdrop-filter: blur(7px);
+}
+.rw-edge-value.stale { border-style: dashed; color: var(--rw-faint); }
+.rw-edge-value.unavailable { border-style: dashed; color: var(--rw-faint); background: color-mix(in oklab, var(--rw-panel2) 78%, transparent); }
+.rw-edge-value.error { border-color: var(--rw-h-error); color: var(--rw-h-error); }
+.rw-edge-swatch { width: 12px; height: 12px; border-radius: 4px; border: 1px solid var(--rw-line); flex: none; }
+.rw-edge-bool { width: 8px; height: 8px; border-radius: 50%; background: var(--rw-line); flex: none; }
+.rw-edge-bool.on { background: var(--rw-h-ok); box-shadow: 0 0 0 3px color-mix(in oklab, var(--rw-h-ok) 18%, transparent), 0 0 7px color-mix(in oklab, var(--rw-h-ok) 38%, transparent); }
+@media (prefers-reduced-motion: reduce) {
+  .rw-edge-flow { animation: none; opacity: .22; }
+  .rw-edge-main.doomed { animation: none; }
+}
 
 /* The rubber-band selection box drawn while drag-selecting on the pane. */
 .react-flow__selection {

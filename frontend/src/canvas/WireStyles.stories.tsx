@@ -1,7 +1,9 @@
-import { useState, type CSSProperties } from "react";
+import { useMemo, useState } from "react";
+import { Handle, Position, ReactFlow, type Edge, type Node } from "@xyflow/react";
 import type { Meta, StoryObj } from "@storybook/react";
 import { TYPE_LABEL, TYPE_VAR, type ValueType } from "../../../shared/theme.js";
-import { ER, ST, UN, V, formatValue, type RWValue } from "../../../shared/value.js";
+import { ER, ST, UN, V, type RWValue } from "../../../shared/value.js";
+import { RWEdge, type RWEdgeData } from "./RWEdge.js";
 
 type WireStatus = RWValue["status"];
 
@@ -22,6 +24,9 @@ type PlaygroundState = {
   datetimeValue: string;
   anyValue: string;
 };
+
+const nodeTypes = { "wire-anchor": WireAnchor };
+const edgeTypes = { rw: RWEdge };
 
 const TYPE_OPTIONS: ValueType[] = ["bool", "num", "str", "color", "duration", "datetime", "any"];
 const STATUS_OPTIONS: WireStatus[] = ["ok", "stale", "unavailable", "error"];
@@ -44,6 +49,15 @@ const STATUS_SAMPLES: Sample[] = [
   { type: "num", value: ER("num", "bad input"), note: "error" },
 ];
 
+function WireAnchor() {
+  return (
+    <div className="wire-anchor-node">
+      <Handle type="target" position={Position.Left} id="in" className="wire-anchor-handle" />
+      <Handle type="source" position={Position.Right} id="out" className="wire-anchor-handle" />
+    </div>
+  );
+}
+
 function rawValue(state: PlaygroundState): unknown {
   switch (state.type) {
     case "bool": return state.boolValue;
@@ -61,56 +75,6 @@ function valueFromState(state: PlaygroundState): RWValue {
   if (state.status === "unavailable") return UN(state.type);
   const raw = rawValue(state);
   return state.status === "stale" ? ST(state.type, raw) : V(state.type, raw);
-}
-
-function statusClass(value: RWValue): string {
-  if (value.status === "error") return "error";
-  if (value.status === "unavailable") return "unavailable";
-  if (value.status === "stale") return "stale";
-  return "ok";
-}
-
-function isBooleanOn(value: RWValue): boolean {
-  return value.type === "bool" && value.status === "ok" && value.v === true;
-}
-
-function ValueBadge({ value }: { value: RWValue }) {
-  const formatted = formatValue(value);
-  const swatch = value.status === "ok" && value.type === "color" ? String(value.v) : null;
-  return (
-    <span className={`wire-value ${statusClass(value)}`}>
-      {swatch && <span className="wire-swatch" style={{ background: swatch }} />}
-      {value.type === "bool" && value.status === "ok" && <span className={`wire-bool ${value.v ? "on" : "off"}`} />}
-      {formatted.text}
-    </span>
-  );
-}
-
-function WirePreview({ sample }: { sample: Sample }) {
-  const color = sample.value.status === "error" ? "var(--rw-h-error)" : TYPE_VAR[sample.type];
-  const muted = sample.value.status === "unavailable";
-  const stale = sample.value.status === "stale";
-  const d = "M 18 32 C 84 4, 176 60, 242 32";
-  const opacity = muted ? 0.34 : stale ? 0.58 : 1;
-  const style = { "--wire": color } as CSSProperties;
-  const glow = isBooleanOn(sample.value);
-
-  return (
-    <div className={`wire-demo ${statusClass(sample.value)} ${glow ? "bool-on" : ""}`} style={style}>
-      <svg viewBox="0 0 260 64" aria-hidden="true">
-        <path className="wire-halo" d={d} />
-        <path className="wire-main" d={d} style={{ opacity }} />
-        {glow && <path className="wire-flow" d={d} />}
-        {sample.value.status === "ok" && (
-          <>
-            <circle className="wire-port" cx="18" cy="32" r="4.3" />
-            <circle className="wire-port" cx="242" cy="32" r="4.3" />
-          </>
-        )}
-      </svg>
-      <ValueBadge value={sample.value} />
-    </div>
-  );
 }
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
@@ -175,6 +139,46 @@ function ValueControl({ state, setState }: { state: PlaygroundState; setState: (
   }
 }
 
+function ActualWirePreview({ sample, id }: { sample: Sample; id: string }) {
+  const nodes = useMemo<Node[]>(() => [
+    { id: `${id}-source`, type: "wire-anchor", position: { x: 16, y: 32 }, data: {} },
+    { id: `${id}-target`, type: "wire-anchor", position: { x: 420, y: 32 }, data: {} },
+  ], [id]);
+  const edges = useMemo<Edge<RWEdgeData>[]>(() => [{
+    id: `${id}-edge`,
+    type: "rw",
+    source: `${id}-source`,
+    sourceHandle: "out",
+    target: `${id}-target`,
+    targetHandle: "in",
+    data: { valueType: sample.type, value: sample.value },
+  }], [id, sample.type, sample.value]);
+
+  return (
+    <div className="wire-flow-preview">
+      <ReactFlow<Node, Edge<RWEdgeData>>
+        nodes={nodes}
+        edges={edges}
+        nodeTypes={nodeTypes}
+        edgeTypes={edgeTypes}
+        fitView
+        fitViewOptions={{ padding: 0.18, maxZoom: 1.08 }}
+        minZoom={0.5}
+        maxZoom={1.4}
+        nodesDraggable={false}
+        nodesConnectable={false}
+        elementsSelectable={false}
+        panOnDrag={false}
+        zoomOnScroll={false}
+        zoomOnPinch={false}
+        zoomOnDoubleClick={false}
+        preventScrolling={false}
+        proOptions={{ hideAttribution: true }}
+      />
+    </div>
+  );
+}
+
 function Playground() {
   const [state, setState] = useState<PlaygroundState>({
     type: "bool",
@@ -193,7 +197,7 @@ function Playground() {
     <section className="wire-playground">
       <div className="wire-playground-head">
         <h2>Interactive playground</h2>
-        <p>Type is color only. Status changes line treatment. Boolean true gets a subtle traveling glow; false stays quiet.</p>
+        <p>This uses the same React Flow edge component as the app canvas.</p>
       </div>
       <div className="wire-controls">
         <Field label="Type">
@@ -208,19 +212,7 @@ function Playground() {
         </Field>
         <ValueControl state={state} setState={setState} />
       </div>
-      <div className="wire-playground-preview">
-        <WirePreview sample={sample} />
-      </div>
-    </section>
-  );
-}
-
-function Column({ title, children, blurb }: { title: string; blurb: string; children: React.ReactNode }) {
-  return (
-    <section className="wire-column">
-      <h3>{title}</h3>
-      <p>{blurb}</p>
-      <div className="wire-stack">{children}</div>
+      <ActualWirePreview sample={sample} id="playground" />
     </section>
   );
 }
@@ -233,110 +225,95 @@ function WireRow({ sample }: { sample: Sample }) {
         <strong>{TYPE_LABEL[sample.type]}</strong>
         <small>{sample.note}</small>
       </div>
-      <WirePreview sample={sample} />
+      <ActualWirePreview sample={sample} id={`sample-${sample.type}`} />
     </div>
   );
 }
 
-function WireStylePrototype() {
+function StatusGallery() {
+  return (
+    <section className="wire-section">
+      <h2>Status handling</h2>
+      <p>Status owns line treatment: solid, muted dashed, faint dotted, red dashed. Boolean true gets the moving highlight; false does not.</p>
+      <div className="wire-status-grid">
+        {STATUS_SAMPLES.map((sample) => (
+          <div className="wire-status-card" key={sample.note}>
+            <small>{sample.note}</small>
+            <ActualWirePreview sample={sample} id={`status-${sample.note.replace(/\W+/g, "-")}`} />
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function WireStyles() {
   return (
     <div className="wire-page">
       <style>{css}</style>
       <header className="wire-header">
         <div>
-          <h1>Wire style prototype</h1>
+          <h1>Wire styles</h1>
           <p>
-            Updated direction: <b>type is carried by color only</b>. Line pattern/opacity is reserved for status,
-            and the recommended style adds a compact live value badge plus a subtle traveling glow only for boolean true.
+            Actual canvas edge component: type is color, status is line treatment, and the carried value is shown as a compact badge.
           </p>
         </div>
       </header>
 
       <Playground />
 
-      <div className="wire-table">
-        {SAMPLES.map((sample) => <WireRow key={sample.type} sample={sample} />)}
-      </div>
+      <section className="wire-section">
+        <h2>Value types</h2>
+        <div className="wire-table">
+          {SAMPLES.map((sample) => <WireRow key={sample.type} sample={sample} />)}
+        </div>
+      </section>
 
-      <div className="wire-columns">
-        <Column title="Status handling" blurb="Status should be visible even without hovering, because it changes safety semantics.">
-          {STATUS_SAMPLES.map((sample) => <WirePreview key={sample.note} sample={sample} />)}
-        </Column>
-        <Column title="Rules this prototype tests" blurb="The pattern should stay learnable and not fight the existing pin/chip language.">
-          <ul className="wire-rules">
-            <li>Color always means value type.</li>
-            <li>No per-type texture — avoid noisy dense graphs.</li>
-            <li>Status owns line treatment: solid, muted dashed, faint dotted, red dashed.</li>
-            <li>Boolean true gets a subtle traveling glow; boolean false does not.</li>
-          </ul>
-        </Column>
-      </div>
+      <StatusGallery />
     </div>
   );
 }
 
 const css = `
-.wire-page { width: min(1180px, calc(100vw - 64px)); color: var(--rw-text); }
+.wire-page { width: min(1080px, calc(100vw - 64px)); color: var(--rw-text); }
 .wire-header { display: flex; justify-content: space-between; gap: 24px; margin-bottom: 22px; }
 .wire-header h1 { margin: 0 0 8px; font-size: 28px; letter-spacing: -0.03em; }
 .wire-header p { margin: 0; max-width: 820px; color: var(--rw-dim); line-height: 1.55; }
-.wire-playground { margin-bottom: 22px; padding: 16px; border: 1px solid var(--rw-line-soft); border-radius: 18px; background: color-mix(in oklab, var(--rw-panel) 72%, transparent); }
+.wire-section, .wire-playground { margin-bottom: 22px; padding: 16px; border: 1px solid var(--rw-line-soft); border-radius: 18px; background: color-mix(in oklab, var(--rw-panel) 72%, transparent); }
+.wire-section h2, .wire-playground h2 { margin: 0 0 4px; font-size: 16px; }
+.wire-section p, .wire-playground p { margin: 0; color: var(--rw-faint); font-size: 12px; line-height: 1.45; }
 .wire-playground-head { display: flex; justify-content: space-between; gap: 18px; align-items: baseline; margin-bottom: 14px; }
-.wire-playground h2 { margin: 0; font-size: 16px; }
-.wire-playground p { margin: 0; color: var(--rw-faint); font-size: 12px; }
 .wire-controls { display: grid; grid-template-columns: 180px 180px minmax(220px, 1fr); gap: 12px; align-items: end; margin-bottom: 14px; }
 .wire-field { display: flex; flex-direction: column; gap: 5px; }
 .wire-field > span { color: var(--rw-faint); font-size: 10px; text-transform: uppercase; letter-spacing: .07em; }
 .wire-field input, .wire-field select { height: 31px; border: 1px solid var(--rw-line); border-radius: 8px; background: var(--rw-panel2); color: var(--rw-text); padding: 0 9px; font: 12px var(--font-mono); outline: none; }
 .wire-field input:focus, .wire-field select:focus { border-color: var(--rw-accent); }
 .wire-muted { color: var(--rw-faint); font-size: 12px; margin: 0 0 7px; }
-.wire-playground-preview { max-width: 520px; }
-.wire-row { display: grid; grid-template-columns: 180px minmax(260px, 1fr); gap: 14px; align-items: center; }
-.wire-table { display: flex; flex-direction: column; gap: 10px; }
-.wire-row { padding: 11px 14px; border: 1px solid var(--rw-line-soft); border-radius: 14px; background: color-mix(in oklab, var(--rw-panel) 70%, transparent); }
+.wire-table { display: flex; flex-direction: column; gap: 10px; margin-top: 14px; }
+.wire-row { display: grid; grid-template-columns: 180px minmax(320px, 1fr); gap: 14px; align-items: center; padding: 11px 14px; border: 1px solid var(--rw-line-soft); border-radius: 14px; background: color-mix(in oklab, var(--rw-canvas) 74%, transparent); }
 .wire-row-label { display: grid; grid-template-columns: 12px 1fr; column-gap: 9px; row-gap: 3px; align-items: center; }
 .wire-row-label small { grid-column: 2; color: var(--rw-faint); font-size: 11px; }
 .wire-type-dot { width: 10px; height: 10px; border-radius: 50%; box-shadow: 0 0 0 3px color-mix(in oklab, currentColor 6%, transparent); }
-.wire-demo { position: relative; height: 64px; border-radius: 12px; background: color-mix(in oklab, var(--rw-canvas) 88%, transparent); overflow: hidden; border: 1px solid color-mix(in oklab, var(--rw-line-soft) 72%, transparent); }
-.wire-demo svg { position: absolute; inset: 0; width: 100%; height: 100%; }
-.wire-halo { fill: none; stroke: color-mix(in oklab, var(--rw-line-soft) 66%, transparent); stroke-width: 7; stroke-linecap: round; opacity: .72; }
-.wire-main { fill: none; stroke: var(--wire); stroke-width: 3.5; stroke-linecap: round; filter: drop-shadow(0 0 2px color-mix(in oklab, var(--wire) 28%, transparent)); }
-.wire-demo.bool-on .wire-main { stroke-width: 3.6; filter: drop-shadow(0 0 3px color-mix(in oklab, var(--wire) 32%, transparent)); }
-.wire-flow { fill: none; stroke: color-mix(in oklab, var(--wire) 84%, white 16%); stroke-width: 5.5; stroke-linecap: round; stroke-dasharray: 26 222; stroke-dashoffset: 0; opacity: .32; filter: drop-shadow(0 0 5px color-mix(in oklab, var(--wire) 42%, transparent)); animation: wireFlow 2.15s linear infinite; }
-.wire-port { fill: var(--rw-canvas); stroke: var(--wire); stroke-width: 2; }
-.wire-demo.bool-on .wire-port { filter: drop-shadow(0 0 3px color-mix(in oklab, var(--wire) 38%, transparent)); }
-.wire-value { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); display: inline-flex; align-items: center; gap: 6px; max-width: 118px; padding: 4px 8px; border-radius: 999px; border: 1px solid color-mix(in oklab, var(--wire) 58%, var(--rw-line)); background: color-mix(in oklab, var(--rw-panel) 92%, transparent); color: var(--rw-text); font: 500 10.5px var(--font-mono); white-space: nowrap; box-shadow: 0 5px 14px -12px rgba(0,0,0,.45); }
-.wire-value.stale { border-style: dashed; color: var(--rw-faint); }
-.wire-value.unavailable { border-style: dashed; color: var(--rw-faint); background: color-mix(in oklab, var(--rw-panel2) 78%, transparent); }
-.wire-value.error { border-color: var(--rw-h-error); color: var(--rw-h-error); }
-.wire-swatch { width: 12px; height: 12px; border-radius: 4px; border: 1px solid var(--rw-line); }
-.wire-bool { width: 8px; height: 8px; border-radius: 50%; background: var(--rw-line); }
-.wire-bool.on { background: var(--rw-h-ok); box-shadow: 0 0 0 3px color-mix(in oklab, var(--rw-h-ok) 20%, transparent), 0 0 8px color-mix(in oklab, var(--rw-h-ok) 45%, transparent); }
-.wire-demo.stale .wire-main { stroke-dasharray: 12 7; opacity: .55; filter: none; }
-.wire-demo.unavailable .wire-main { stroke-dasharray: 3 8; opacity: .35; filter: none; }
-.wire-demo.error .wire-main { stroke: var(--rw-h-error); stroke-dasharray: 8 5; filter: drop-shadow(0 0 4px color-mix(in oklab, var(--rw-h-error) 60%, transparent)); }
-.wire-columns { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; margin-top: 22px; }
-.wire-column { border: 1px solid var(--rw-line-soft); border-radius: 16px; background: color-mix(in oklab, var(--rw-panel) 78%, transparent); padding: 16px; }
-.wire-column h3 { margin: 0 0 4px; font-size: 15px; }
-.wire-column p { margin: 0 0 14px; color: var(--rw-faint); font-size: 12px; line-height: 1.45; }
-.wire-stack { display: grid; grid-template-columns: repeat(2, minmax(220px, 1fr)); gap: 10px; }
-.wire-rules { margin: 0; padding-left: 18px; color: var(--rw-dim); line-height: 1.8; }
-@keyframes wireFlow {
-  to { stroke-dashoffset: -248; }
-}
+.wire-flow-preview { height: 82px; min-width: 300px; border-radius: 12px; border: 1px solid color-mix(in oklab, var(--rw-line-soft) 72%, transparent); background: color-mix(in oklab, var(--rw-canvas) 88%, transparent); overflow: hidden; }
+.wire-flow-preview .react-flow__node { opacity: 0; pointer-events: none; }
+.wire-flow-preview .react-flow__handle { opacity: 0; pointer-events: none; }
+.wire-flow-preview .react-flow__pane { cursor: default; }
+.wire-anchor-node { width: 1px; height: 1px; }
+.wire-anchor-handle { width: 1px; height: 1px; min-width: 1px; min-height: 1px; border: 0; background: transparent; }
+.wire-status-grid { display: grid; grid-template-columns: repeat(2, minmax(260px, 1fr)); gap: 12px; margin-top: 14px; }
+.wire-status-card { padding: 10px; border: 1px solid var(--rw-line-soft); border-radius: 14px; background: color-mix(in oklab, var(--rw-canvas) 74%, transparent); }
+.wire-status-card small { display: block; margin: 0 0 6px; color: var(--rw-faint); font: 10px var(--font-mono); text-transform: uppercase; letter-spacing: .06em; }
 @media (max-width: 920px) {
-  .wire-row { grid-template-columns: 1fr; }
-  .wire-columns, .wire-controls { grid-template-columns: 1fr; }
-  .wire-playground-preview { max-width: none; }
+  .wire-row, .wire-controls, .wire-status-grid { grid-template-columns: 1fr; }
 }
 `;
 
-const meta: Meta<typeof WireStylePrototype> = {
-  title: "Design/Wire style prototype",
-  component: WireStylePrototype,
+const meta: Meta<typeof WireStyles> = {
+  title: "Canvas/Wires",
+  component: WireStyles,
 };
 export default meta;
 
-type Story = StoryObj<typeof WireStylePrototype>;
+type Story = StoryObj<typeof WireStyles>;
 
-export const Gallery: Story = {};
+export const LiveStyles: Story = {};

@@ -4,7 +4,6 @@ import {
   Background,
   BackgroundVariant,
   Controls,
-  addEdge,
   useNodesState,
   useEdgesState,
   type Connection,
@@ -14,7 +13,6 @@ import {
   type OnSelectionChangeParams,
   type ReactFlowInstance,
 } from "@xyflow/react";
-import "@xyflow/react/dist/style.css";
 import { buildThemeVars, gridStyle, TYPE_VAR, type Aesthetic, type Mode } from "../../shared/theme.js";
 import { cn } from "./cn.js";
 import { evaluate, type Memory, type ViewEdge } from "../../shared/engine/evaluate.js";
@@ -29,8 +27,10 @@ import { Palette } from "./canvas/Palette.js";
 import { NodeConfigPopup } from "./canvas/NodeConfigPopup.js";
 import { PALETTE, growVariadic, type NodeTemplate, type RequiredConfig } from "./canvas/node-templates.js";
 import { ResultsProvider } from "./canvas/results-context.js";
-import { connectionReason, connectionValid, edgeStyle, type RWNodeType } from "./canvas/validation.js";
+import { connectionReason, connectionValid, type RWNodeType } from "./canvas/validation.js";
+import { connectionAlreadyWired, replaceInputEdge } from "./canvas/wire-replace.js";
 import { CommentNode } from "./canvas/CommentNode.js";
+import { RWEdge, withRWEdgeData } from "./canvas/RWEdge.js";
 import { CommentCtx } from "./canvas/comments-context.js";
 import { type CommentNodeType } from "./canvas/comments.js";
 import { MobileBar } from "./components/MobileBar.js";
@@ -59,6 +59,7 @@ import { useCollabDocument } from "./state/use-collab-document.js";
 import { useCommentFrames } from "./state/use-comment-frames.js";
 
 const nodeTypes = { rw: RWNode, comment: CommentNode };
+const edgeTypes = { rw: RWEdge };
 const DEFAULT_AESTHETIC: Aesthetic = "ide";
 
 const isRWNode = (n: EditorNode): n is RWNodeType => n.type === "rw";
@@ -325,8 +326,13 @@ export function App() {
 
   const onConnect = useCallback(
     (c: Connection) => {
+      // Redrawing the identical wire onto its own input replaces nothing, so skip it rather than
+      // record a no-op undo checkpoint and churn state.
+      if (connectionAlreadyWired(edgesRef.current, c)) return;
       pushHistory();
-      setEdges((eds) => addEdge({ ...c, animated: true, style: edgeStyle(rwNodes, c.source, c.sourceHandle) }, eds));
+      // An input pin holds at most one wire; wiring an already-occupied input replaces the old wire
+      // in the same edit, so the checkpoint above makes the whole replace one undo step.
+      setEdges((eds) => replaceInputEdge(eds, c));
       // Connecting a variadic node's trailing empty pin fills it and grows the next one.
       if (c.target && c.targetHandle) {
         const handle = c.targetHandle;
@@ -337,7 +343,7 @@ export function App() {
         );
       }
     },
-    [rwNodes, setEdges, setNodes, pushHistory],
+    [setEdges, setNodes, pushHistory],
   );
   const isValidConnection: IsValidConnection = useCallback((c) => connectionValid(rwNodes, edges, c as Connection), [rwNodes, edges]);
 
@@ -488,7 +494,7 @@ export function App() {
       es
         .filter((e) => !removedE.has(e.id))
         .concat(
-          r.newEdges.map((e) => ({ id: e.id, source: e.from.node, sourceHandle: e.from.pin, target: e.to.node, targetHandle: e.to.pin, animated: true, style: edgeStyle(rwNodes, e.from.node, e.from.pin) })),
+          r.newEdges.map((e) => ({ id: e.id, source: e.from.node, sourceHandle: e.from.pin, target: e.to.node, targetHandle: e.to.pin, type: "rw" })),
         ),
     );
     setSelected(r.instance.id);
@@ -618,6 +624,7 @@ export function App() {
     [selectedDef],
   );
   const valueHistory = useValueHistory(results, observedPins);
+  const displayEdges = useMemo(() => withRWEdgeData(edges, rwNodes, results), [edges, rwNodes, results]);
 
   return (
     <div
@@ -763,12 +770,12 @@ export function App() {
           </div>
           <CommentCtx.Provider value={commentOps}>
             <ResultsProvider value={{ results, actuating, entities, onConfig, onSetValue }}>
-              <ReactFlow
+              <ReactFlow<EditorNode, Edge>
                 onInit={(inst) => {
                   rf.current = inst;
                 }}
                 nodes={nodes}
-                edges={edges}
+                edges={displayEdges}
                 onNodesChange={onNodesChange}
                 onEdgesChange={onEdgesChange}
                 onConnect={onConnect}
@@ -784,6 +791,7 @@ export function App() {
                 onBeforeDelete={onBeforeDelete}
                 onMove={(_, viewport) => setZoom(viewport.zoom)}
                 nodeTypes={nodeTypes}
+                edgeTypes={edgeTypes}
                 colorMode={mode}
                 deleteKeyCode={["Backspace", "Delete"]}
                 elevateNodesOnSelect={false}
