@@ -74,6 +74,10 @@ jobs:
           cache: true
           locked: true
 
+      - name: Install npm dependencies through pixi tasks
+        if: steps.version.outputs.tag_exists == 'false'
+        run: pixi run --locked install-all
+
       - name: Run checks
         if: steps.version.outputs.tag_exists == 'false'
         run: pixi run --locked check
