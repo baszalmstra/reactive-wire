@@ -1,5 +1,8 @@
 import { defineConfig, devices } from "@playwright/test";
 
+const frontendPort = process.env.E2E_FRONTEND_PORT ?? "5175";
+const baseURL = `http://127.0.0.1:${frontendPort}`;
+
 export default defineConfig({
   testDir: "./e2e",
   timeout: 30_000,
@@ -10,7 +13,7 @@ export default defineConfig({
   workers: 1,
   reporter: process.env.CI ? "github" : "list",
   use: {
-    baseURL: "http://127.0.0.1:5175",
+    baseURL,
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
   },
@@ -19,7 +22,7 @@ export default defineConfig({
   ],
   webServer: {
     command: "npm run e2e:app",
-    url: "http://127.0.0.1:5175",
+    url: baseURL,
     reuseExistingServer: false,
     timeout: 30_000,
   },

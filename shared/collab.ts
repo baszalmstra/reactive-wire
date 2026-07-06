@@ -50,6 +50,8 @@ export type DocErrorMessage = { type: "docError"; error: string };
 export type CollabProtocolMessage = DocStateMessage | DocUpdateMessage | DocErrorMessage;
 
 const VERSION = 1;
+/** The editor document schema version this build reads and writes. */
+export const EDITOR_DOCUMENT_VERSION = VERSION;
 const DEFAULT_FLOW_ID = "flow-1";
 export const DEFAULT_MAX_DOC_UPDATE_BYTES = 2_000_000;
 export const DEFAULT_MAX_DOC_STATE_BYTES = 8_000_000;
@@ -404,8 +406,28 @@ function orderedValues<T extends { id: string }>(map: Y.Map<unknown>, order: Y.A
   return out;
 }
 
+/** The version stamped into a document's meta map, or undefined for an uninitialized doc. */
+export function readEditorDocumentVersion(doc: Y.Doc): unknown {
+  return doc.getMap("meta").get("version");
+}
+
+/**
+ * Read a document's snapshot without enforcing the version. The CRDT map structure is
+ * version-stable — only the JSON payloads inside nodes change across versions — so this lifts an
+ * older-than-current doc into a snapshot the migration registry can then transform. The strict
+ * snapshotFromEditorDoc stays the reader for current-version docs; use this only on the migration
+ * path where the version guard would reject a doc that is meant to be upgraded.
+ */
+export function readEditorDocumentSnapshotUnchecked(doc: Y.Doc): EditorDocumentSnapshot {
+  return readEditorDocSnapshot(doc);
+}
+
 export function snapshotFromEditorDoc(doc: Y.Doc): EditorDocumentSnapshot {
   ensureEditorDocInitialized(doc);
+  return readEditorDocSnapshot(doc);
+}
+
+function readEditorDocSnapshot(doc: Y.Doc): EditorDocumentSnapshot {
   const { meta, flows, flowOrder, macros } = rootMaps(doc);
   const seen = new Set<string>();
   const outFlows: CollabFlow[] = [];
@@ -435,6 +457,8 @@ export function snapshotFromEditorDoc(doc: Y.Doc): EditorDocumentSnapshot {
   const deployFlowId = safeString(meta.get("deployFlowId"), activeFlowId || fallback);
   const snapshotFlows = outFlows.length ? outFlows : emptyEditorDocumentSnapshot().flows;
   return {
+    // Always stamped current, even on the lenient migration read of an older doc. Migration
+    // functions must key off the fromVersion passed to migrateSnapshot, never this field.
     version: VERSION,
     activeFlowId: snapshotFlows.some((f) => f.id === activeFlowId) ? activeFlowId : fallback,
     flows: snapshotFlows,
