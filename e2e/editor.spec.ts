@@ -1,9 +1,13 @@
 import { expect, test } from "@playwright/test";
+import { clearCanvas } from "./canvas-utils.js";
 
 test.describe.serial("Reactive Wire editor with mock server", () => {
   test.beforeEach(async ({ page }) => {
     await page.goto("/");
     await expect(page.getByLabel("Home Assistant connected")).toBeVisible();
+    // The mock server's collaborative document is shared and persisted, so start from a clean
+    // canvas no matter what a previous spec left behind.
+    await clearCanvas(page);
   });
 
   test("adds a palette node and renders it on the canvas", async ({ page }) => {
