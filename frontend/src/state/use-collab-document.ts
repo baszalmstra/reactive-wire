@@ -37,6 +37,8 @@ export function useCollabDocument(options: {
   replaceMacros: (macros: MacroMap) => void;
   autoDeploy: boolean;
   setAutoDeploy: Dispatch<SetStateAction<boolean>>;
+  deployedFlowIds: string[];
+  setDeployedFlowIds: Dispatch<SetStateAction<string[]>>;
   setNodes: Dispatch<SetStateAction<EditorNode[]>>;
   setEdges: Dispatch<SetStateAction<Edge[]>>;
   setSelected: Dispatch<SetStateAction<string | null>>;
@@ -59,6 +61,8 @@ export function useCollabDocument(options: {
     replaceMacros,
     autoDeploy,
     setAutoDeploy,
+    deployedFlowIds,
+    setDeployedFlowIds,
     setNodes,
     setEdges,
     setSelected,
@@ -82,7 +86,8 @@ export function useCollabDocument(options: {
     activeEdges: edgesRef.current,
     macros,
     autoDeploy,
-  }), [activeFlowId, autoDeploy, flows, macros, nodesRef, edgesRef]);
+    deployedFlowIds,
+  }), [activeFlowId, autoDeploy, deployedFlowIds, flows, macros, nodesRef, edgesRef]);
 
   const applyRemoteDocumentSnapshot = useCallback((snapshot: EditorDocumentSnapshot) => {
     applyingCollab.current = true;
@@ -93,6 +98,7 @@ export function useCollabDocument(options: {
     setEdges(applied.activeEdges);
     replaceMacros(applied.macros);
     setAutoDeploy(applied.autoDeploy);
+    setDeployedFlowIds(applied.deployedFlowIds);
     setSelected((id) => (id && applied.activeNodes.some((node) => node.id === id) ? id : null));
     setSelectedIds((ids) => ids.filter((id) => applied.activeNodes.some((node) => node.id === id)));
     setPast([]);
@@ -105,7 +111,7 @@ export function useCollabDocument(options: {
     queueMicrotask(() => {
       applyingCollab.current = false;
     });
-  }, [activeFlowId, replaceMacros, setFlows, setActiveFlowId, setEdges, setNodes, setAutoDeploy, setSelected, setSelectedIds, setPast, setFuture]);
+  }, [activeFlowId, replaceMacros, setFlows, setActiveFlowId, setEdges, setNodes, setAutoDeploy, setDeployedFlowIds, setSelected, setSelectedIds, setPast, setFuture]);
 
   const flushLocalDocumentToCollab = useCallback((allowBeforeReady = false) => {
     if ((!allowBeforeReady && !collabReady.current) || applyingCollab.current) return;
@@ -176,5 +182,5 @@ export function useCollabDocument(options: {
     if (!collabReady.current || applyingCollab.current) return;
     const timer = setTimeout(() => flushLocalDocumentToCollab(), 180);
     return () => clearTimeout(timer);
-  }, [nodes, edges, flows, activeFlowId, macros, flushLocalDocumentToCollab]);
+  }, [nodes, edges, flows, activeFlowId, macros, autoDeploy, deployedFlowIds, flushLocalDocumentToCollab]);
 }

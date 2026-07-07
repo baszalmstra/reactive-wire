@@ -1,5 +1,6 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
 import { clearCanvas } from "./canvas-utils.js";
+import { resetWorkspace } from "./collab-utils.js";
 import { debugState, nodeOfType, onlySink, queryServer, stateToBool } from "./deploy-depth-utils.js";
 
 /**
@@ -201,6 +202,30 @@ test.describe.serial("Deploy depth: cross-layer against server debugState", () =
     // Back out without deploying this problematic graph.
     await guard.getByRole("button", { name: "Cancel" }).click();
     await expect(guard).toHaveCount(0);
+  });
+
+  test("deploys all flow tabs enabled for live deployment", async ({ page }) => {
+    await page.getByRole("button", { name: "New flow" }).click();
+    await expect(page.locator('div[title="Flow 2"]')).toBeVisible();
+
+    const flow2Sink = await addLightSink(page, "light.bedroom");
+    await setSinkOn(flow2Sink, false);
+
+    await page.locator('div[title="Flow 1"]').click();
+    const flow1Sink = await addLightSink(page, "light.bedroom");
+    await setSinkOn(flow1Sink, false);
+
+    await page.getByRole("button", { name: "Enable Flow 2 for deployment" }).click();
+    await deployViaGuard(page);
+
+    const debug = await debugState(PORT);
+    const sinkEntries = Object.entries(debug.nodes).filter(([, node]) => node.type === "sink-light");
+    expect(sinkEntries.map(([id]) => id).sort()).toHaveLength(2);
+    expect(sinkEntries.every(([id]) => id.includes("/"))).toBe(true);
+    expect(Object.keys(debug.sinks)).toHaveLength(2);
+
+    // This spec creates an extra flow; collapse it before sibling specs inherit the shared doc.
+    await resetWorkspace(page);
   });
 
   test("auto-deploy redeploys on edit without pressing Deploy (generation bumps)", async ({ page }) => {

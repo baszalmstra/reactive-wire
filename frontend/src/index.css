@@ -135,6 +135,9 @@
 .rw-ha-badge { height: 30px; min-width: 34px; display: flex; align-items: center; justify-content: center; border-radius: 7px; border: 1px solid var(--rw-line); font-size: 10.5px; font-weight: 800; letter-spacing: .08em; color: var(--rw-dim); }
 .rw-ha-badge.online { color: var(--rw-h-ok); border-color: color-mix(in oklab, var(--rw-h-ok) 38%, transparent); background: color-mix(in oklab, var(--rw-h-ok) 9%, transparent); }
 .rw-ha-badge.offline { color: var(--rw-h-warn); border-color: color-mix(in oklab, var(--rw-h-warn) 38%, transparent); background: color-mix(in oklab, var(--rw-h-warn) 9%, transparent); }
+.rw-flow-live-toggle { width: 15px; height: 15px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--rw-line); border-radius: 999px; background: transparent; color: var(--rw-faint); font-size: 9px; line-height: 1; cursor: pointer; transition: all .12s; }
+.rw-flow-live-toggle:hover { color: var(--rw-text); border-color: var(--rw-accent); }
+.rw-flow-live-toggle.on { color: var(--rw-h-ok); border-color: color-mix(in oklab, var(--rw-h-ok) 55%, transparent); background: color-mix(in oklab, var(--rw-h-ok) 13%, transparent); box-shadow: 0 0 0 2px color-mix(in oklab, var(--rw-h-ok) 7%, transparent); }
 
 /* ── Inspector ─────────────────────────────────────────────────────────── */
 .rw-inspector {

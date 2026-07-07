@@ -55,20 +55,34 @@ function snapshot(overrides: Partial<EditorDocumentSnapshot> = {}): EditorDocume
       },
     ],
     macros: {},
-    settings: { autoDeploy: false, deployFlowId: "flow-a" },
+    settings: { autoDeploy: false, deployFlowId: "flow-a", deployedFlowIds: ["flow-a"] },
     ...overrides,
   };
 }
 
 describe("collab deploy adapter", () => {
-  it("derives a runtime graph from the selected deploy flow and filters non-runtime nodes", () => {
+  it("derives a namespaced runtime graph from enabled flows and filters non-runtime nodes", () => {
     const graph = graphFromEditorSnapshot(snapshot());
 
-    expect(graph?.nodes.map((n) => n.id)).toEqual(["a", "b"]);
-    expect(graph?.edges).toEqual([{ id: "ok", from: { node: "a", pin: "out" }, to: { node: "b", pin: "in" } }]);
+    expect(graph.nodes.map((n) => n.id)).toEqual(["flow-a/a", "flow-a/b"]);
+    expect(graph.edges).toEqual([{ id: "flow-a/ok", from: { node: "flow-a/a", pin: "out" }, to: { node: "flow-a/b", pin: "in" } }]);
   });
 
-  it("uses the configured deploy flow rather than the collaborative active flow", () => {
+  it("combines multiple enabled flows rather than following the collaborative active tab", () => {
+    const graph = graphFromEditorSnapshot(snapshot({
+      activeFlowId: "flow-a",
+      flows: [
+        { id: "flow-a", name: "A", nodes: [rw("same")], edges: [] },
+        { id: "flow-b", name: "B", nodes: [rw("same")], edges: [] },
+        { id: "draft", name: "Draft", nodes: [rw("draft")], edges: [] },
+      ],
+      settings: { autoDeploy: false, deployFlowId: "flow-a", deployedFlowIds: ["flow-a", "flow-b"] },
+    }));
+
+    expect(graph.nodes.map((n) => n.id)).toEqual(["flow-a/same", "flow-b/same"]);
+  });
+
+  it("falls back to the legacy single deploy flow when deployedFlowIds is absent", () => {
     const graph = graphFromEditorSnapshot(snapshot({
       activeFlowId: "flow-a",
       flows: [
@@ -78,19 +92,19 @@ describe("collab deploy adapter", () => {
       settings: { autoDeploy: false, deployFlowId: "flow-b" },
     }));
 
-    expect(graph?.nodes.map((n) => n.id)).toEqual(["b"]);
+    expect(graph.nodes.map((n) => n.id)).toEqual(["flow-b/b"]);
   });
 
   it("auto-deploys once per deploy graph signature and resets when disabled", () => {
     const deployed: DeployRequest[] = [];
     const controller = new AutoDeployController((graph) => deployed.push(graph));
-    const enabled = snapshot({ settings: { autoDeploy: true, deployFlowId: "flow-a" } });
+    const enabled = snapshot({ settings: { autoDeploy: true, deployFlowId: "flow-a", deployedFlowIds: ["flow-a"] } });
 
     expect(controller.maybeDeploy(enabled)).toEqual({ ok: true, unsupported: [] });
     expect(controller.maybeDeploy(enabled)).toBeUndefined();
     expect(deployed).toHaveLength(1);
 
-    controller.maybeDeploy(snapshot({ settings: { autoDeploy: false, deployFlowId: "flow-a" } }));
+    controller.maybeDeploy(snapshot({ settings: { autoDeploy: false, deployFlowId: "flow-a", deployedFlowIds: ["flow-a"] } }));
     expect(controller.maybeDeploy(enabled)).toEqual({ ok: true, unsupported: [] });
     expect(deployed).toHaveLength(2);
   });
@@ -101,7 +115,7 @@ describe("collab deploy adapter", () => {
     const controller = new AutoDeployController((graph) => deployer.deploy(graph.nodes, graph.edges, true, graph.macros ?? {}));
     const snap = snapshot({
       flows: [{ id: "flow-a", name: "A", nodes: [partialRw("a")], edges: [] }],
-      settings: { autoDeploy: true, deployFlowId: "flow-a" },
+      settings: { autoDeploy: true, deployFlowId: "flow-a", deployedFlowIds: ["flow-a"] },
     });
 
     // Before the fix this def reached evaluate() with `inputs`/`outputs` undefined and threw inside
@@ -116,7 +130,7 @@ describe("collab deploy adapter", () => {
     const controller = new AutoDeployController((graph) => deployed.push(graph));
     const snap = snapshot({
       flows: [{ id: "flow-a", name: "A", nodes: [invalidRw("a")], edges: [] }],
-      settings: { autoDeploy: true, deployFlowId: "flow-a" },
+      settings: { autoDeploy: true, deployFlowId: "flow-a", deployedFlowIds: ["flow-a"] },
     });
 
     const result = controller.maybeDeploy(snap);
@@ -132,7 +146,7 @@ describe("collab deploy adapter", () => {
     const controller = new AutoDeployController(() => {});
     const snap = snapshot({
       flows: [{ id: "flow-a", name: "A", nodes: [invalidRw("a")], edges: [] }],
-      settings: { autoDeploy: true, deployFlowId: "flow-a" },
+      settings: { autoDeploy: true, deployFlowId: "flow-a", deployedFlowIds: ["flow-a"] },
     });
 
     controller.maybeDeploy(snap);

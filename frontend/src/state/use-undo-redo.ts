@@ -1,4 +1,5 @@
 import { useCallback, useState, type Dispatch, type MutableRefObject, type SetStateAction } from "react";
+import { flushSync } from "react-dom";
 import type { Edge } from "@xyflow/react";
 import type { EditorNode } from "../canvas/flows.js";
 
@@ -41,8 +42,13 @@ export function useUndoRedo(options: {
   // been reassigned to the post-mutation arrays, and would capture the wrong state.
   const pushHistory = useCallback(() => {
     const before = snapshot();
-    setPast((p) => [...p.slice(-40), before]);
-    setFuture([]);
+    // Commit the checkpoint before the mutating event continues. React Flow's onBeforeDelete may
+    // remove nodes/edges immediately after this callback; without a synchronous commit, a very fast
+    // Ctrl+Z can observe the pre-checkpoint history and undo the wrong edit.
+    flushSync(() => {
+      setPast((p) => [...p.slice(-40), before]);
+      setFuture([]);
+    });
   }, [snapshot]);
   const undo = useCallback(() => {
     const current = snapshot();

@@ -22,6 +22,7 @@ export interface EditorWorkingState {
   activeEdges: Edge[];
   macros: MacroMap;
   autoDeploy: boolean;
+  deployedFlowIds: string[];
 }
 
 export interface AppliedEditorDocumentState {
@@ -31,6 +32,7 @@ export interface AppliedEditorDocumentState {
   activeEdges: Edge[];
   macros: MacroMap;
   autoDeploy: boolean;
+  deployedFlowIds: string[];
 }
 
 export function editorNodeWithInitialSize(node: EditorNode): EditorNode {
@@ -112,8 +114,8 @@ function collabEdgeToEditor(edge: CollabEdge): Edge {
 /**
  * Project the local editor working state into the collaborative document interface.
  * The active flow's React Flow working copy is stashed into its flow entry first; the
- * active tab itself remains local UI state, while settings.deployFlowId records the flow
- * the server should auto-deploy.
+ * active tab itself remains local UI state; settings.deployedFlowIds records the flow tabs
+ * the server should deploy.
  */
 export function snapshotFromWorkingState(state: EditorWorkingState): EditorDocumentSnapshot {
   const stashedFlows = state.flows.map((flow) =>
@@ -128,15 +130,15 @@ export function snapshotFromWorkingState(state: EditorWorkingState): EditorDocum
     edges: edgesForCollab(flow.edges),
   }));
   if (snapshotFlows.length === 0) snapshotFlows.push(emptyEditorDocumentSnapshot().flows[0]!);
-  const deployFlowId = snapshotFlows.some((flow) => flow.id === state.activeFlowId)
-    ? state.activeFlowId
-    : snapshotFlows[0]?.id;
+  const deployedFlowIds = state.deployedFlowIds.filter((id, index) =>
+    state.deployedFlowIds.indexOf(id) === index && snapshotFlows.some((flow) => flow.id === id),
+  );
   return {
     version: 1,
     activeFlowId: snapshotFlows[0]?.id,
     flows: snapshotFlows,
     macros: state.macros,
-    settings: { autoDeploy: state.autoDeploy, deployFlowId },
+    settings: { autoDeploy: state.autoDeploy, deployFlowId: deployedFlowIds[0] ?? snapshotFlows[0]?.id, deployedFlowIds },
   };
 }
 
@@ -166,6 +168,7 @@ export function workingStateFromSnapshot(
     activeEdges: active?.edges ?? [],
     macros: snapshot.macros,
     autoDeploy: snapshot.settings.autoDeploy,
+    deployedFlowIds: snapshot.settings.deployedFlowIds ?? [snapshot.settings.deployFlowId].filter((id): id is string => !!id),
   };
 }
 

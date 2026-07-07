@@ -13,11 +13,13 @@ type Story = StoryObj<typeof FlowTabs>;
 function Demo({ initial }: { initial: { id: string; name: string }[] }) {
   const [flows, setFlows] = useState(initial);
   const [active, setActive] = useState(initial[0]!.id);
+  const [deployedIds, setDeployedIds] = useState<string[]>([initial[0]!.id]);
   return (
     <div style={{ width: 520, border: "1px solid var(--rw-line)", borderRadius: 8, overflow: "hidden" }}>
       <FlowTabs
         flows={flows}
         activeId={active}
+        deployedIds={deployedIds}
         onSelect={setActive}
         onAdd={() => {
           const id = `f${Date.now()}`;
@@ -25,9 +27,11 @@ function Demo({ initial }: { initial: { id: string; name: string }[] }) {
           setActive(id);
         }}
         onRename={(id, name) => setFlows((fs) => fs.map((f) => (f.id === id ? { ...f, name } : f)))}
+        onToggleDeploy={(id, enabled) => setDeployedIds((ids) => (enabled ? [...new Set([...ids, id])] : ids.filter((x) => x !== id)))}
         onClose={(id) =>
           setFlows((fs) => {
             const rest = fs.filter((f) => f.id !== id);
+            setDeployedIds((ids) => ids.filter((x) => x !== id));
             if (id === active && rest.length) setActive(rest[0]!.id);
             return rest;
           })

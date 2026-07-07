@@ -69,13 +69,14 @@ function useHarness(server: Server) {
   edgesRef.current = edges;
   const [macros, setMacros] = useState<MacroMap>({});
   const [autoDeploy, setAutoDeploy] = useState(false);
+  const [deployedFlowIds, setDeployedFlowIds] = useState<string[]>([activeFlowId]);
   const [, setSelected] = useState<string | null>(null);
   const [, setSelectedIds] = useState<string[]>([]);
   const [, setPast] = useState<CanvasSnapshot[]>([]);
   const [, setFuture] = useState<CanvasSnapshot[]>([]);
   useCollabDocument({
     server, flows, setFlows, activeFlowId, setActiveFlowId, nodes, edges, nodesRef, edgesRef,
-    macros, replaceMacros: setMacros, autoDeploy, setAutoDeploy, setNodes, setEdges,
+    macros, replaceMacros: setMacros, autoDeploy, setAutoDeploy, deployedFlowIds, setDeployedFlowIds, setNodes, setEdges,
     setSelected, setSelectedIds, setPast, setFuture, showToast: () => {},
   });
   return { nodes, setFlows };

@@ -70,7 +70,10 @@ const stopFeed = startFeed(ha, { port, host, allowedHosts, allowedOrigins, deplo
   },
   documentStore,
   onDocumentChange: (snapshot) => autoDeploy.maybeDeploy(snapshot),
-  inspect: () => ({ ...deployer.inspect(), autoDeploy: documentStore.snapshot().settings.autoDeploy }),
+  inspect: () => {
+    const settings = documentStore.snapshot().settings;
+    return { ...deployer.inspect(), autoDeploy: settings.autoDeploy, deployedFlowIds: settings.deployedFlowIds ?? [settings.deployFlowId].filter((id): id is string => !!id) };
+  },
 });
 
 autoDeploy.maybeDeploy(documentStore.snapshot());

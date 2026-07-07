@@ -56,11 +56,12 @@ function flow(id: string, nodes: EditorNode[] = [], edges: Edge[] = []): Flow {
 }
 
 function collabSnapshot(flows: EditorDocumentSnapshot["flows"], activeFlowId?: string): EditorDocumentSnapshot {
-  return { version: 1, activeFlowId, flows, macros: {}, settings: { autoDeploy: false, deployFlowId: flows[0]?.id } };
+  const first = flows[0]?.id;
+  return { version: 1, activeFlowId, flows, macros: {}, settings: { autoDeploy: false, deployFlowId: first, deployedFlowIds: first ? [first] : [] } };
 }
 
 describe("editor document adapter", () => {
-  it("stashes the active working copy into the collaborative snapshot", () => {
+  it("stashes the active working copy without making the active tab the deployment target", () => {
     const inactiveNode = rw("old");
     const activeNode = rw("active", 42);
     const activeEdge = edge("e1", "active", "other");
@@ -72,13 +73,14 @@ describe("editor document adapter", () => {
       activeEdges: [activeEdge],
       macros: {},
       autoDeploy: true,
+      deployedFlowIds: ["inactive"],
     });
 
     expect(snapshot.flows.find((f) => f.id === "inactive")?.nodes.map((n) => n.id)).toEqual(["old"]);
     expect(snapshot.flows.find((f) => f.id === "active")?.nodes.map((n) => n.id)).toEqual(["active"]);
     expect(snapshot.flows.find((f) => f.id === "active")?.edges.map((e) => e.id)).toEqual(["e1"]);
     expect(snapshot.activeFlowId).toBe("inactive");
-    expect(snapshot.settings).toEqual({ autoDeploy: true, deployFlowId: "active" });
+    expect(snapshot.settings).toEqual({ autoDeploy: true, deployFlowId: "inactive", deployedFlowIds: ["inactive"] });
   });
 
   it("strips selected state from collaborative nodes", () => {
@@ -89,12 +91,13 @@ describe("editor document adapter", () => {
       activeEdges: [],
       macros: {},
       autoDeploy: false,
+      deployedFlowIds: ["flow"],
     });
 
     expect(snapshot.flows[0]!.nodes.every((n) => !("selected" in n))).toBe(true);
   });
 
-  it("uses the first flow when the active flow is missing from the working state", () => {
+  it("filters missing deployment flows while keeping a legacy first-flow fallback", () => {
     const snapshot = snapshotFromWorkingState({
       flows: [flow("first")],
       activeFlowId: "missing",
@@ -102,9 +105,11 @@ describe("editor document adapter", () => {
       activeEdges: [],
       macros: {},
       autoDeploy: false,
+      deployedFlowIds: ["missing"],
     });
 
     expect(snapshot.settings.deployFlowId).toBe("first");
+    expect(snapshot.settings.deployedFlowIds).toEqual([]);
   });
 
   it("preserves the previous local active flow when applying a remote snapshot", () => {
@@ -132,7 +137,7 @@ describe("editor document adapter", () => {
     expect(workingStateFromSnapshot(withInvalidSnapshotActive, "deleted").activeFlowId).toBe("first");
   });
 
-  it("restores macros and auto-deploy settings from the snapshot", () => {
+  it("restores macros and deployment settings from the snapshot", () => {
     const macros: MacroMap = {
       m1: { id: "m1", name: "Macro", inputs: [], outputs: [], nodes: [], edges: [], stateful: false },
     };
@@ -141,22 +146,22 @@ describe("editor document adapter", () => {
       activeFlowId: "flow",
       flows: [{ id: "flow", name: "Flow", nodes: [], edges: [] }],
       macros,
-      settings: { autoDeploy: true, deployFlowId: "flow" },
+      settings: { autoDeploy: true, deployFlowId: "flow", deployedFlowIds: ["flow"] },
     };
 
-    expect(workingStateFromSnapshot(snapshot, "flow")).toMatchObject({ macros, autoDeploy: true });
+    expect(workingStateFromSnapshot(snapshot, "flow")).toMatchObject({ macros, autoDeploy: true, deployedFlowIds: ["flow"] });
   });
 
   it("keeps current JSON snapshot equality semantics", () => {
-    const snapshot = snapshotFromWorkingState({ flows: [flow("flow")], activeFlowId: "flow", activeNodes: [], activeEdges: [], macros: {}, autoDeploy: false });
+    const snapshot = snapshotFromWorkingState({ flows: [flow("flow")], activeFlowId: "flow", activeNodes: [], activeEdges: [], macros: {}, autoDeploy: false, deployedFlowIds: ["flow"] });
 
     expect(editorSnapshotsEqual(null, snapshot)).toBe(false);
     expect(editorSnapshotsEqual(snapshot, JSON.parse(JSON.stringify(snapshot)) as EditorDocumentSnapshot)).toBe(true);
   });
 
   it("detects whether a local snapshot has user content", () => {
-    const empty = snapshotFromWorkingState({ flows: [{ id: "flow-1", name: "Flow 1", nodes: [], edges: [] }], activeFlowId: "flow-1", activeNodes: [], activeEdges: [], macros: {}, autoDeploy: false });
-    const nonEmpty = snapshotFromWorkingState({ flows: [flow("flow")], activeFlowId: "flow", activeNodes: [rw("n")], activeEdges: [], macros: {}, autoDeploy: false });
+    const empty = snapshotFromWorkingState({ flows: [{ id: "flow-1", name: "Flow 1", nodes: [], edges: [] }], activeFlowId: "flow-1", activeNodes: [], activeEdges: [], macros: {}, autoDeploy: false, deployedFlowIds: ["flow-1"] });
+    const nonEmpty = snapshotFromWorkingState({ flows: [flow("flow")], activeFlowId: "flow", activeNodes: [rw("n")], activeEdges: [], macros: {}, autoDeploy: false, deployedFlowIds: ["flow"] });
 
     expect(editorSnapshotHasUserContent(empty)).toBe(false);
     expect(editorSnapshotHasUserContent(nonEmpty)).toBe(true);

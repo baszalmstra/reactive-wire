@@ -30,10 +30,12 @@ export interface CollabFlow {
 }
 
 export interface EditorDocumentSettings {
-  /** Server-owned actuation policy. When true, the server deploys the configured flow after document edits. */
+  /** Server-owned actuation policy. When true, the server deploys enabled flows after document edits. */
   autoDeploy: boolean;
-  /** Flow the server should auto-deploy. This is intentionally separate from each client's active tab. */
+  /** Legacy single-flow deployment target, kept for older documents/clients. */
   deployFlowId?: string;
+  /** Flow tabs the server should deploy and keep live. Empty means no flows are enabled. */
+  deployedFlowIds?: string[];
 }
 
 export interface EditorDocumentSnapshot {
@@ -149,13 +151,30 @@ function sanitizeMacroMap(raw: unknown): MacroMap {
   return out;
 }
 
+function uniqueValidFlowIds(rawIds: unknown[], flowIds: Set<string>): string[] {
+  const out: string[] = [];
+  for (const raw of rawIds) {
+    const id = safeString(raw).trim();
+    if (!id || !flowIds.has(id) || out.includes(id)) continue;
+    out.push(id);
+  }
+  return out;
+}
+
+function readDeploymentFlowIds(settings: JsonRecord | null | undefined, flows: CollabFlow[], fallback: string): string[] {
+  const flowIds = new Set(flows.map((f) => f.id));
+  if (Array.isArray(settings?.deployedFlowIds)) return uniqueValidFlowIds(settings.deployedFlowIds, flowIds);
+  const legacy = safeString(settings?.deployFlowId, fallback).trim();
+  return legacy && flowIds.has(legacy) ? [legacy] : [fallback];
+}
+
 export function emptyEditorDocumentSnapshot(flowId = DEFAULT_FLOW_ID): EditorDocumentSnapshot {
   return {
     version: VERSION,
     activeFlowId: flowId,
     flows: [{ id: flowId, name: "Flow 1", nodes: [], edges: [] }],
     macros: {},
-    settings: { autoDeploy: false, deployFlowId: flowId },
+    settings: { autoDeploy: false, deployFlowId: flowId, deployedFlowIds: [flowId] },
   };
 }
 
@@ -179,16 +198,18 @@ export function sanitizeEditorDocumentSnapshot(raw: unknown): EditorDocumentSnap
   }
   if (flows.length === 0) flows.push(emptyEditorDocumentSnapshot().flows[0]!);
   const activeFlowId = safeString(record.activeFlowId, flows[0]!.id).trim();
+  const validActiveFlowId = flows.some((f) => f.id === activeFlowId) ? activeFlowId : flows[0]!.id;
   const settingsRecord = asRecord(record.settings);
-  const deployFlowId = safeString(settingsRecord?.deployFlowId, activeFlowId || flows[0]!.id).trim();
+  const deployedFlowIds = readDeploymentFlowIds(settingsRecord, flows, validActiveFlowId);
   return {
     version: VERSION,
-    activeFlowId: flows.some((f) => f.id === activeFlowId) ? activeFlowId : flows[0]!.id,
+    activeFlowId: validActiveFlowId,
     flows,
     macros: sanitizeMacroMap(record.macros),
     settings: {
       autoDeploy: settingsRecord?.autoDeploy === true,
-      deployFlowId: flows.some((f) => f.id === deployFlowId) ? deployFlowId : flows[0]!.id,
+      deployFlowId: deployedFlowIds[0] ?? validActiveFlowId,
+      deployedFlowIds,
     },
   };
 }
@@ -330,7 +351,8 @@ export function applyEditorSnapshot(doc: Y.Doc, rawSnapshot: unknown, origin?: u
     setMapValueIfChanged(meta, "version", VERSION);
     setMapValueIfChanged(meta, "activeFlowId", snapshot.activeFlowId ?? snapshot.flows[0]?.id ?? DEFAULT_FLOW_ID);
     setMapValueIfChanged(meta, "autoDeploy", snapshot.settings.autoDeploy);
-    setMapValueIfChanged(meta, "deployFlowId", snapshot.settings.deployFlowId ?? snapshot.activeFlowId ?? snapshot.flows[0]?.id ?? DEFAULT_FLOW_ID);
+    setMapValueIfChanged(meta, "deployedFlowIds", snapshot.settings.deployedFlowIds ?? [snapshot.settings.deployFlowId ?? snapshot.activeFlowId ?? snapshot.flows[0]?.id ?? DEFAULT_FLOW_ID]);
+    setMapValueIfChanged(meta, "deployFlowId", snapshot.settings.deployFlowId ?? snapshot.settings.deployedFlowIds?.[0] ?? snapshot.activeFlowId ?? snapshot.flows[0]?.id ?? DEFAULT_FLOW_ID);
     for (const id of Array.from(flows.keys())) flows.delete(id);
     replaceArray(flowOrder, snapshot.flows.map((f) => f.id));
     for (const flow of snapshot.flows) {
@@ -359,7 +381,8 @@ export function applyEditorSnapshotDiff(doc: Y.Doc, previousRaw: unknown, nextRa
     setMapValueIfChanged(meta, "version", VERSION);
     setMapValueIfChanged(meta, "activeFlowId", next.activeFlowId ?? next.flows[0]?.id ?? DEFAULT_FLOW_ID);
     setMapValueIfChanged(meta, "autoDeploy", next.settings.autoDeploy);
-    setMapValueIfChanged(meta, "deployFlowId", next.settings.deployFlowId ?? next.activeFlowId ?? next.flows[0]?.id ?? DEFAULT_FLOW_ID);
+    setMapValueIfChanged(meta, "deployedFlowIds", next.settings.deployedFlowIds ?? [next.settings.deployFlowId ?? next.activeFlowId ?? next.flows[0]?.id ?? DEFAULT_FLOW_ID]);
+    setMapValueIfChanged(meta, "deployFlowId", next.settings.deployFlowId ?? next.settings.deployedFlowIds?.[0] ?? next.activeFlowId ?? next.flows[0]?.id ?? DEFAULT_FLOW_ID);
 
     const prevFlows = new Map(previous.flows.map((f) => [f.id, f]));
     const nextFlows = new Map(next.flows.map((f) => [f.id, f]));
@@ -454,18 +477,20 @@ function readEditorDocSnapshot(doc: Y.Doc): EditorDocumentSnapshot {
   }
   const fallback = outFlows[0]?.id ?? DEFAULT_FLOW_ID;
   const activeFlowId = safeString(meta.get("activeFlowId"), fallback);
-  const deployFlowId = safeString(meta.get("deployFlowId"), activeFlowId || fallback);
   const snapshotFlows = outFlows.length ? outFlows : emptyEditorDocumentSnapshot().flows;
+  const validActiveFlowId = snapshotFlows.some((f) => f.id === activeFlowId) ? activeFlowId : fallback;
+  const deployedFlowIds = readDeploymentFlowIds({ deployedFlowIds: meta.get("deployedFlowIds"), deployFlowId: meta.get("deployFlowId") }, snapshotFlows, validActiveFlowId);
   return {
     // Always stamped current, even on the lenient migration read of an older doc. Migration
     // functions must key off the fromVersion passed to migrateSnapshot, never this field.
     version: VERSION,
-    activeFlowId: snapshotFlows.some((f) => f.id === activeFlowId) ? activeFlowId : fallback,
+    activeFlowId: validActiveFlowId,
     flows: snapshotFlows,
     macros: macroObj,
     settings: {
       autoDeploy: meta.get("autoDeploy") === true,
-      deployFlowId: snapshotFlows.some((f) => f.id === deployFlowId) ? deployFlowId : snapshotFlows[0]?.id ?? DEFAULT_FLOW_ID,
+      deployFlowId: deployedFlowIds[0] ?? validActiveFlowId,
+      deployedFlowIds,
     },
   };
 }

@@ -112,11 +112,11 @@ describe("collaborative editor document model", () => {
   it("syncs server-side auto-deploy settings through the collaborative document", () => {
     const doc = new Y.Doc();
     const base = emptyEditorDocumentSnapshot();
-    const enabled: EditorDocumentSnapshot = { ...base, settings: { autoDeploy: true, deployFlowId: base.flows[0]!.id } };
+    const enabled: EditorDocumentSnapshot = { ...base, settings: { autoDeploy: true, deployFlowId: base.flows[0]!.id, deployedFlowIds: [base.flows[0]!.id] } };
 
     applyEditorSnapshotDiff(doc, base, enabled, "client");
 
-    expect(snapshotFromEditorDoc(doc).settings).toEqual({ autoDeploy: true, deployFlowId: base.flows[0]!.id });
+    expect(snapshotFromEditorDoc(doc).settings).toEqual({ autoDeploy: true, deployFlowId: base.flows[0]!.id, deployedFlowIds: [base.flows[0]!.id] });
   });
 
   it("does not emit updates for an unchanged snapshot diff", () => {

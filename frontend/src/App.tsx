@@ -16,6 +16,7 @@ import {
 import { buildThemeVars, gridStyle, TYPE_VAR, type Aesthetic, type Mode } from "../../shared/theme.js";
 import { cn } from "./cn.js";
 import { evaluate, type Memory, type ViewEdge } from "../../shared/engine/evaluate.js";
+import { combineFlowGraphs, type RuntimeFlowGraph } from "../../shared/engine/flow-graphs.js";
 import { simulate } from "./example/sim.js";
 import { nodeGeom, type NodeData } from "../../shared/node-types.js";
 import type { EntityMap } from "../../shared/entities.js";
@@ -64,7 +65,6 @@ const edgeTypes = { rw: RWEdge };
 const DEFAULT_AESTHETIC: Aesthetic = "ide";
 
 const isRWNode = (n: EditorNode): n is RWNodeType => n.type === "rw";
-const isCommentNode = (n: EditorNode): n is CommentNodeType => n.type === "comment";
 
 /**
  * Marks every live value as last-known (stale) so chips grey out while the feed is down.
@@ -198,6 +198,20 @@ export function App() {
     setFuture,
     memories,
   });
+  const [deployedFlowIds, setDeployedFlowIds] = useState<string[]>(() => [activeFlowId]);
+  const deployedFlowIdSet = useMemo(() => new Set(deployedFlowIds), [deployedFlowIds]);
+  const activeFlowDeployed = deployedFlowIdSet.has(activeFlowId);
+  const toggleFlowDeploy = useCallback((id: string, enabled: boolean) => {
+    setDeployedFlowIds((ids) => {
+      const has = ids.includes(id);
+      if (enabled) return has ? ids : [...ids, id];
+      return ids.filter((x) => x !== id);
+    });
+  }, []);
+  const closeFlowAndDisable = useCallback((id: string) => {
+    setDeployedFlowIds((ids) => ids.filter((x) => x !== id));
+    closeFlow(id);
+  }, [closeFlow]);
 
   // Offline simulated entities, used when not connected to the server's live feed.
   const [simEntities, setSimEntities] = useState<EntityMap>(() => simulate(0));
@@ -280,8 +294,8 @@ export function App() {
   const problems = deriveProblems(nodeDefs, results, server.connected);
   const { errors: errorCount, warns: warnCount } = problemCounts(problems);
 
-  // The graph is actuating the home only when connected and either auto-deploying or freshly deployed.
-  const actuating = (autoDeploy || liveDeployed) && server.connected;
+  // The active flow is actuating only when it is part of the live deployment set and the server is live.
+  const actuating = activeFlowDeployed && (autoDeploy || liveDeployed) && server.connected;
 
   const deploy = server.deploy;
 
@@ -299,6 +313,8 @@ export function App() {
     replaceMacros: macroLib.replace,
     autoDeploy,
     setAutoDeploy,
+    deployedFlowIds,
+    setDeployedFlowIds,
     setNodes,
     setEdges,
     setSelected,
@@ -308,32 +324,49 @@ export function App() {
     showToast,
   });
 
+  const deployableFlowGraphs = useCallback((activeNodes: EditorNode[], activeEdges: Edge[]): RuntimeFlowGraph[] => {
+    const enabled = new Set(deployedFlowIds);
+    return flows
+      .filter((flow) => enabled.has(flow.id))
+      .map((flow) => {
+        const flowNodes = flow.id === activeFlowId ? activeNodes : flow.nodes;
+        const flowEdges = flow.id === activeFlowId ? activeEdges : flow.edges;
+        const runtimeNodes = flowNodes.filter(isRWNode).map((n) => n.data.def);
+        const runtimeNodeIds = new Set(runtimeNodes.map((n) => n.id));
+        return {
+          flowId: flow.id,
+          nodes: runtimeNodes,
+          edges: flowEdges
+            .filter((x) => runtimeNodeIds.has(x.source) && runtimeNodeIds.has(x.target))
+            .map((x) => ({
+              id: x.id,
+              from: { node: x.source, pin: x.sourceHandle ?? "" },
+              to: { node: x.target, pin: x.targetHandle ?? "" },
+            })),
+        };
+      });
+  }, [activeFlowId, deployedFlowIds, flows]);
+
   // Signature of the deployable graph: structure + config + wiring, ignoring node positions.
-  // Changes only on meaningful edits — not on entity-feed re-renders or node drags.
+  // Changes only on meaningful edits in enabled flows — not on entity-feed re-renders or node drags.
   const macrosRef = useRef<MacroMap>(macroLib.macros);
   macrosRef.current = macroLib.macros;
 
-  const graphSig = useMemo(
-    () =>
-      JSON.stringify({
-        n: rwNodes.map((n) => ({ id: n.id, t: n.data.def.type, c: n.data.def.config ?? null, v: n.data.def.values ?? null })),
-        e: edges.map((x) => ({ s: x.source, sh: x.sourceHandle, t: x.target, th: x.targetHandle })),
-        m: macroLib.macros,
-      }),
-    [rwNodes, edges, macroLib.macros],
-  );
+  const graphSig = useMemo(() => {
+    const deployFlows = deployableFlowGraphs(nodes, edges);
+    return JSON.stringify({
+      flows: deployFlows.map((flow) => ({
+        id: flow.flowId,
+        n: flow.nodes.map((n) => ({ id: n.id, t: n.type, c: n.config ?? null, v: n.values ?? null })),
+        e: flow.edges.map((x) => ({ s: x.from.node, sh: x.from.pin, t: x.to.node, th: x.to.pin })),
+      })),
+      m: macroLib.macros,
+    });
+  }, [deployableFlowGraphs, nodes, edges, macroLib.macros]);
 
   const deployNow = useCallback(() => {
-    const e = edgesRef.current.map((x) => ({
-      id: x.id,
-      from: { node: x.source, pin: x.sourceHandle ?? "" },
-      to: { node: x.target, pin: x.targetHandle ?? "" },
-    }));
-    // Comment frames travel with the graph as annotations, so they round-trip on save/load.
-    const comments = nodesRef.current
-      .filter(isCommentNode)
-      .map((c) => ({ id: c.id, x: c.position.x, y: c.position.y, ...c.data }));
-    const sent = deploy({ nodes: nodesRef.current.filter(isRWNode).map((n) => n.data.def), edges: e, macros: macrosRef.current, comments });
+    const graph = combineFlowGraphs(deployableFlowGraphs(nodesRef.current, edgesRef.current));
+    const sent = deploy({ nodes: graph.nodes, edges: graph.edges, macros: macrosRef.current });
     setDeployOpen(false);
     if (sent) {
       setDeployPending(true);
@@ -342,7 +375,7 @@ export function App() {
       setLiveDeployed(false);
       showToast("Deploy was not sent — editor feed is disconnected", "error");
     }
-  }, [deploy, showToast]);
+  }, [deploy, deployableFlowGraphs, edgesRef, nodesRef, showToast]);
 
   useEffect(() => {
     if (!deployPending || !server.lastResult) return;
@@ -352,10 +385,10 @@ export function App() {
   }, [deployPending, server.lastResult, showToast]);
 
   // The Deploy button opens a guard first. Auto-deploy is a synced server-side document setting;
-  // when enabled, the server deploys the configured flow after collaborative document updates.
+  // when enabled, the server deploys the configured flow set after collaborative document updates.
   const requestDeploy = useCallback(() => setDeployOpen(true), []);
 
-  // Editing returns the graph to a draft (sinks dry-run) until the next deploy.
+  // Editing enabled flows returns them to a draft (sinks dry-run) until the next deploy.
   useEffect(() => {
     if (!autoDeploy) {
       setLiveDeployed(false);
@@ -652,13 +685,14 @@ export function App() {
 
   const themeVars = buildThemeVars(aesthetic, mode) as CSSProperties;
   const grid = gridStyle(aesthetic);
-  const status = deriveStatus(server.connected, actuating, !liveDeployed);
+  const status = deriveStatus(server.connected, actuating, activeFlowDeployed ? !liveDeployed : false);
   const problemTotal = errorCount + warnCount;
+  const enabledFlowCount = flowTabs.filter((flow) => deployedFlowIdSet.has(flow.id)).length;
   const deployNote = deployPending
     ? "deploying…"
     : server.lastResult
       ? server.lastResult.ok
-        ? `deployed${server.lastResult.unsupported.length ? ` · ${server.lastResult.unsupported.length} skipped` : ""}`
+        ? `deployed ${enabledFlowCount} flow${enabledFlowCount === 1 ? "" : "s"}${server.lastResult.unsupported.length ? ` · ${server.lastResult.unsupported.length} skipped` : ""}`
         : "deploy failed"
       : "";
   const selectedNode = nodes.find((n) => n.id === selected) ?? null;
@@ -729,7 +763,7 @@ export function App() {
         <div className="rw-tb-center" aria-label="Deployment and live state">
           <div className="rw-tb-group rw-deploy-group">
             <StatusPill {...status} />
-            <label className="rw-autodeploy rw-hide-mobile" title="Server auto-deploys this flow after graph edits">
+            <label className="rw-autodeploy rw-hide-mobile" title="Server auto-deploys enabled flows after graph edits">
               <input type="checkbox" checked={autoDeploy} onChange={(e) => setAutoDeploy(e.target.checked)} />
               <span className="rw-checkbox" />
               auto-deploy
@@ -737,10 +771,10 @@ export function App() {
             <button
               onClick={requestDeploy}
               disabled={!server.connected || deployPending}
-              title={server.connected ? "Deploy this graph to the server" : "Editor feed disconnected; live server state is unknown"}
+              title={server.connected ? "Deploy all enabled flows to the server" : "Editor feed disconnected; live server state is unknown"}
               className="rw-deploy"
             >
-              Deploy
+              Deploy enabled
               {server.lastResult && (!server.lastResult.ok || server.lastResult.unsupported.length > 0) && (
                 <span className={cn("rw-deploy-badge", server.lastResult.ok && "warn")}>
                   {server.lastResult.ok ? server.lastResult.unsupported.length : "!"}
@@ -785,10 +819,12 @@ export function App() {
       <FlowTabs
         flows={flowTabs}
         activeId={activeFlowId}
+        deployedIds={deployedFlowIds}
         onSelect={switchFlow}
         onAdd={addFlow}
         onRename={renameFlow}
-        onClose={closeFlow}
+        onClose={closeFlowAndDisable}
+        onToggleDeploy={toggleFlowDeploy}
       />
 
       <div className="relative flex-1 min-h-0 flex">

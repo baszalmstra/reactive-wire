@@ -6,21 +6,27 @@ import type { Flow } from "../canvas/flows.js";
 export function FlowTabs({
   flows,
   activeId,
+  deployedIds = [],
   onSelect,
   onAdd,
   onRename,
   onClose,
+  onToggleDeploy,
 }: {
   flows: Pick<Flow, "id" | "name">[];
   activeId: string;
+  /** Flow ids included in the server's live deployment set. */
+  deployedIds?: string[];
   onSelect: (id: string) => void;
   onAdd: () => void;
   onRename: (id: string, name: string) => void;
   onClose: (id: string) => void;
+  onToggleDeploy?: (id: string, enabled: boolean) => void;
 }) {
   const [editing, setEditing] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
+  const deployed = new Set(deployedIds);
 
   useEffect(() => {
     if (editing) inputRef.current?.select();
@@ -42,6 +48,7 @@ export function FlowTabs({
     <div className="flex-none flex items-stretch gap-1 px-2 h-[34px] bg-rw-panel border-b border-rw-line select-none overflow-x-auto">
       {flows.map((f) => {
         const active = f.id === activeId;
+        const liveEnabled = deployed.has(f.id);
         return (
           <div
             key={f.id}
@@ -55,6 +62,19 @@ export function FlowTabs({
                 : "text-rw-dim border border-transparent hover:bg-rw-panel2 hover:text-rw-text",
             )}
           >
+            {onToggleDeploy && editing !== f.id && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onToggleDeploy(f.id, !liveEnabled);
+                }}
+                aria-label={`${liveEnabled ? "Disable" : "Enable"} ${f.name} for deployment`}
+                title={liveEnabled ? "Included in live deployment" : "Not deployed — click to include"}
+                className={cn("rw-flow-live-toggle", liveEnabled && "on")}
+              >
+                ●
+              </button>
+            )}
             {editing === f.id ? (
               <input
                 ref={inputRef}
