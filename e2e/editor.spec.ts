@@ -31,6 +31,43 @@ test.describe.serial("Reactive Wire editor with mock server", () => {
     await expect.poll(() => viewport.evaluate((el) => getComputedStyle(el).transform)).not.toBe(before);
   });
 
+  test("shows one outline for pointer-selected nodes", async ({ page }) => {
+    await page.getByRole("button", { name: /Number \+/ }).click();
+    await page.getByRole("button", { name: /Boolean \+/ }).click();
+
+    const nodes = page.locator(".react-flow__node");
+    const numberNode = nodes.filter({ hasText: "Number" }).last();
+    const booleanNode = nodes.filter({ hasText: "Boolean" }).last();
+
+    await numberNode.locator(".rw-drag").click();
+    await expect(numberNode).toHaveClass(/selected/);
+    await expect.poll(() => numberNode.evaluate((node) => node === document.activeElement)).toBe(true);
+    await expect.poll(() => numberNode.evaluate((node) => getComputedStyle(node).outlineStyle)).toBe("none");
+
+    await page.locator(".react-flow__pane").click({ position: { x: 650, y: 500 } });
+    const boxes = await Promise.all([numberNode.boundingBox(), booleanNode.boundingBox()]);
+    const [numberBox, booleanBox] = boxes;
+    expect(numberBox).not.toBeNull();
+    expect(booleanBox).not.toBeNull();
+    const left = Math.min(numberBox!.x, booleanBox!.x) - 12;
+    const top = Math.min(numberBox!.y, booleanBox!.y) - 12;
+    const right = Math.max(numberBox!.x + numberBox!.width, booleanBox!.x + booleanBox!.width) + 12;
+    const bottom = Math.max(numberBox!.y + numberBox!.height, booleanBox!.y + booleanBox!.height) + 12;
+
+    await page.keyboard.down("Shift");
+    await page.mouse.move(left, top);
+    await page.mouse.down();
+    await page.mouse.move(right, bottom, { steps: 8 });
+    await page.mouse.up();
+    await page.keyboard.up("Shift");
+
+    await expect(numberNode).toHaveClass(/selected/);
+    await expect(booleanNode).toHaveClass(/selected/);
+    const selectionRect = page.locator(".react-flow__nodesselection-rect");
+    await expect(selectionRect).toBeVisible();
+    await expect.poll(() => selectionRect.evaluate((rect) => getComputedStyle(rect).borderTopColor)).toBe("rgba(0, 0, 0, 0)");
+  });
+
   test("selects a Home Assistant entity from the node config picker", async ({ page }) => {
     await page.getByRole("button", { name: /^Entity \+$/ }).click();
     await expect(page.getByText("Choose entity", { exact: true })).toBeVisible();
