@@ -39,10 +39,11 @@ Climb only as far as the change requires.
 
 ## Safety invariant
 
-The server actuates **nothing** unless a graph is deployed **live**. Just starting the server, and
-the editor's preview, never change your home: sinks dry-run (log the intended call instead of
-making it) until an explicit **Deploy** or enabled **auto-deploy**. Sinks also never actuate on a
-non-`ok` value, so an offline input can't drive a call. `RW_DEPLOY_TOKEN`, when set, gates deploys.
+The server actuates **nothing** unless a graph is deployed **live**. Starting with a manual-mode
+document and using the editor preview never change your home: sinks dry-run until an explicit
+**Deploy**. Enabling **auto-deploy** is durable authorization, so a persisted enabled document may
+resume live actuation when the server restarts. Sinks never actuate on a non-`ok` value, so an
+offline input cannot drive a call. `RW_DEPLOY_TOKEN`, when set, gates deploys.
 
 ## Module map
 
