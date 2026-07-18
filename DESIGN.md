@@ -231,10 +231,10 @@ flow-based packet-passing, *not* dependency-tracked re-derivation); the only rea
 in HA is text-based templates.
 
 **Actionable integration facts (drive Q6):**
-- Build on **`subscribeEntities`** (maintained *merged current-state map*), NOT raw
-  `state_changed` events. First callback is a **full snapshot** → seeds every behavior so
-  outputs are defined from t=0. This natively solves Node-RED's "no current value on
-  connect" / cold-start gap.
+- Build one canonical current-state map from **`getStates`**, then apply raw
+  **`state_changed` events in O(1)**. Initial connection and reconnect install a versioned full
+  snapshot; ordinary changes publish ordered versioned deltas. This seeds every behavior from t=0
+  without rescanning, cloning, or retransmitting all H entities for each event.
 - Auth: `createLongLivedTokenAuth(url, token)` + `createConnection({auth})`. Under Node we
   must provide a `WebSocket` (the lib was browser-first) — relevant to where the runtime runs.
 - Actions: `callService(conn, domain, service, data?, target?)`.
@@ -394,7 +394,8 @@ the sinks `sink-light`/`sink-call`/`sink-climate`/`sink-cover`/`sink-input`/`sin
   env (`RW_PORT`, `RW_HOST`, `RW_DEPLOY_TOKEN`, `RW_ALLOWED_HOSTS`/`RW_ALLOWED_ORIGINS`,
   `RW_DATA_DIR`); starts the feed; holds the `Deployer`, the `EditorDocumentStore`, and the
   `AutoDeployController`.
-- `feed.ts` — WebSocket (default `:7420`): streams the live entity map, accepts `deploy`
+- `feed.ts` — WebSocket (default `:7420`): sends a versioned entity snapshot on connect and
+  ordered compact deltas afterward, accepts `deploy`
   requests, and carries the collaborative-document frames. Every upgrade passes the
   connection-policy check first.
 - `runtime.ts` — `Deployer`: inlines macros, then re-runs the deployed graph with `evaluate` on

@@ -4,7 +4,15 @@ import { isRecord, parseJsonRecord } from "./json.js";
 
 export interface EntitiesFrame {
   type: "entities";
+  version: number;
   entities: EntityMap;
+}
+
+export interface EntityDeltaFrame {
+  type: "entityDelta";
+  version: number;
+  changed: EntityMap;
+  removed: string[];
 }
 
 export interface DeployResultFrame {
@@ -14,7 +22,7 @@ export interface DeployResultFrame {
   error?: string;
 }
 
-export type ServerFrame = EntitiesFrame | DeployResultFrame | DocStateMessage | DocUpdateMessage | DocErrorMessage;
+export type ServerFrame = EntitiesFrame | EntityDeltaFrame | DeployResultFrame | DocStateMessage | DocUpdateMessage | DocErrorMessage;
 
 export interface DeployClientMessage {
   type: "deploy";
@@ -65,13 +73,24 @@ export function isDeployResultFrame(value: unknown): value is DeployResultFrame 
 }
 
 export function isEntitiesFrame(value: unknown): value is EntitiesFrame {
-  return isRecord(value) && value.type === "entities" && isEntityMap(value.entities);
+  return isRecord(value) && value.type === "entities" && typeof value.version === "number" && Number.isSafeInteger(value.version) && value.version >= 0 && isEntityMap(value.entities);
+}
+
+export function isEntityDeltaFrame(value: unknown): value is EntityDeltaFrame {
+  return isRecord(value)
+    && value.type === "entityDelta"
+    && typeof value.version === "number"
+    && Number.isSafeInteger(value.version)
+    && value.version >= 0
+    && isEntityMap(value.changed)
+    && Array.isArray(value.removed)
+    && value.removed.every((id) => typeof id === "string");
 }
 
 export function decodeServerFrame(raw: string): ServerFrame | null {
   const value = parseJsonRecord(raw);
   if (!value) return null;
-  if (isEntitiesFrame(value) || isDeployResultFrame(value) || isDocStateMessage(value) || isDocUpdateMessage(value) || isDocErrorMessage(value)) return value;
+  if (isEntitiesFrame(value) || isEntityDeltaFrame(value) || isDeployResultFrame(value) || isDocStateMessage(value) || isDocUpdateMessage(value) || isDocErrorMessage(value)) return value;
   return null;
 }
 

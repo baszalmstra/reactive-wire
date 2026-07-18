@@ -31,7 +31,7 @@ class FakeWebSocket {
     this.sent.push(data);
   }
 
-  close(): void {
+  close(_code?: number, _reason?: string): void {
     if (this.readyState === FakeWebSocket.CLOSED) return;
     this.readyState = FakeWebSocket.CLOSED;
     this.onclose?.();
@@ -77,8 +77,42 @@ describe("useServer", () => {
     expect(result.current.connected).toBe(true);
 
     const entities = { "light.bedroom": { state: "on", attributes: {} } };
-    act(() => latest().emit({ type: "entities", entities }));
+    act(() => latest().emit({ type: "entities", version: 1, entities }));
     expect(result.current.entities).toEqual(entities);
+  });
+
+  it("applies ordered entity deltas including additions, updates, and removals", () => {
+    const { result } = renderHook(() => useServer("ws://test.local"));
+    act(() => latest().emitOpen());
+    act(() => latest().emit({
+      type: "entities", version: 4,
+      entities: { "light.a": { state: "off", attributes: {} }, "light.old": { state: "on", attributes: {} } },
+    }));
+    act(() => latest().emit({
+      type: "entityDelta", version: 5,
+      changed: { "light.a": { state: "on", attributes: { brightness: 10 } }, "light.b": { state: "off", attributes: {} } },
+      removed: ["light.old"],
+    }));
+
+    expect(result.current.entities).toEqual({
+      "light.a": { state: "on", attributes: { brightness: 10 } },
+      "light.b": { state: "off", attributes: {} },
+    });
+
+    // Duplicate/old delivery is harmless and does not roll state back.
+    act(() => latest().emit({ type: "entityDelta", version: 5, changed: { "light.a": { state: "off", attributes: {} } }, removed: [] }));
+    expect(result.current.entities["light.a"]?.state).toBe("on");
+  });
+
+  it("reconnects for a full snapshot when an entity delta version is missing", () => {
+    renderHook(() => useServer("ws://test.local"));
+    act(() => latest().emitOpen());
+    const first = latest();
+    act(() => first.emit({ type: "entities", version: 1, entities: {} }));
+    act(() => first.emit({ type: "entityDelta", version: 3, changed: {}, removed: [] }));
+    expect(first.readyState).toBe(FakeWebSocket.CLOSED);
+    act(() => { vi.advanceTimersByTime(1500); });
+    expect(FakeWebSocket.instances).toHaveLength(2);
   });
 
   it("sends a deploy frame only while open and resolves the later deployResult", () => {
@@ -148,7 +182,7 @@ describe("useServer", () => {
     const { result, unmount } = renderHook(() => useServer("ws://test.local"));
     act(() => latest().emitOpen());
     const socket = latest();
-    act(() => socket.emit({ type: "entities", entities: { "sun.sun": { state: "above_horizon", attributes: {} } } }));
+    act(() => socket.emit({ type: "entities", version: 1, entities: { "sun.sun": { state: "above_horizon", attributes: {} } } }));
     const seen = result.current.entities;
 
     unmount();
@@ -161,7 +195,7 @@ describe("useServer", () => {
     expect(FakeWebSocket.instances).toHaveLength(1);
 
     // A late frame on the disposed socket does not mutate the last observed state.
-    act(() => socket.emit({ type: "entities", entities: { "sun.sun": { state: "below_horizon", attributes: {} } } }));
+    act(() => socket.emit({ type: "entities", version: 2, entities: { "sun.sun": { state: "below_horizon", attributes: {} } } }));
     expect(result.current.entities).toBe(seen);
   });
 });

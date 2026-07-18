@@ -165,7 +165,8 @@ export function startFeed(ha: EntityFeed, portOrOptions: number | FeedOptions, h
 
   wss.on("connection", (ws, req) => {
     const connectionTokenOk = tokenMatches(requestToken(req), options.deployToken);
-    ws.send(JSON.stringify({ type: "entities", entities: ha.entitiesSnapshot() }));
+    const entitySnapshot = ha.entitiesSnapshot();
+    ws.send(JSON.stringify({ type: "entities", version: entitySnapshot.version, entities: entitySnapshot.entities }));
     if (handlers.documentStore) {
       try {
         const frame: DocStateMessage = { type: "docState", update: encodeUpdateBase64(handlers.documentStore.encodeState()) };
@@ -264,26 +265,22 @@ export function startFeed(ha: EntityFeed, portOrOptions: number | FeedOptions, h
     });
   });
 
-  let pending: ReturnType<typeof setTimeout> | null = null;
-  const unsub = ha.onEntities(() => {
-    if (pending) return;
-    pending = setTimeout(() => {
-      pending = null;
-      const msg = JSON.stringify({ type: "entities", entities: ha.entitiesSnapshot() });
-      for (const client of wss.clients) {
-        if (client.readyState !== WebSocket.OPEN) continue;
-        if (client.bufferedAmount > maxPayload) {
-          client.close(1009, "client is too far behind");
-          continue;
-        }
-        client.send(msg);
+  const unsub = ha.onEntities((update) => {
+    const msg = JSON.stringify(update.kind === "full"
+      ? { type: "entities", version: update.version, entities: update.entities }
+      : { type: "entityDelta", version: update.version, changed: update.changed, removed: update.removed });
+    for (const client of wss.clients) {
+      if (client.readyState !== WebSocket.OPEN) continue;
+      if (client.bufferedAmount > maxPayload) {
+        client.close(1009, "client is too far behind");
+        continue;
       }
-    }, 150);
+      client.send(msg);
+    }
   });
 
   return () => {
     unsub();
-    if (pending) clearTimeout(pending);
     wss.close();
     httpServer?.close();
   };

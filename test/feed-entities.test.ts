@@ -1,0 +1,90 @@
+import { createServer } from "node:net";
+import { describe, expect, it } from "vitest";
+import WebSocket from "ws";
+import { MockHA } from "../src/ha/mock.js";
+import { startFeed } from "../src/server/feed.js";
+
+async function freePort(): Promise<number> {
+  return await new Promise((resolve, reject) => {
+    const server = createServer();
+    server.on("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      const address = server.address();
+      server.close(() => resolve(typeof address === "object" && address ? address.port : 0));
+    });
+  });
+}
+
+function nextFrame(ws: WebSocket, type: string): Promise<Record<string, unknown>> {
+  return new Promise((resolve, reject) => {
+    const onMessage = (raw: WebSocket.RawData) => {
+      try {
+        const frame = JSON.parse(String(raw)) as Record<string, unknown>;
+        if (frame.type !== type) return;
+        ws.off("message", onMessage);
+        resolve(frame);
+      } catch (error) {
+        reject(error);
+      }
+    };
+    ws.on("message", onMessage);
+  });
+}
+
+async function connect(url: string): Promise<{ ws: WebSocket; initial: Record<string, unknown> }> {
+  const ws = new WebSocket(url, { headers: { origin: "http://localhost:5173" } });
+  const initial = nextFrame(ws, "entities");
+  await new Promise<void>((resolve, reject) => {
+    ws.once("open", resolve);
+    ws.once("error", reject);
+  });
+  return { ws, initial: await initial };
+}
+
+describe("versioned entity feed", () => {
+  it("sends one full snapshot then compact ordered deltas", async () => {
+    const port = await freePort();
+    const ha = new MockHA();
+    ha.setState("light.a", "off");
+    const stop = startFeed(ha, { port, host: "127.0.0.1" });
+    const { ws, initial } = await connect(`ws://127.0.0.1:${port}`);
+    try {
+      expect(initial).toMatchObject({
+        type: "entities",
+        version: 1,
+        entities: { "light.a": { state: "off", attributes: {} } },
+      });
+
+      const changed = nextFrame(ws, "entityDelta");
+      ha.setState("light.a", "on", { brightness: 7 });
+      expect(await changed).toEqual({
+        type: "entityDelta",
+        version: 2,
+        changed: { "light.a": { state: "on", attributes: { brightness: 7 } } },
+        removed: [],
+      });
+
+      const removed = nextFrame(ws, "entityDelta");
+      ha.remove("light.a");
+      expect(await removed).toEqual({ type: "entityDelta", version: 3, changed: {}, removed: ["light.a"] });
+    } finally {
+      ws.close();
+      stop();
+    }
+  });
+
+  it("gives a newly connected client the latest full version", async () => {
+    const port = await freePort();
+    const ha = new MockHA();
+    const stop = startFeed(ha, { port, host: "127.0.0.1" });
+    ha.setState("sensor.a", "1");
+    ha.setState("sensor.a", "2");
+    const { ws, initial } = await connect(`ws://127.0.0.1:${port}`);
+    try {
+      expect(initial).toMatchObject({ version: 2, entities: { "sensor.a": { state: "2" } } });
+    } finally {
+      ws.close();
+      stop();
+    }
+  });
+});

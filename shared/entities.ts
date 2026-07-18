@@ -10,3 +10,14 @@ export interface EntityState {
 
 /** All known entities, keyed by entity id. */
 export type EntityMap = Record<string, EntityState>;
+
+/** A versioned, immutable view of the server-owned canonical entity map. */
+export interface EntitySnapshot {
+  version: number;
+  entities: Readonly<EntityMap>;
+}
+
+/** Ordered changes published by an entity adapter. */
+export type EntityUpdate =
+  | { kind: "full"; version: number; entities: Readonly<EntityMap> }
+  | { kind: "delta"; version: number; changed: EntityMap; removed: string[] };

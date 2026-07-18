@@ -291,7 +291,7 @@ export class Deployer {
 
   private run(): void {
     if (this.stopped || !this.graph) return;
-    const entities: EntityMap = this.ha.entitiesSnapshot();
+    const entities: EntityMap = this.ha.entitiesSnapshot().entities as EntityMap;
     const results = evaluate(this.graph.nodes, this.graph.edges, entities, this.mem, Date.now(), this.poller.sources());
     // The evaluate above mutated durable nodes' slots in place; persist them (debounced) so the
     // latest accumulated history is on disk before any restart.

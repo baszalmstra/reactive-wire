@@ -1,16 +1,5 @@
-import type { HassEntities, HassEntity } from "home-assistant-js-websocket";
-import type { EntityState } from "../../shared/entities.js";
-
-/**
- * The result of folding a Home Assistant snapshot into our entity map: the next state keyed by
- * entity id, the raw entities retained for reference-equality change detection on the next call,
- * and whether anything actually changed (so callers only notify listeners when needed).
- */
-export interface AppliedEntities {
-  latest: Map<string, EntityState>;
-  lastRaw: Map<string, HassEntity>;
-  changed: boolean;
-}
+import type { HassEntity, StateChangedEvent } from "home-assistant-js-websocket";
+import type { EntityMap, EntityState } from "../../shared/entities.js";
 
 /** Home Assistant reports change/update times as ISO strings; parse to epoch ms, or drop if invalid. */
 function parseInstant(iso: unknown): number | undefined {
@@ -18,7 +7,8 @@ function parseInstant(iso: unknown): number | undefined {
   return Number.isFinite(ms) ? ms : undefined;
 }
 
-function translate(entityId: string, raw: HassEntity): EntityState {
+/** Translate one HA state without retaining the HA client's mutable transport object. */
+export function translateEntity(raw: HassEntity): EntityState {
   const lc = parseInstant(raw.last_changed);
   const lu = parseInstant(raw.last_updated);
   return {
@@ -29,33 +19,34 @@ function translate(entityId: string, raw: HassEntity): EntityState {
   };
 }
 
+/** Build a canonical full state once during initial synchronization or reconnect. */
+export function entityMapFromStates(states: readonly HassEntity[]): EntityMap {
+  const entities: EntityMap = Object.create(null) as EntityMap;
+  for (const raw of states) entities[raw.entity_id] = translateEntity(raw);
+  return entities;
+}
+
+export interface AppliedEntityEvent {
+  changed: EntityMap;
+  removed: string[];
+}
+
 /**
- * Apply a merged Home Assistant snapshot to the previous entity map, updating only entities whose
- * raw payload actually changed (compared by reference against `prevRaw`) and dropping entities the
- * snapshot no longer reports. Pure: the given maps are not mutated; fresh maps are returned.
+ * Apply exactly one `state_changed` event to the canonical map in O(1). The map is deliberately
+ * mutated in place: it is server-owned and exposed only as a read-only snapshot. Returning the
+ * compact delta lets the feed avoid cloning or scanning all H entities for an individual change.
  */
-export function applyEntities(
-  prevLatest: ReadonlyMap<string, EntityState>,
-  prevRaw: ReadonlyMap<string, HassEntity>,
-  entities: HassEntities,
-): AppliedEntities {
-  const latest = new Map(prevLatest);
-  const lastRaw = new Map(prevRaw);
-  let changed = false;
-
-  for (const entityId of prevLatest.keys()) {
-    if (Object.prototype.hasOwnProperty.call(entities, entityId)) continue;
-    changed = true;
-    latest.delete(entityId);
-    lastRaw.delete(entityId);
+export function applyEntityEvent(entities: EntityMap, event: StateChangedEvent): AppliedEntityEvent | null {
+  const entityId = event.data.entity_id;
+  if (!entityId) return null;
+  if (event.data.new_state === null) {
+    if (!Object.prototype.hasOwnProperty.call(entities, entityId)) return null;
+    delete entities[entityId];
+    return { changed: Object.create(null) as EntityMap, removed: [entityId] };
   }
-
-  for (const [entityId, raw] of Object.entries(entities)) {
-    if (prevRaw.get(entityId) === raw) continue;
-    changed = true;
-    lastRaw.set(entityId, raw);
-    latest.set(entityId, translate(entityId, raw));
-  }
-
-  return { latest, lastRaw, changed };
+  const state = translateEntity(event.data.new_state);
+  entities[entityId] = state;
+  const changed: EntityMap = Object.create(null) as EntityMap;
+  changed[entityId] = state;
+  return { changed, removed: [] };
 }

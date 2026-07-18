@@ -3,6 +3,7 @@ import { Deployer, type DurableMemory } from "../src/server/runtime.js";
 import { MockHA } from "../src/ha/mock.js";
 import type { NodeData } from "../shared/node-types.js";
 import type { ViewEdge } from "../shared/engine/evaluate.js";
+import type { EntityUpdate } from "../shared/entities.js";
 
 // Exercise the new sinks through the actual server Deployer (the live actuation path), so the
 // reconciling de-dupe and the transient fire-on-change bypass are covered end to end. A large
@@ -216,7 +217,7 @@ describe("Deployer lifecycle", () => {
     vi.useFakeTimers();
     try {
       const ha = new MockHA();
-      let entityCallback: (() => void) | undefined;
+      let entityCallback: ((update: EntityUpdate) => void) | undefined;
       const unsubscribe = vi.fn();
       vi.spyOn(ha, "onEntities").mockImplementation((callback) => {
         entityCallback = callback;
@@ -246,7 +247,7 @@ describe("Deployer lifecycle", () => {
       });
 
       // Even a callback retained by an ill-behaved feed and clock advancement cannot revive it.
-      entityCallback?.();
+      entityCallback?.({ kind: "delta", version: 999, changed: {}, removed: [] });
       vi.advanceTimersByTime(5_000);
       expect(ha.calls).toHaveLength(1);
 

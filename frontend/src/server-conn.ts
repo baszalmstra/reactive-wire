@@ -83,6 +83,7 @@ export function useServer(url: string = DEFAULT_URL): Server {
   const [docUpdate, setDocUpdate] = useState<DocPacket | null>(null);
   const [docError, setDocError] = useState<string | null>(null);
   const nonceRef = useRef(0);
+  const entityVersionRef = useRef<number | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
 
   useEffect(() => {
@@ -90,14 +91,37 @@ export function useServer(url: string = DEFAULT_URL): Server {
     let retry: ReturnType<typeof setTimeout> | undefined;
 
     const connect = () => {
+      entityVersionRef.current = null;
       const ws = new WebSocket(urlWithToken(url, DEPLOY_TOKEN));
       wsRef.current = ws;
       ws.onopen = () => setConnected(true);
       ws.onmessage = (ev) => {
         try {
           const msg = JSON.parse(ev.data as string);
-          if (msg.type === "entities") setEntities(msg.entities as EntityMap);
-          else if (msg.type === "deployResult") setLastResult(msg as DeployResult);
+          if (msg.type === "entities" && Number.isSafeInteger(msg.version) && msg.version >= 0 && msg.entities && typeof msg.entities === "object") {
+            const current = entityVersionRef.current;
+            if (current === null || msg.version >= current) {
+              entityVersionRef.current = msg.version;
+              setEntities(msg.entities as EntityMap);
+            }
+          } else if (msg.type === "entityDelta" && Number.isSafeInteger(msg.version) && msg.version >= 0
+            && msg.changed && typeof msg.changed === "object" && Array.isArray(msg.removed)) {
+            const current = entityVersionRef.current;
+            if (current !== null && msg.version <= current) return;
+            if (current === null || msg.version !== current + 1) {
+              // A missing frame would leave the editor with a silently incomplete world view.
+              // Closing uses the existing reconnect path, whose first frame is a full snapshot.
+              ws.close(1008, "entity version gap");
+              return;
+            }
+            entityVersionRef.current = msg.version;
+            setEntities((previous) => {
+              const next = { ...previous };
+              for (const entityId of msg.removed as unknown[]) if (typeof entityId === "string") delete next[entityId];
+              for (const [entityId, state] of Object.entries(msg.changed as EntityMap)) next[entityId] = state;
+              return next;
+            });
+          } else if (msg.type === "deployResult") setLastResult(msg as DeployResult);
           else if (msg.type === "docState" && typeof msg.update === "string") setDocState({ update: (msg as DocStateMessage).update, nonce: ++nonceRef.current });
           else if (msg.type === "docUpdate" && typeof msg.update === "string") setDocUpdate({ update: (msg as DocUpdateMessage).update, nonce: ++nonceRef.current });
           else if (msg.type === "docError" && typeof msg.error === "string") setDocError((msg as DocErrorMessage).error);
