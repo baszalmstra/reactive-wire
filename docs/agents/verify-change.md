@@ -10,12 +10,14 @@ cover.
 
 | Change touches | Run | ~Runtime | Green looks like |
 | --- | --- | --- | --- |
-| Anything (always) | `pixi run check` | seconds | `typecheck` clean, all unit tests pass |
+| Anything (always) | `pixi run check` | seconds | core/editor typechecks and frontend lint are clean; all unit tests pass |
 | An isolated frontend component | `pixi run storybook` | interactive | the component renders/behaves correctly in isolation |
-| Cross-cutting editor flow (deploy, canvas, collab) | `pixi run e2e` | ~1 min | Playwright suite passes |
+| Cross-cutting editor flow (deploy, canvas, collab) | `pixi run e2e` | ~1 min | Playwright suite, including accessibility scenarios, passes |
 
-`pixi run check` is typecheck (core + editor) plus the unit suite — the default gate for every
-change. `pixi run e2e` starts its own mock server + Vite on isolated ports; reach for it only when
+`pixi run check` runs core/editor typechecks, the frontend ESLint rules, and the unit suite — the
+default gate for every change. The unit suite includes automated theme contrast checks; keyboard,
+focus, touch-target, and reduced-motion behavior is covered by `e2e/accessibility.spec.ts` in the
+Playwright gate. `pixi run e2e` starts its own mock server + Vite on isolated ports; reach for it only when
 the change spans the editor and server together and no unit test can exercise it.
 
 ## The unit-test rule
@@ -34,7 +36,7 @@ A behavioral change with no accompanying test is not done, even if `check` is gr
 
 ## What green means
 
-- `pixi run check` exits 0 with no `tsc` diagnostics and every test file passing.
+- `pixi run check` exits 0 with no `tsc` or ESLint diagnostics and every test file passing.
 - A red typecheck or a failing test blocks the change — fix the cause, do not skip or `.only`.
 - When a change has a runtime surface, also confirm the actual behavior (see
   [debug-live.md](./debug-live.md) to query a running server) — passing tests plus a real

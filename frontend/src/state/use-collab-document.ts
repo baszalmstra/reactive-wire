@@ -72,6 +72,7 @@ export function useCollabDocument(options: {
     setFuture,
     showToast,
   } = options;
+  const sendDocUpdate = server.sendDocUpdate;
 
   const collabDoc = useRef<Y.Doc | null>(null);
   const getCollabDoc = useCallback((): Y.Doc => {
@@ -166,19 +167,19 @@ export function useCollabDocument(options: {
     const missing = Y.encodeStateAsUpdate(getCollabDoc(), Y.encodeStateVector(serverDoc));
     // Yjs encodes an empty diff as [0, 0]. Anything larger contains local/offline edits the
     // server has not seen yet, so upload it after reconnecting instead of silently diverging.
-    if (missing.length > 2) server.sendDocUpdate(missing);
+    if (missing.length > 2) sendDocUpdate(missing);
     serverDoc.destroy();
-  }, [server.sendDocUpdate, getCollabDoc]);
+  }, [sendDocUpdate, getCollabDoc]);
 
   useEffect(() => {
     const doc = getCollabDoc();
     const onUpdate = (update: Uint8Array, origin: unknown) => {
       if (origin === collabServerOrigin || !collabReady.current) return;
-      server.sendDocUpdate(update);
+      sendDocUpdate(update);
     };
     doc.on("update", onUpdate);
     return () => doc.off("update", onUpdate);
-  }, [server.sendDocUpdate, getCollabDoc]);
+  }, [sendDocUpdate, getCollabDoc]);
 
   useEffect(() => {
     if (!server.docState || appliedDocStateNonce.current === server.docState.nonce) return;

@@ -58,7 +58,6 @@ re-derives the output.
   loopback-default bind, a deploy token, and host/origin allowlists (**D23**) — but not identity
   or per-user permissions.
 - Full parity with Node-RED's node catalog.
-- (TBD) Whether we ever run *inside* HA as an add-on vs. standalone service.
 
 ---
 
@@ -74,7 +73,7 @@ re-derives the output.
 | D6 | Live value inspection | **Layered (option d)**: always-on port-anchored value chips + selection inspector; wires **color-coded by type**; current-value-only for prototype (sparkline-ready). | Keeps Node-RED's at-a-glance strength; cheap with React Flow. |
 | D7 | Custom node model | Shareable nodes = **pure subgraph macros**, serialized as **JSON**. Trusted built-in code "primitives" ship with the project. Arbitrary user code nodes deferred behind a trust gate. | Safe-by-default sharing (no code exec on import); declarative & versionable. |
 | D8 | Node distribution | **JSON export/import now**; **conda packages for versioned nodes later** (fits pixi/conda stack). | Quick start, clean upgrade path. |
-| D21 | Editor styling | **Tailwind CSS v4 + shadcn/ui** (Radix-based copy-in components: dialogs, dropdowns, the auto-deploy checkbox, etc.). Dark-mode-first; unopinionated look we control; pairs cleanly with custom React Flow nodes. | Modern de-facto standard; full control of the node-canvas look while getting accessible primitives for free. |
+| D21 | Editor styling | **Tailwind CSS v4 + small repository-owned accessible primitives** (native modal dialog wrapper, ARIA tabs, checkbox, tooltip, focus/live-region conventions). Dark-mode-first; pairs cleanly with custom React Flow nodes without a Radix/shadcn runtime dependency. | Full control of the node-canvas look while centralizing keyboard, focus, motion, and announcement behavior in tested primitives. |
 | D9 | Runtime topology | **Headless server is the source of truth** (option b, built immediately — not staged). The **server** owns the HA WebSocket connection, runs the flows 24/7, and calls services. The **editor is a live view** that loads/saves graph JSON and subscribes to the server's node/wire values. Reactive **engine is one shared TS module** imported by the server (and reused by the editor for type-checking/preview). | Always-on automation is the actual goal; canvas = view over runtime state. |
 | D10 | Reactive engine | **Signals core** (recommended **alien-signals**, fallback `@vue/reactivity`) for glitch-free, topologically-ordered, lazy propagation. RxJS only at async edges, never the core. | Signals are the only family giving glitch-free diamond propagation for free (§5.2). |
 | D11 | **Behaviors-only wires + stateful nodes** | The graph has **one wire type: behaviors** (continuous, always-current values). No separate "event" wire type. The event-ish residue (edge/`rising`, `scan`/`fold`/toggle, dedup, `hold`) collapses into **nodes with local state** — analogous to React: pure node = `useMemo`, stateful node = `useState`/`useReducer`/`usePrevious`. Implemented as a writable signal updated by an effect over inputs. Editor marks stateful nodes with a "has memory" badge so the graph stays honest. | Maximally reactive & one honest wire type; pushes durations/timers (time is a behavior) and reconcilable actions into pure derivation; confines memory to where it's irreducible. Driven by user's "it's local state, like useState" insight. |
@@ -175,12 +174,11 @@ Tracked as we go. ✅ = resolved, ⏳ = in progress, ⬜ = not yet discussed.
   are built via Yjs updates. Persisted `autoDeploy=true` reconstructs and validates the configured
   graph on boot, then resumes it live; manual deployments are intentionally not restored. Durable
   stateful-node memory is stored separately (see §9).
-- ⬜ **Q10 Execution location & lifecycle**: when does the graph run? Headless vs needs editor open?
+- ✅ **Q10 Execution location & lifecycle**: when does the graph run? Headless vs needs editor open?
   - ✅ Topology = D9 (headless server is source of truth).
-  - 🎯 **Future goal: ship as a Home Assistant add-on** (Supervisor-managed Docker
-    container). Implication: keep the server **containerizable** (Docker image; pixi can
-    produce it), config via add-on options (HA URL/token via Supervisor API / `SUPERVISOR_TOKEN`),
-    and assume an ingress-proxied web UI. Don't paint ourselves out of this.
+  - ✅ **Home Assistant add-on shipped**: Supervisor-managed multi-architecture image,
+    ingress-proxied editor, `/data` persistence, and Supervisor API authentication via
+    `SUPERVISOR_TOKEN`. The standalone server remains supported for development and other installs.
 - ✅ **Q11 Feedback loops / cycles**: strict DAG; feedback inside nodes; echo-safe sinks (D17).
 - ✅ **Q12 Errors & invalid state**: errors-as-values + sink safety (D18), schema-drift/dangling
   refs (D19), error UX (D20). See §7.
@@ -289,7 +287,7 @@ in HA is text-based templates.
 
 User will produce the visual design separately (Claude design). This section is the
 self-contained spec to design against. Library: **React Flow** (D5); styled with
-**Tailwind v4 + shadcn/ui** (D21).
+**Tailwind v4 + repository-owned accessible UI primitives** (D21).
 
 ### 6.1 Canvas & wires
 - One wire type: **behaviors** (D11). Wires **colored by value type** (D12): `boolean`,
@@ -442,9 +440,9 @@ the sinks `sink-light`/`sink-call`/`sink-climate`/`sink-cover`/`sink-input`/`sin
   boot — the editor document survives restarts. On load it checks the persisted schema version: a
   current-version document loads as-is, an older one is migrated (see the migration path below), and
   a newer one is refused with a clear error (downgrade protection).
-- `collab-deploy-adapter.ts` — projects the collaborative document to the deploy graph
-  (`graphFromEditorSnapshot`) and the `AutoDeployController` that redeploys the server-selected
-  `deployFlowId` when `autoDeploy` is on and the graph signature changes.
+- `collab-deploy-adapter.ts` — projects all server-enabled flows from the collaborative document
+  into one namespaced deploy graph (`graphFromEditorSnapshot`) and the `AutoDeployController` that
+  redeploys when `autoDeploy` is on and the combined graph signature changes.
 - `connection-policy.ts` / `deploy-validation.ts` — the security layer (D23): host/origin
   allowlists, loopback-default bind, timing-safe deploy-token check, and structural
   sanitization of deploy graphs. See "Server security model" below.
@@ -452,15 +450,15 @@ the sinks `sink-light`/`sink-call`/`sink-climate`/`sink-cover`/`sink-input`/`sin
 
 **Collaborative document & persistence** (`shared/collab.ts`, `src/server/doc-store.ts`,
 `frontend/src/state/editor-document.ts`): the editor document — flows (nodes/edges), macros, and
-server-owned `settings` (`autoDeploy`, `deployFlowId`) — is a **Yjs CRDT** (`shared/collab.ts`
+server-owned `settings` (`autoDeploy`, `deployedFlowIds`, plus legacy `deployFlowId` compatibility) — is a **Yjs CRDT** (`shared/collab.ts`
 defines the `Y.Doc` shape, snapshot/diff projection, and sanitization caps). Clients and server
 exchange it as base64-encoded Yjs update frames (`docState`/`docUpdate`/`docError`) multiplexed
 over the **existing feed WebSocket** rather than a dedicated binary endpoint (see the collab
-rationale in §9). `autoDeploy`/`deployFlowId` are **server-owned document settings**, so the
-server can auto-deploy the chosen flow independently of any client's active tab. Deploy remains
+rationale in §9). `autoDeploy`/`deployedFlowIds` are **server-owned document settings**, so the
+server can auto-deploy all enabled flows independently of any client's active tab. Deploy remains
 an explicit act: a remote collaborator's edit only actuates Home Assistant when `autoDeploy` is
-enabled. That enabled setting is durable authorization, so a valid configured graph also resumes
-live during server startup (see the safety caveat in §9). Accepted updates are validated against a
+enabled. That enabled setting is durable authorization, so the valid combined graph of enabled
+flows also resumes live during server startup (see the safety caveat in §9). Accepted updates are validated against a
 retained shadow `Y.Doc`, then compacted into short asynchronous persistence batches; feed broadcast
 and auto-deploy occur only after the containing batch is durable. Frontend snapshot projection
 structurally shares unchanged flows, nodes, and edges.
@@ -680,7 +678,6 @@ variadic shrink-on-disconnect.
   — would let the editor drop its in-browser engine.
 
 ### Productionization (later)
-- **Ship as a Home Assistant add-on** (Supervisor Docker, ingress UI, `SUPERVISOR_TOKEN`) — Q10.
 - **Conda-package node distribution** (D8) + a community index.
 - Auth beyond the current deploy-token model (D23) — roles/users/OAuth for exposed multi-user setups.
 - Error-UX completeness: node-template ghost-pin healing (D19) is built as read-side def

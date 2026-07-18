@@ -52,7 +52,7 @@ Everything runs through pixi. Core (engine + server):
 pixi run test            # run the engine/unit test suite
 pixi run typecheck       # type-check the core
 pixi run start           # run the server against a live Home Assistant
-pixi run check           # typecheck core + editor and run the tests
+pixi run check           # typecheck, lint the editor, and run the unit tests
 pixi run e2e             # Playwright browser smoke tests with the mock server + Vite
 ```
 
@@ -89,7 +89,9 @@ pixi run addon-build
 The packaging step compiles the server, builds the editor with same-origin WebSocket support, writes
 a runtime-only npm lockfile, and copies the Pixi manifest/lock plus runtime artifacts into
 `reactive_wire/app/`. After starting the add-on, open **Reactive Wire** from the Home Assistant
-sidebar. It still starts safe: nothing actuates until you press **Deploy** or enable auto-deploy.
+sidebar. Manual-mode documents start with nothing deployed. Enabling auto-deploy is durable
+authorization: if it was enabled before shutdown, a valid enabled graph resumes live actuation on
+restart without another button press. Disable auto-deploy before shutdown when that is not desired.
 
 Release flow: run the **Prepare release PR** GitHub Action with the target semver and changelog
 notes. The generated PR bumps `package.json`, Pixi/add-on metadata, and the add-on changelog. When
@@ -159,8 +161,8 @@ preview immediately.
 
 Press **Deploy** to send the graph to the server and run it **live** against Home Assistant;
 sinks show as live in the editor. **Auto-deploy** is a durable server-owned, synced document setting:
-when enabled, the server deploys the configured flow after collaborative graph edits from any client
-and resumes that valid live graph after server restart. With auto-deploy off, startup remains
+when enabled, the server deploys all enabled flows after collaborative graph edits from any client
+and resumes that valid combined graph after server restart. With auto-deploy off, startup remains
 undeployed and edits remain a draft until the next explicit Deploy.
 
 ## Layout
@@ -173,7 +175,6 @@ shared/               neutral engine + types, imported by both editor and server
 src/                  server + Home Assistant adapters
   ha/                 HAClient/EntityFeed, MockHA, RealHA (subscribeEntities + callService)
   server/             index (boot), feed (WebSocket), runtime (Deployer), sim
-  reactive.ts         cell (live entity storage for the HA layer)
 frontend/             the editor (Vite + React + Tailwind v4 + React Flow)
   src/canvas/         React Flow node, validation, palette, inspector, entity picker, popups
   src/components/     ValueChip, Pin, Widgets (value editors), Badges, Icon, NodeView

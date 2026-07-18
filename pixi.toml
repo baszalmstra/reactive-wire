@@ -57,6 +57,10 @@ depends-on = ["fe-install"]
 cmd = "npm run typecheck"
 cwd = "frontend"
 
+[tasks.lint]
+cmd = "npm run lint"
+cwd = "frontend"
+
 [tasks.fe-dev]
 cmd = "npm run dev"
 cwd = "frontend"
@@ -75,7 +79,7 @@ depends-on = ["install", "fe-install"]
 depends-on = ["install", "fe-install"]
 
 [tasks.check]
-depends-on = ["typecheck", "test", "fe-typecheck"]
+depends-on = ["typecheck", "test", "fe-typecheck", "lint"]
 
 [environments]
 runtime = { features = ["runtime"], no-default-feature = true }

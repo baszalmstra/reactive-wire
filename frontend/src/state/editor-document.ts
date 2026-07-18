@@ -189,7 +189,7 @@ function reconcileItems<T extends { id: string }>(
       if (prior !== previous[index]) changed = true;
       return prior;
     }
-    stats && (stats.itemPayloadsCompared += 1);
+    if (stats) stats.itemPayloadsCompared += 1;
     const converted = convert(item);
     // Selection/dragging/resizing are local React Flow state and are deliberately absent from the
     // collaborative document. They must not make an otherwise unchanged remote item look changed.
@@ -222,7 +222,7 @@ export function workingStateFromSnapshot(
       if (prior !== previous?.flows[index]) flowsChanged = true;
       return prior;
     }
-    stats && (stats.flowsProjected += 1);
+    if (stats) stats.flowsProjected += 1;
     const priorNodes = prior && flow.id === previous?.activeFlowId ? previous.activeNodes : prior?.nodes ?? [];
     const priorEdges = prior && flow.id === previous?.activeFlowId ? previous.activeEdges : prior?.edges ?? [];
     const reconciled = reconcileFlowNodes(

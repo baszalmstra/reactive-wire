@@ -32,12 +32,8 @@ jobs:
       - name: Install npm dependencies through pixi tasks
         run: pixi run install-all
 
-      - name: Run typechecks and unit tests
+      - name: Run typechecks, lint, and unit tests
         run: pixi run check
-
-      # Frontend lint runs once the eslint config and a `lint` pixi task land in the repo.
-      # - name: Run lint
-      #   run: pixi run lint
 
   addon-context:
     name: Add-on build context
