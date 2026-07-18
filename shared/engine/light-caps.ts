@@ -6,6 +6,8 @@ export interface LightCaps {
   brightness: boolean;
   rgb: boolean;
   colorTemp: boolean;
+  /** Whether the light accepts a transition duration on turn_on/turn_off calls. */
+  transition: boolean;
   /** The color-temperature bounds in Kelvin, when the light reports them. */
   minKelvin?: number;
   maxKelvin?: number;
@@ -15,10 +17,12 @@ export interface LightCaps {
 // every other mode carries brightness.
 const RGB_MODES = new Set(["hs", "rgb", "rgbw", "rgbww", "xy"]);
 
-// Legacy supported_features bits, for lights that predate supported_color_modes.
+// Home Assistant light feature bits. Color dimensions fall back to these for legacy lights;
+// transition support still uses this bitmask alongside modern supported_color_modes.
 const SF_BRIGHTNESS = 1;
 const SF_COLOR_TEMP = 2;
 const SF_COLOR = 16;
+const SF_TRANSITION = 32;
 
 function kelvinBounds(attributes: Record<string, unknown>): { minKelvin?: number; maxKelvin?: number } {
   const min = Number(attributes.min_color_temp_kelvin);
@@ -31,29 +35,33 @@ function kelvinBounds(attributes: Record<string, unknown>): { minKelvin?: number
 
 /**
  * Read a light's capabilities from its attributes. Prefers the modern `supported_color_modes` list
- * and falls back to the legacy `supported_features` bitmask. Returns null when the attributes carry
- * neither — capabilities are then unknown, and the caller keeps a permissive default rather than
- * hiding dimensions the light might support.
+ * for color dimensions and falls back to the legacy `supported_features` bits, while transition
+ * support always comes from `supported_features`. Returns null when the attributes carry neither —
+ * capabilities are then unknown, and the caller keeps a permissive default rather than hiding
+ * dimensions the light might support.
  */
 export function lightCaps(attributes: Record<string, unknown> | undefined): LightCaps | null {
   if (!attributes) return null;
   const modes = Array.isArray(attributes.supported_color_modes)
     ? attributes.supported_color_modes.map((m) => String(m).toLowerCase())
     : null;
+  const sf = Number(attributes.supported_features);
+  const transition = Number.isFinite(sf) && (sf & SF_TRANSITION) !== 0;
   if (modes && modes.length) {
     return {
       brightness: modes.some((m) => m !== "onoff" && m !== "unknown"),
       rgb: modes.some((m) => RGB_MODES.has(m)),
       colorTemp: modes.includes("color_temp"),
+      transition,
       ...kelvinBounds(attributes),
     };
   }
-  const sf = Number(attributes.supported_features);
   if (Number.isFinite(sf) && sf > 0) {
     return {
       brightness: (sf & SF_BRIGHTNESS) !== 0,
       rgb: (sf & SF_COLOR) !== 0,
       colorTemp: (sf & SF_COLOR_TEMP) !== 0,
+      transition,
       ...kelvinBounds(attributes),
     };
   }
@@ -62,14 +70,19 @@ export function lightCaps(attributes: Record<string, unknown> | undefined): Ligh
 
 /**
  * The input pins a light sink should expose for a light with the given capabilities: `on` always,
- * then only the color/temperature/brightness dimensions the light actually supports. Unknown
- * capabilities (null) keep the permissive default of color + brightness so the sink stays usable.
+ * then only the color/temperature/brightness dimensions the light actually supports, followed by
+ * wireable on/off transition durations when supported. Unknown capabilities (null) keep the
+ * permissive default of color + brightness but do not assume transition support.
  */
 export function lightSinkPins(caps: LightCaps | null): PinDef[] {
   const pins: PinDef[] = [{ id: "on", label: "on", type: "bool", editable: true }];
   if (!caps || caps.rgb) pins.push({ id: "color", label: "color", type: "color", editable: true });
   if (caps?.colorTemp) pins.push({ id: "temperature", label: "temperature", type: "num", unit: "K", editable: true });
   if (!caps || caps.brightness) pins.push({ id: "brightness", label: "brightness", type: "num", editable: true });
+  if (caps?.transition) {
+    pins.push({ id: "transition_on", label: "on transition", type: "duration", editable: true });
+    pins.push({ id: "transition_off", label: "off transition", type: "duration", editable: true });
+  }
   return pins;
 }
 
@@ -96,9 +109,12 @@ export function reconcileLightSinkPins(stored: PinDef[], caps: LightCaps | null,
   }
   for (const pin of stored) {
     if (desiredIds.has(pin.id)) continue;
-    if (isWired(pin.id)) out.push({ ...pin, ghost: true, missing: pin.missing ?? pin.label ?? pin.id });
+    if (isWired(pin.id)) {
+      const missing = pin.missing ?? pin.label ?? pin.id;
+      out.push(pin.ghost && pin.missing === missing ? pin : { ...pin, ghost: true, missing });
+    }
   }
-  return out;
+  return out.length === stored.length && out.every((pin, i) => pin === stored[i]) ? stored : out;
 }
 
 /**

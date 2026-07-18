@@ -1,5 +1,5 @@
 import { useState, type CSSProperties, type PointerEvent } from "react";
-import { DURATION_UNITS, durationLiteralSeconds, durationUnitSeconds, normalizeDurationUnit, type DurationUnit } from "../../../shared/duration.js";
+import { DURATION_UNITS, durationLiteralSeconds, durationSeconds, durationUnitSeconds, normalizeDurationUnit, type DurationUnit } from "../../../shared/duration.js";
 import type { SinkAction } from "../../../shared/results.js";
 import { TYPE_VAR, type ValueType } from "../../../shared/theme.js";
 import type { RWValue } from "../../../shared/value.js";
@@ -22,10 +22,11 @@ const DURATION_INPUT = "nodrag h-[28px] px-2 rounded-[6px] border border-rw-line
 
 const stop = (e: PointerEvent) => e.stopPropagation();
 
-function SetValueButton({ compact, label, onClick }: { compact?: boolean; label: string; onClick: () => void }) {
+function SetValueButton({ compact, label, ariaLabel, onClick }: { compact?: boolean; label: string; ariaLabel?: string; onClick: () => void }) {
   return (
     <button
       type="button"
+      aria-label={ariaLabel}
       onClick={onClick}
       onPointerDown={stop}
       className={cn(
@@ -81,15 +82,24 @@ export function PinValueEditor({
   type,
   onChange,
   compact,
+  ariaLabel,
+  defaultDurationUnit = "min",
+  minDurationSeconds,
 }: {
   value: unknown;
   type: string;
   onChange: (v: unknown) => void;
   /** Tight layout for inline-on-pin use: color shows only the swatch (no preset row). */
   compact?: boolean;
+  /** Accessible prefix for controls whose surrounding visual label is not a native label. */
+  ariaLabel?: string;
+  /** Initial unit offered when an optional duration has not been set yet. */
+  defaultDurationUnit?: DurationUnit;
+  /** Reject duration edits below this many seconds. */
+  minDurationSeconds?: number;
 }) {
   const [editingEmpty, setEditingEmpty] = useState(false);
-  const [draftDurationUnit, setDraftDurationUnit] = useState<DurationUnit>("min");
+  const [draftDurationUnit, setDraftDurationUnit] = useState<DurationUnit>(defaultDurationUnit);
   // Outline each editor in its value type's color, matching the pins and wires.
   const tc = TYPE_VAR[type as ValueType] ?? "var(--rw-t-any)";
   const unset = value === undefined || value === null;
@@ -164,20 +174,37 @@ export function PinValueEditor({
 
   if (type === "duration") {
     const parsed = durationEditorValue(value, draftDurationUnit);
-    const durationUnset = parsed.count === null;
+    const belowMinimum = parsed.count !== null && minDurationSeconds !== undefined
+      && durationSeconds(parsed.count, parsed.unit) < minDurationSeconds;
+    const durationUnset = parsed.count === null || belowMinimum;
     const countText = durationUnset ? "" : String(parsed.count);
     const setDuration = (count: number | null, unit: DurationUnit) => {
       setDraftDurationUnit(unit);
-      onChange(count === null || !Number.isFinite(count) ? undefined : { count, unit });
+      if (count === null || !Number.isFinite(count)) {
+        onChange(undefined);
+        return;
+      }
+      if (minDurationSeconds !== undefined && durationSeconds(count, unit) < minDurationSeconds) return;
+      onChange({ count, unit });
     };
     if (durationUnset && !editingEmpty) {
-      return <SetValueButton compact={compact} label={compact ? "set" : "Set duration"} onClick={() => setEditingEmpty(true)} />;
+      return (
+        <SetValueButton
+          compact={compact}
+          label={compact ? "set" : "Set duration"}
+          ariaLabel={ariaLabel ? `${ariaLabel}: set duration` : undefined}
+          onClick={() => setEditingEmpty(true)}
+        />
+      );
     }
     return (
       <div className={cn("nodrag flex items-center gap-1", compact ? "w-[104px]" : "w-full")} onPointerDown={stop}>
         <input
           autoFocus={editingEmpty}
           type="number"
+          step="any"
+          aria-label={ariaLabel ? `${ariaLabel} duration` : undefined}
+          min={minDurationSeconds === undefined ? undefined : minDurationSeconds / durationUnitSeconds(parsed.unit)}
           value={countText}
           placeholder="count"
           onBlur={() => {
@@ -188,6 +215,7 @@ export function PinValueEditor({
           className={cn(DURATION_INPUT, "rw-num min-w-0", compact ? "h-6 w-[52px] px-1.5 text-[10px]" : "flex-1")}
         />
         <select
+          aria-label={ariaLabel ? `${ariaLabel} unit` : undefined}
           value={parsed.unit}
           onChange={(e) => setDuration(parsed.count, normalizeDurationUnit(e.target.value))}
           style={{ borderColor: tc }}

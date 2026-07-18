@@ -1,6 +1,7 @@
 import type { EntityMap } from "../entities.js";
 import type { ServiceCall } from "../results.js";
 import { hexToRgb, type RWValue } from "../value.js";
+import { lightCaps } from "./light-caps.js";
 
 export interface DesiredLightState {
   on: RWValue | null;
@@ -8,6 +9,8 @@ export interface DesiredLightState {
   /** Color temperature in Kelvin. Ignored when an RGB color is also desired — a light applies one. */
   temperature?: RWValue | null;
   brightness?: RWValue | null;
+  transitionOn?: RWValue | null;
+  transitionOff?: RWValue | null;
 }
 
 export interface DesiredClimateState {
@@ -36,6 +39,11 @@ function brightnessMatches(actual: unknown, want: unknown): boolean {
   return Number(actual) === Number(want);
 }
 
+function transitionSeconds(value: DesiredLightState["transitionOn"]): number | undefined {
+  const seconds = value?.status === "ok" ? Number(value.v) : NaN;
+  return Number.isFinite(seconds) && seconds >= 0 ? seconds : undefined;
+}
+
 // A light's current color temperature in Kelvin, taken from `color_temp_kelvin` when present or
 // converted from the legacy `color_temp` (mireds) otherwise.
 function actualKelvin(attributes: Record<string, unknown>): number | undefined {
@@ -51,12 +59,18 @@ export function reconcileLight(entity_id: string, desired: DesiredLightState, en
 
   const e = entity(entities, entity_id);
   const actualState = e ? String(e.state) : undefined;
+  const supportsTransition = lightCaps(e?.attributes)?.transition === true;
   if (on.v === false) {
     if (actualState === "off") return null;
-    return { domain: "light", service: "turn_off", data: {}, target: { entity_id } };
+    const data: Record<string, unknown> = {};
+    const transition = transitionSeconds(desired.transitionOff);
+    if (supportsTransition && transition !== undefined) data.transition = transition;
+    return { domain: "light", service: "turn_off", data, target: { entity_id } };
   }
 
   const data: Record<string, unknown> = {};
+  const transition = transitionSeconds(desired.transitionOn);
+  if (supportsTransition && transition !== undefined) data.transition = transition;
   let differs = actualState !== "on";
   // A light applies either an RGB color or a color temperature, not both; a wired color wins.
   const color = desired.color;

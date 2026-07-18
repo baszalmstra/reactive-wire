@@ -147,13 +147,22 @@ export function RWNode({ id, data, selected }: NodeProps<RWNodeType>) {
           <div className="flex flex-col min-w-0">
             {def.inputs.map((p) => {
               const editing = p.editable && !results.connected[pinKey(id, p.id)];
+              const lightTransition = def.type === "sink-light" && (p.id === "transition_on" || p.id === "transition_off");
               return (
                 <div key={p.id} className="relative flex items-center h-7 pl-[15px] pr-1 gap-1.5">
                   {editing ? (
                     <>
                       <span className="text-[10.5px] text-rw-dim shrink-0">{p.label}</span>
                       <div className="w-[104px] flex justify-start">
-                        <PinValueEditor compact value={def.values?.[p.id]} type={results.inputs[pinKey(id, p.id)]?.type ?? p.type} onChange={(v) => onSetValue(id, p.id, v)} />
+                        <PinValueEditor
+                          compact
+                          value={def.values?.[p.id]}
+                          type={results.inputs[pinKey(id, p.id)]?.type ?? p.type}
+                          ariaLabel={p.label || p.id}
+                          defaultDurationUnit={lightTransition ? "sec" : undefined}
+                          minDurationSeconds={lightTransition ? 0 : undefined}
+                          onChange={(v) => onSetValue(id, p.id, v)}
+                        />
                       </div>
                     </>
                   ) : p.ghost ? (

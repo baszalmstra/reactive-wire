@@ -17,14 +17,14 @@ export function simulate(phase: number): EntityMap {
     "light.living_room": {
       state: "on",
       attributes: {
-        supported_color_modes: ["color_temp", "rgb"], color_mode: "rgb", brightness: 200, rgb_color: [255, 59, 48],
+        supported_color_modes: ["color_temp", "rgb"], supported_features: 32, color_mode: "rgb", brightness: 200, rgb_color: [255, 59, 48],
         color_temp_kelvin: 2700, min_color_temp_kelvin: 2000, max_color_temp_kelvin: 6500,
       },
     },
     "light.desk": {
       state: "on",
       attributes: {
-        supported_color_modes: ["color_temp"], color_mode: "color_temp", brightness: 180,
+        supported_color_modes: ["color_temp"], supported_features: 32, color_mode: "color_temp", brightness: 180,
         color_temp_kelvin: 4000, min_color_temp_kelvin: 2200, max_color_temp_kelvin: 6500,
       },
     },

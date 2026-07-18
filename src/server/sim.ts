@@ -11,11 +11,11 @@ import { type MockHA } from "../ha/mock.js";
 export function startSimulator(ha: MockHA): () => void {
   let phase = 0;
   ha.setState("light.living_room", "on", {
-    supported_color_modes: ["color_temp", "rgb"], color_mode: "rgb", brightness: 200, rgb_color: [255, 59, 48],
+    supported_color_modes: ["color_temp", "rgb"], supported_features: 32, color_mode: "rgb", brightness: 200, rgb_color: [255, 59, 48],
     color_temp_kelvin: 2700, min_color_temp_kelvin: 2000, max_color_temp_kelvin: 6500,
   });
   ha.setState("light.desk", "on", {
-    supported_color_modes: ["color_temp"], color_mode: "color_temp", brightness: 180,
+    supported_color_modes: ["color_temp"], supported_features: 32, color_mode: "color_temp", brightness: 180,
     color_temp_kelvin: 4000, min_color_temp_kelvin: 2200, max_color_temp_kelvin: 6500,
   });
   ha.setState("light.porch", "off", { supported_color_modes: ["onoff"] });

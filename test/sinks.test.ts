@@ -9,7 +9,7 @@ type Pin = { id: string; type: NodeData["inputs"][number]["type"] };
 
 function source(id: string, pin: Pin, value: NodeData["values"]): NodeData {
   return {
-    id, type: `const-${pin.type === "bool" ? "bool" : pin.type === "num" ? "number" : pin.type === "color" ? "color" : "string"}`,
+    id, type: `const-${pin.type === "bool" ? "bool" : pin.type === "num" ? "number" : pin.type === "color" ? "color" : pin.type === "duration" ? "duration" : "string"}`,
     title: "", subtitle: "", icon: "const", x: 0, y: 0,
     values: value, inputs: [], outputs: [{ id: "out", label: "", type: pin.type, editable: true }],
   };
@@ -90,6 +90,56 @@ describe("light reconciling sink", () => {
       { pin: { id: "brightness", type: "num" }, value: { out: 180 } },
     ], { "light.lr": { state: "off", attributes: { rgb_color: [51, 102, 153], brightness: 180 } } });
     expect(c[0]!.call).toEqual({ domain: "light", service: "turn_on", data: { rgb_color: [51, 102, 153], brightness: 180 }, target: { entity_id: "light.lr" } });
+  });
+
+  it("uses separate optional transition duration pins when the light advertises support", () => {
+    const transitionNode = sink("sink-light", { entity_id: "light.lr" }, [
+      { id: "on", type: "bool" },
+      { id: "transition_on", type: "duration" },
+      { id: "transition_off", type: "duration" },
+    ]);
+
+    const onCall = run(transitionNode, [
+      { pin: { id: "on", type: "bool" }, value: { out: true } },
+      { pin: { id: "transition_on", type: "duration" }, value: { out: { count: 1500, unit: "ms" } } },
+    ], { "light.lr": { state: "off", attributes: { supported_color_modes: ["onoff"], supported_features: 32 } } });
+    expect(onCall[0]!.call).toEqual({
+      domain: "light", service: "turn_on", data: { transition: 1.5 }, target: { entity_id: "light.lr" },
+    });
+
+    const offCall = run(transitionNode, [
+      { pin: { id: "on", type: "bool" }, value: { out: false } },
+      { pin: { id: "transition_off", type: "duration" }, value: { out: { count: 3, unit: "sec" } } },
+    ], { "light.lr": { state: "on", attributes: { supported_color_modes: ["onoff"], supported_features: 32 } } });
+    expect(offCall[0]!.call).toEqual({
+      domain: "light", service: "turn_off", data: { transition: 3 }, target: { entity_id: "light.lr" },
+    });
+  });
+
+  it("leaves transition durations unset by default", () => {
+    const transitionNode = sink("sink-light", { entity_id: "light.lr" }, [
+      { id: "on", type: "bool" },
+      { id: "transition_on", type: "duration" },
+      { id: "transition_off", type: "duration" },
+    ]);
+    const c = run(transitionNode, [
+      { pin: { id: "on", type: "bool" }, value: { out: false } },
+    ], { "light.lr": { state: "on", attributes: { supported_color_modes: ["onoff"], supported_features: 32 } } });
+    expect(c[0]!.call.data).toEqual({});
+  });
+
+  it("omits wired transitions when the light does not advertise support", () => {
+    const transitionNode = sink("sink-light", { entity_id: "light.lr" }, [
+      { id: "on", type: "bool" },
+      { id: "transition_off", type: "duration" },
+    ]);
+    const c = run(transitionNode, [
+      { pin: { id: "on", type: "bool" }, value: { out: false } },
+      { pin: { id: "transition_off", type: "duration" }, value: { out: { count: 4, unit: "sec" } } },
+    ], { "light.lr": { state: "on", attributes: { supported_color_modes: ["onoff"], supported_features: 0 } } });
+    expect(c[0]!.call).toEqual({
+      domain: "light", service: "turn_off", data: {}, target: { entity_id: "light.lr" },
+    });
   });
 
   it("turns on when color differs from rgb_color", () => {

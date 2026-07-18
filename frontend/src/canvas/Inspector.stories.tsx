@@ -19,17 +19,19 @@ function lightNode(caps: LightCaps | null, title = "light.living_room"): NodeDat
 }
 
 // Feed the inspector the pin values the engine would have derived for the selected light.
-function resultsWith(vals: { on: RWValue; color?: RWValue; temperature?: RWValue; brightness?: RWValue }): EvalResults {
+function resultsWith(vals: { on: RWValue; color?: RWValue; temperature?: RWValue; brightness?: RWValue; transitionOn?: RWValue; transitionOff?: RWValue }): EvalResults {
   const r = emptyResults();
   r.inputs[pinKey(ID, "on")] = vals.on;
   if (vals.color) r.inputs[pinKey(ID, "color")] = vals.color;
   if (vals.temperature) r.inputs[pinKey(ID, "temperature")] = vals.temperature;
   if (vals.brightness) r.inputs[pinKey(ID, "brightness")] = vals.brightness;
+  if (vals.transitionOn) r.inputs[pinKey(ID, "transition_on")] = vals.transitionOn;
+  if (vals.transitionOff) r.inputs[pinKey(ID, "transition_off")] = vals.transitionOff;
   return r;
 }
 
-const FULL: LightCaps = { brightness: true, rgb: true, colorTemp: true };
-const TUNABLE: LightCaps = { brightness: true, rgb: false, colorTemp: true };
+const FULL: LightCaps = { brightness: true, rgb: true, colorTemp: true, transition: true };
+const TUNABLE: LightCaps = { brightness: true, rgb: false, colorTemp: true, transition: true };
 
 const meta: Meta<typeof Inspector> = {
   title: "Chrome/Inspector",
@@ -54,4 +56,17 @@ export const LightOff: Story = {
 
 export const LightIdle: Story = {
   args: { node: lightNode(FULL), results: resultsWith({ on: UN("bool") }) },
+};
+
+export const LightTransitions: Story = {
+  args: {
+    node: lightNode(FULL),
+    entities: {
+      "light.living_room": {
+        state: "on",
+        attributes: { supported_color_modes: ["color_temp", "rgb"], supported_features: 32 },
+      },
+    },
+    results: resultsWith({ on: V("bool", true), color: V("color", "#ff3b30"), brightness: V("num", 229) }),
+  },
 };
