@@ -402,8 +402,9 @@ the sinks `sink-light`/`sink-call`/`sink-climate`/`sink-cover`/`sink-input`/`sin
   completion cannot mutate the stopped runtime.
 - `poller.ts` — the async data-source driver: for each `fetch` node it polls the URL on the
   node's interval, decodes the body, and writes the latest `SourceResult` (loading→`unavailable`,
-  failure→`error`, success→`ok`) into a source map the synchronous engine reads. Overlapping/
-  stale responses are dropped by generation + per-node sequence.
+  failure→`error`, success→`ok`) into a source map the synchronous engine reads. Each source is
+  single-flight and schedules its next request only after completion; requests time out, failures
+  back off to a cap, and stop/redeploy aborts active work and invalidates late completions.
 - `doc-store.ts` — `EditorDocumentStore`: the server-side Yjs `Y.Doc`, persisted as a binary
   snapshot under `RW_DATA_DIR` (`editor-doc.ydoc`, atomic tmp+rename write) and reloaded on
   boot — the editor document survives restarts. On load it checks the persisted schema version: a

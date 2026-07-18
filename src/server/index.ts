@@ -59,7 +59,7 @@ if (url && token) {
 // document resumes its validated live graph during startup. Async data-source nodes fetch over HTTP
 // using the platform fetch, driven by the deployer's poller after a graph is deployed.
 const durableMemory = new DurableMemoryStore({ dataDir });
-const deployer = new Deployer(ha, 1000, (url) => fetch(url), durableMemory);
+const deployer = new Deployer(ha, 1000, (url, { signal }) => fetch(url, { signal }), durableMemory);
 const documentStore = new EditorDocumentStore({ dataDir });
 
 const autoDeploy = new AutoDeployController((graph) => deployer.deploy(graph.nodes, graph.edges, true, graph.macros ?? {}));

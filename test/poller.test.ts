@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { Poller, type FetchFn } from "../src/server/poller.js";
+import { FETCH_TIMEOUT_MS, Poller, type FetchFn } from "../src/server/poller.js";
 import { Deployer } from "../src/server/runtime.js";
 import { MockHA } from "../src/ha/mock.js";
 import type { NodeData } from "../shared/node-types.js";
@@ -38,7 +38,7 @@ describe("Poller", () => {
     expect(p.sources()["f"]).toEqual({ status: "unavailable" });
     await flush();
     expect(p.sources()["f"]).toEqual({ status: "ok", body: 19.5 });
-    expect(fetchFn).toHaveBeenCalledWith("http://x");
+    expect(fetchFn).toHaveBeenCalledWith("http://x", { signal: expect.any(AbortSignal) });
     p.stop();
   });
 
@@ -80,36 +80,156 @@ describe("Poller", () => {
     expect(p.sources()["f"]).toBeUndefined();
   });
 
-  it("ignores a stale older response after a newer overlapping request has updated the source", async () => {
+  it("never overlaps a permanently pending request, even when fetch ignores abort", () => {
     vi.useFakeTimers();
-    let p: Poller | null = null;
+    const fetchFn = vi.fn<FetchFn>(() => new Promise(() => {}));
+    const p = new Poller(fetchFn, () => {});
     try {
-      const pending: Array<(value: Awaited<ReturnType<FetchFn>>) => void> = [];
-      const fetchFn = vi.fn<FetchFn>(() => new Promise((resolve) => pending.push(resolve)));
-      const onUpdate = vi.fn();
-      p = new Poller(fetchFn, onUpdate);
       p.start([fetchNode("f", { url: "http://x", interval: 0.001 })]);
-
       expect(fetchFn).toHaveBeenCalledTimes(1);
-      // User-configured fetch intervals are clamped to at least one second to avoid accidental
-      // tight polling loops, but unresolved requests may still overlap with the next scheduled
-      // poll. The older response must not overwrite the newer value.
-      vi.advanceTimersByTime(1000);
-      expect(fetchFn).toHaveBeenCalledTimes(2);
 
-      pending[1]!({ ok: true, status: 200, text: () => Promise.resolve("2") });
-      await flushMicrotasks();
-      expect(p.sources()["f"]).toEqual({ status: "ok", body: 2 });
-      expect(onUpdate).toHaveBeenCalledTimes(1);
-
-      pending[0]!({ ok: true, status: 200, text: () => Promise.resolve("1") });
-      await flushMicrotasks();
-      expect(p.sources()["f"]).toEqual({ status: "ok", body: 2 });
-      expect(onUpdate).toHaveBeenCalledTimes(1);
+      vi.advanceTimersByTime(FETCH_TIMEOUT_MS + 60 * 60_000);
+      expect(fetchFn).toHaveBeenCalledTimes(1);
+      expect(fetchFn.mock.calls[0]?.[1].signal.aborted).toBe(true);
     } finally {
-      p?.stop();
+      p.stop();
       vi.useRealTimers();
     }
+  });
+
+  it("aborts a timed-out request, publishes an error, and notifies once", async () => {
+    vi.useFakeTimers();
+    const onUpdate = vi.fn();
+    const fetchFn = vi.fn<FetchFn>((_url, { signal }) => new Promise((_resolve, reject) => {
+      signal.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
+    }));
+    const p = new Poller(fetchFn, onUpdate);
+    try {
+      p.start([fetchNode("f", { url: "http://x", interval: 0.001 })]);
+      vi.advanceTimersByTime(FETCH_TIMEOUT_MS);
+      await flushMicrotasks();
+
+      expect(fetchFn.mock.calls[0]?.[1].signal.aborted).toBe(true);
+      expect(p.sources()["f"]).toEqual({ status: "error", msg: `Fetch timed out after ${FETCH_TIMEOUT_MS} ms` });
+      expect(onUpdate).toHaveBeenCalledTimes(1);
+    } finally {
+      p.stop();
+      vi.useRealTimers();
+    }
+  });
+
+  it("aborts active work on stop and ignores a late completion", async () => {
+    let resolveFetch!: (value: Awaited<ReturnType<FetchFn>>) => void;
+    let signal!: AbortSignal;
+    const fetchFn = vi.fn<FetchFn>((_url, options) => {
+      signal = options.signal;
+      return new Promise((resolve) => { resolveFetch = resolve; });
+    });
+    const onUpdate = vi.fn();
+    const p = new Poller(fetchFn, onUpdate);
+    p.start([fetchNode("f", { url: "http://x" })]);
+
+    p.stop();
+    expect(signal.aborted).toBe(true);
+    resolveFetch({ ok: true, status: 200, text: () => Promise.resolve("late") });
+    await flushMicrotasks();
+    expect(p.sources()["f"]).toBeUndefined();
+    expect(onUpdate).not.toHaveBeenCalled();
+  });
+
+  it("schedules the next request from completion rather than start time", async () => {
+    vi.useFakeTimers();
+    let resolveFetch!: (value: Awaited<ReturnType<FetchFn>>) => void;
+    const fetchFn = vi.fn<FetchFn>(() => new Promise((resolve) => { resolveFetch = resolve; }));
+    const p = new Poller(fetchFn, () => {});
+    try {
+      p.start([fetchNode("f", { url: "http://x", interval: 0.001 })]);
+      vi.advanceTimersByTime(900);
+      expect(fetchFn).toHaveBeenCalledTimes(1);
+
+      resolveFetch({ ok: true, status: 200, text: () => Promise.resolve("1") });
+      await flushMicrotasks();
+      vi.advanceTimersByTime(999);
+      expect(fetchFn).toHaveBeenCalledTimes(1);
+      vi.advanceTimersByTime(1);
+      expect(fetchFn).toHaveBeenCalledTimes(2);
+    } finally {
+      p.stop();
+      vi.useRealTimers();
+    }
+  });
+
+  it("backs off failures and resets to the normal interval after success", async () => {
+    vi.useFakeTimers();
+    const fetchFn = vi.fn<FetchFn>()
+      .mockRejectedValueOnce(new Error("one"))
+      .mockRejectedValueOnce(new Error("two"))
+      .mockImplementation(() => okText("3"));
+    const p = new Poller(fetchFn, () => {});
+    try {
+      p.start([fetchNode("f", { url: "http://x", interval: 0.001 })]);
+      await flushMicrotasks();
+      vi.advanceTimersByTime(1_999);
+      expect(fetchFn).toHaveBeenCalledTimes(1);
+      vi.advanceTimersByTime(1);
+      expect(fetchFn).toHaveBeenCalledTimes(2);
+      await flushMicrotasks();
+
+      vi.advanceTimersByTime(3_999);
+      expect(fetchFn).toHaveBeenCalledTimes(2);
+      vi.advanceTimersByTime(1);
+      expect(fetchFn).toHaveBeenCalledTimes(3);
+      await flushMicrotasks();
+
+      vi.advanceTimersByTime(999);
+      expect(fetchFn).toHaveBeenCalledTimes(3);
+      vi.advanceTimersByTime(1);
+      expect(fetchFn).toHaveBeenCalledTimes(4);
+    } finally {
+      p.stop();
+      vi.useRealTimers();
+    }
+  });
+
+  it("caps repeated failure backoff", async () => {
+    vi.useFakeTimers();
+    const fetchFn = vi.fn<FetchFn>().mockRejectedValue(new Error("offline"));
+    const p = new Poller(fetchFn, () => {});
+    try {
+      p.start([fetchNode("f", { url: "http://x", interval: 0.001 })]);
+      await flushMicrotasks();
+      const delays = [2_000, 4_000, 8_000, 16_000, 32_000, 64_000, 128_000, 256_000, 300_000, 300_000];
+      for (const [index, delay] of delays.entries()) {
+        vi.advanceTimersByTime(delay - 1);
+        expect(fetchFn).toHaveBeenCalledTimes(index + 1);
+        vi.advanceTimersByTime(1);
+        expect(fetchFn).toHaveBeenCalledTimes(index + 2);
+        await flushMicrotasks();
+      }
+    } finally {
+      p.stop();
+      vi.useRealTimers();
+    }
+  });
+
+  it("rejects stale completion from a prior deployment generation", async () => {
+    const pending: Array<(value: Awaited<ReturnType<FetchFn>>) => void> = [];
+    const fetchFn = vi.fn<FetchFn>(() => new Promise((resolve) => pending.push(resolve)));
+    const onUpdate = vi.fn();
+    const p = new Poller(fetchFn, onUpdate);
+    p.start([fetchNode("f", { url: "http://old" })]);
+    p.start([fetchNode("f", { url: "http://new" })]);
+
+    pending[0]!({ ok: true, status: 200, text: () => Promise.resolve("1") });
+    await flushMicrotasks();
+    expect(p.sources()["f"]).toEqual({ status: "unavailable" });
+    expect(onUpdate).not.toHaveBeenCalled();
+
+    pending[1]!({ ok: true, status: 200, text: () => Promise.resolve("2") });
+    await flushMicrotasks();
+    expect(p.sources()["f"]).toEqual({ status: "ok", body: 2 });
+    expect(onUpdate).toHaveBeenCalledTimes(1);
+    p.stop();
   });
 });
 
