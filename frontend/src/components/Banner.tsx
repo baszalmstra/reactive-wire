@@ -5,7 +5,7 @@
 export function Banner({ lastSync }: { lastSync: string | null }) {
   return (
     <div className="flex-none flex items-center gap-2.5 px-[14px] h-9 text-[11.5px] text-rw-warn border-b border-[color-mix(in_oklab,var(--rw-h-warn)_45%,var(--rw-line))] bg-[color-mix(in_oklab,var(--rw-h-warn)_12%,var(--rw-panel))] select-none">
-      <span className="w-2 h-2 rounded-full bg-rw-warn shrink-0" />
+      <span className="w-2 h-2 rounded-full bg-rw-warn-fill shrink-0" />
       <span className="min-w-0 truncate">
         {lastSync ? (
           <>

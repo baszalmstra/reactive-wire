@@ -15,8 +15,11 @@ export function Toast({ toast }: { toast: ToastMessage | null }) {
     <div className="fixed bottom-4 right-4 z-50 pointer-events-none">
       <div
         key={toast.id}
+        role={toast.kind === "error" ? "alert" : "status"}
+        aria-live={toast.kind === "error" ? "assertive" : "polite"}
+        aria-atomic="true"
         className={cn(
-          "flex items-center gap-2 max-w-[340px] px-3 py-2 rounded-lg text-[12px] border shadow-rw [animation:rw-toast-in_.18s_ease-out]",
+          "rw-toast-message flex items-center gap-2 max-w-[340px] px-3 py-2 rounded-lg text-[12px] border shadow-rw [animation:rw-toast-in_.18s_ease-out]",
           toast.kind === "error"
             ? "text-rw-error border-[color-mix(in_oklab,var(--rw-h-error)_45%,transparent)] bg-[color-mix(in_oklab,var(--rw-h-error)_14%,var(--rw-panel))]"
             : "text-rw-text border-rw-line bg-rw-panel",
@@ -24,8 +27,8 @@ export function Toast({ toast }: { toast: ToastMessage | null }) {
       >
         <span
           className={cn(
-            "inline-flex items-center justify-center w-[16px] h-[16px] rounded-full text-[10px] font-bold shrink-0 text-white",
-            toast.kind === "error" ? "bg-rw-error" : "bg-rw-accent",
+            "inline-flex items-center justify-center w-[16px] h-[16px] rounded-full text-[10px] font-bold shrink-0",
+            toast.kind === "error" ? "bg-rw-error-fill text-rw-health-on" : "bg-rw-accent text-rw-accent-text",
           )}
         >
           {toast.kind === "error" ? "⨯" : "i"}

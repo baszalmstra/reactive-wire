@@ -40,6 +40,7 @@ import { CommentCtx } from "./canvas/comments-context.js";
 import { type CommentNodeType } from "./canvas/comments.js";
 import { MobileBar } from "./components/MobileBar.js";
 import { useIsMobile } from "./use-is-mobile.js";
+import { useReducedMotion } from "./use-reduced-motion.js";
 import { useMacros } from "./canvas/use-macros.js";
 import { groupSelection } from "./canvas/grouping.js";
 import { isMacroInstance, makeMacroInstance, type MacroDef, type MacroMap } from "../../shared/macros.js";
@@ -169,6 +170,7 @@ export function App() {
   const [toast, setToast] = useState<ToastMessage | null>(null);
   const [lastSync, setLastSync] = useState<string | null>(null);
   const isMobile = useIsMobile();
+  const reducedMotion = useReducedMotion();
   const [navOpen, setNavOpen] = useState(false);
   const [sheetOpen, setSheetOpen] = useState(false);
 
@@ -492,9 +494,9 @@ export function App() {
 
   const rf = useRef<ReactFlowInstance<EditorNode, Edge> | null>(null);
   const [zoom, setZoom] = useState(1);
-  const zoomOut = useCallback(() => void rf.current?.zoomOut({ duration: 160 }), []);
-  const zoomIn = useCallback(() => void rf.current?.zoomIn({ duration: 160 }), []);
-  const fitCanvas = useCallback(() => void rf.current?.fitView({ padding: 0.25, maxZoom: 1, duration: 260 }), []);
+  const zoomOut = useCallback(() => void rf.current?.zoomOut({ duration: reducedMotion ? 0 : 160 }), [reducedMotion]);
+  const zoomIn = useCallback(() => void rf.current?.zoomIn({ duration: reducedMotion ? 0 : 160 }), [reducedMotion]);
+  const fitCanvas = useCallback(() => void rf.current?.fitView({ padding: 0.25, maxZoom: 1, duration: reducedMotion ? 0 : 260 }), [reducedMotion]);
   const idc = useRef(0);
   const [pending, setPending] = useState<{ nodeId: string; requires: RequiredConfig } | null>(null);
 
@@ -632,10 +634,10 @@ export function App() {
     const node = nodesRef.current.find((n) => n.id === id);
     if (!node || !rf.current) return;
     const w = isRWNode(node) ? node.data.def.w ?? 210 : node.data.w;
-    rf.current.setCenter(node.position.x + w / 2, node.position.y + 80, { zoom: 1, duration: 400 });
+    rf.current.setCenter(node.position.x + w / 2, node.position.y + 80, { zoom: 1, duration: reducedMotion ? 0 : 400 });
     setSelected(id);
     setNodes((ns) => ns.map((n) => ({ ...n, selected: n.id === id })));
-  }, [setNodes]);
+  }, [reducedMotion, setNodes]);
 
   // Color the in-progress connection line by the dragged pin's type (grey if unresolved).
   const onConnectStart = useCallback((_: unknown, params: OnConnectStartParams) => {

@@ -16,7 +16,7 @@ function ProblemRow({ p, onFocus }: { p: Problem; onFocus: (id: string) => void 
       <span
         className={cn(
           "inline-flex items-center justify-center w-[15px] h-[15px] rounded-full text-[9px] font-extrabold shrink-0 text-white",
-          p.severity === "error" ? "bg-rw-error" : "bg-rw-warn",
+          p.severity === "error" ? "bg-rw-error-fill" : "bg-rw-warn-fill",
         )}
       >
         {SEV_ICON[p.severity]}

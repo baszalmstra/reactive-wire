@@ -11,7 +11,7 @@ type Story = StoryObj<typeof Tooltip>;
 
 const trigger = (
   <button className="rounded-[7px] bg-rw-panel2 px-3 py-1.5 text-[12px] text-rw-text">
-    Hover me
+    Hover or focus me
   </button>
 );
 

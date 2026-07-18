@@ -22,6 +22,7 @@ test.describe.serial("Keyboard graph accessibility", () => {
 
     const output = source.getByRole("button", { name: "Boolean: value output, boolean" });
     const input = target.getByRole("button", { name: "NOT: in input, boolean" });
+    expect((await output.boundingBox())?.width).toBeGreaterThanOrEqual(28);
     await output.focus();
     await page.keyboard.press("Enter");
     await input.focus();
@@ -60,5 +61,25 @@ test.describe.serial("Keyboard graph accessibility", () => {
     await autoDeploy.focus();
     await expect(autoDeploy).toBeFocused();
     await expect(page.locator(".rw-checkbox")).toHaveCSS("outline-style", "solid");
+  });
+
+  test("exposes focused tooltips, large color targets, and reduced-motion styling", async ({ page }) => {
+    const paletteButton = page.locator(".rw-palette-scroll button").first();
+    await paletteButton.focus();
+    const tooltip = page.getByRole("tooltip");
+    await expect(tooltip).toBeVisible();
+    await expect(paletteButton).toHaveAttribute("aria-describedby", await tooltip.getAttribute("id") ?? "");
+    await page.keyboard.press("Escape");
+    await expect(tooltip).toBeHidden();
+
+    await addNode(page, "Color");
+    const blue = page.getByRole("button", { name: "Set color Blue" });
+    const target = await blue.boundingBox();
+    expect(target?.width).toBeGreaterThanOrEqual(32);
+    expect(target?.height).toBeGreaterThanOrEqual(32);
+
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    expect(await page.evaluate(() => matchMedia("(prefers-reduced-motion: reduce)").matches)).toBe(true);
+    await expect(page.locator(".rw-sidebar-wrap")).toHaveCSS("transition-duration", "0s");
   });
 });

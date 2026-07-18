@@ -10,6 +10,10 @@ import { Icon } from "./Icon.js";
 const DEFAULT_COLOR = "#ffffff";
 
 export const COLOR_PRESETS = [DEFAULT_COLOR, "#ffd60a", "#ff9f0a", "#ff3b30", "#34c759", "#0a84ff", "#bf5af2", "#64d2ff"];
+const COLOR_PRESET_NAMES: Record<string, string> = {
+  "#ffffff": "White", "#ffd60a": "Yellow", "#ff9f0a": "Orange", "#ff3b30": "Red",
+  "#34c759": "Green", "#0a84ff": "Blue", "#bf5af2": "Purple", "#64d2ff": "Cyan",
+};
 
 const INPUT =
   "nodrag h-[28px] px-2 rounded-[6px] border border-rw-line bg-rw-panel2 text-rw-text font-mono text-[11.5px] outline-none w-full focus:border-rw-accent";
@@ -224,9 +228,22 @@ export function PinValueEditor({
       <div className="flex items-center gap-[9px]" onPointerDown={stop}>
         {picker}
         <div className="flex flex-wrap gap-1.5">
-          {COLOR_PRESETS.map((c) => (
-            <button key={c} style={{ background: c }} onClick={() => onChange(c)} className="nodrag w-[14px] h-[14px] rounded-full border border-rw-line" />
-          ))}
+          {COLOR_PRESETS.map((c) => {
+            const name = COLOR_PRESET_NAMES[c] ?? c;
+            return (
+              <button
+                key={c}
+                type="button"
+                onClick={() => onChange(c)}
+                className="nodrag inline-flex w-8 h-8 items-center justify-center rounded-full hover:bg-rw-panel2"
+                aria-label={`Set color ${name}`}
+                aria-pressed={!colorUnset && hex.toLowerCase() === c}
+                title={name}
+              >
+                <span aria-hidden="true" className="w-[14px] h-[14px] rounded-full border border-rw-line" style={{ background: c }} />
+              </button>
+            );
+          })}
         </div>
         {!colorUnset && (
           <button type="button" onClick={() => onChange(undefined)} className="nodrag text-[10px] text-rw-faint hover:text-rw-text">

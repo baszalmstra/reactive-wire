@@ -79,10 +79,13 @@ export function CommentNode({ id, data, selected }: NodeProps<CommentNodeType>) 
                   key={k}
                   type="button"
                   className={cn("rw-comment-sw", data.color === k && "on")}
-                  style={{ background: COMMENT_COLORS[k] }}
-                  title={k}
+                  title={`${k} comment color`}
+                  aria-label={`Set comment color ${k}`}
+                  aria-pressed={data.color === k}
                   onClick={() => onRecolor(id, k as CommentColor)}
-                />
+                >
+                  <span aria-hidden="true" style={{ background: COMMENT_COLORS[k] }} />
+                </button>
               ))}
             </div>
             <button

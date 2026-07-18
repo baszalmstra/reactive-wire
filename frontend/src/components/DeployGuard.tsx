@@ -52,17 +52,17 @@ export function DeployGuard({
         <div className="px-4 pt-3">
           {blocked ? (
             <div className="flex items-center gap-2 text-[12px] text-rw-error">
-              <span className="inline-flex items-center justify-center w-[16px] h-[16px] rounded-full bg-rw-error text-white text-[10px] font-bold">✕</span>
+              <span className="inline-flex items-center justify-center w-[16px] h-[16px] rounded-full bg-rw-error-fill text-rw-health-on text-[10px] font-bold">✕</span>
               Deploy blocked — {errors} hard error{errors === 1 ? "" : "s"} must be resolved first.
             </div>
           ) : warns > 0 ? (
             <div className="flex items-center gap-2 text-[12px] text-rw-warn">
-              <span className="inline-flex items-center justify-center w-[16px] h-[16px] rounded-full bg-rw-warn text-white text-[10px] font-bold">△</span>
+              <span className="inline-flex items-center justify-center w-[16px] h-[16px] rounded-full bg-rw-warn-fill text-rw-health-on text-[10px] font-bold">△</span>
               {warns} warning{warns === 1 ? "" : "s"} — degraded inputs will deploy as-is.
             </div>
           ) : (
             <div className="flex items-center gap-2 text-[12px] text-rw-ok">
-              <span className="inline-flex items-center justify-center w-[16px] h-[16px] rounded-full bg-rw-ok text-white text-[10px] font-bold">✓</span>
+              <span className="inline-flex items-center justify-center w-[16px] h-[16px] rounded-full bg-rw-ok-fill text-rw-health-on text-[10px] font-bold">✓</span>
               No problems. Safe to deploy.
             </div>
           )}
@@ -77,8 +77,8 @@ export function DeployGuard({
               >
                 <span
                   className={cn(
-                    "inline-flex items-center justify-center w-[15px] h-[15px] rounded-full text-[9px] font-extrabold shrink-0 text-white mt-px",
-                    p.severity === "error" ? "bg-rw-error" : "bg-rw-warn",
+                    "inline-flex items-center justify-center w-[15px] h-[15px] rounded-full text-[9px] font-extrabold shrink-0 text-rw-health-on mt-px",
+                    p.severity === "error" ? "bg-rw-error-fill" : "bg-rw-warn-fill",
                   )}
                 >
                   {p.severity === "error" ? "✕" : "△"}

@@ -19,6 +19,9 @@ const LABEL: Record<StatusKind, string> = { offline: "DISCONNECTED", live: "LIVE
 export function StatusPill({ kind, sub }: { kind: StatusKind; sub?: string }) {
   return (
     <div
+      role="status"
+      aria-live="polite"
+      aria-atomic="true"
       title={sub}
       className={cn(
         "flex items-center gap-[7px] h-[30px] px-3 rounded-lg border font-bold text-[11px] tracking-[.06em]",
@@ -28,7 +31,7 @@ export function StatusPill({ kind, sub }: { kind: StatusKind; sub?: string }) {
       <span
         className={cn(
           "w-2 h-2 rounded-full shrink-0",
-          kind === "offline" ? "bg-rw-warn" : kind === "live" ? "bg-rw-ok [animation:rw-blink_1.8s_ease-in-out_infinite]" : "bg-rw-faint",
+          kind === "offline" ? "bg-rw-warn-fill" : kind === "live" ? "rw-live-dot bg-rw-ok-fill [animation:rw-blink_1.8s_ease-in-out_infinite]" : "bg-rw-faint",
         )}
       />
       <span className="flex flex-col items-start leading-[1.05]">
