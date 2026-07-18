@@ -46,15 +46,25 @@ export function EntityPicker({
     setActive(0);
   };
 
-  const chooseFromPointer = (id: string, ev: React.PointerEvent | React.MouseEvent) => {
-    // Select before the input blur/React Flow/backdrop handlers can close or steal the event.
+  const closeWhenFocusLeaves = (ev: React.FocusEvent<HTMLDivElement>) => {
+    // Moving focus from the input to an option is still inside this picker. Closing at that point
+    // unmounts the option before its click completes on slower pointer clients.
+    if (!(ev.relatedTarget instanceof Node) || !ev.currentTarget.contains(ev.relatedTarget)) setOpen(false);
+  };
+
+  const keepInputFocused = (ev: React.MouseEvent) => {
+    ev.preventDefault();
+    ev.stopPropagation();
+  };
+
+  const chooseFromClick = (id: string, ev: React.MouseEvent) => {
     ev.preventDefault();
     ev.stopPropagation();
     choose(id);
   };
 
   return (
-    <div className="relative z-[220]">
+    <div className="relative z-[220]" onBlur={closeWhenFocusLeaves}>
       <input
         value={value}
         autoFocus={autoFocus}
@@ -67,7 +77,6 @@ export function EntityPicker({
           setOpen(true);
         }}
         onFocus={() => setOpen(true)}
-        onBlur={() => setTimeout(() => setOpen(false), 160)}
         onKeyDown={(e) => {
           if (e.key === "ArrowDown") {
             e.preventDefault();
@@ -108,9 +117,8 @@ export function EntityPicker({
                   aria-selected={selected}
                   data-entity-id={id}
                   onPointerEnter={() => setActive(index)}
-                  onPointerDown={(ev) => chooseFromPointer(id, ev)}
-                  onMouseDown={(ev) => chooseFromPointer(id, ev)}
-                  onClick={(ev) => chooseFromPointer(id, ev)}
+                  onMouseDown={keepInputFocused}
+                  onClick={(ev) => chooseFromClick(id, ev)}
                   className={`flex w-full items-center justify-between gap-3 px-3 py-2 text-left font-mono text-[11.5px] outline-none transition-colors ${highlighted || selected ? "bg-rw-accent/15 text-rw-text" : "text-rw-dim hover:bg-rw-panel2 hover:text-rw-text"}`}
                 >
                   <span className="min-w-0 truncate text-rw-text">{id}</span>
