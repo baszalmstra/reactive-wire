@@ -75,6 +75,7 @@ const stopFeed = startFeed(ha, { port, host, allowedHosts, allowedOrigins, deplo
     const settings = documentStore.snapshot().settings;
     return { ...deployer.inspect(), autoDeploy: settings.autoDeploy, deployedFlowIds: settings.deployedFlowIds ?? [settings.deployFlowId].filter((id): id is string => !!id) };
   },
+  subscribeRuntime: (listener) => deployer.subscribe(listener),
 });
 
 const startupDeployment = applyStartupDeploymentPolicy(documentStore.snapshot(), autoDeploy);

@@ -19,6 +19,37 @@ function boolEntity(id: string, entityId: string): RuntimeNode {
 afterEach(() => vi.useRealTimers());
 
 describe("runtime cause-aware scheduling", () => {
+  it("bounds retained history payloads while preserving the current runtime output", () => {
+    const ha = new MockHA();
+    const source = made("const-string", "source");
+    source.values = { out: "x".repeat(10_000) };
+    const deployer = new Deployer(ha, 100_000);
+    deployer.deploy([source], [], false);
+
+    const snapshot = deployer.inspect();
+    expect(snapshot.nodes.source?.outputs.out?.value).toHaveLength(10_000);
+    const retained = snapshot.history["source:out"]?.[0]?.value.value;
+    expect(typeof retained).toBe("string");
+    expect(String(retained).length).toBeLessThan(4_200);
+    deployer.stop();
+  });
+
+  it("caps retained history across the complete graph below the runtime frame budget", () => {
+    const ha = new MockHA();
+    const sources = Array.from({ length: 1_050 }, (_, index) => {
+      const source = made("const-string", `source-${index}`);
+      source.values = { out: "x".repeat(5_000) };
+      return source;
+    });
+    const deployer = new Deployer(ha, 100_000);
+    deployer.deploy(sources, [], false);
+
+    const history = deployer.inspect().history;
+    expect(Object.values(history).reduce((total, samples) => total + samples.length, 0)).toBe(500);
+    expect(Buffer.byteLength(JSON.stringify(history))).toBeLessThan(2_500_000);
+    deployer.stop();
+  });
+
   it("skips unrelated entity updates and evaluates only the relevant closure", () => {
     const ha = new MockHA();
     ha.setState("binary_sensor.a", "off");

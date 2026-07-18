@@ -404,6 +404,24 @@ describe("boundary nodes preview as unavailable in a definition canvas", () => {
   });
 });
 
+describe("macro runtime history", () => {
+  it("retains placement output aliases for the server-backed inspector", () => {
+    const macros: MacroMap = { m_toggle: toggleMacro() };
+    const source = entityNode("src", "binary_sensor.trigger", "bool");
+    const instance = macroInstance("a", "m_toggle");
+    const edges: ViewEdge[] = [{ id: "e", from: { node: "src", pin: "state" }, to: { node: "a", pin: "trig" } }];
+    const ha = new MockHA();
+    ha.setState("binary_sensor.trigger", "off");
+    const deployer = new Deployer(ha, 100_000);
+    deployer.deploy([source, instance], edges, false, macros);
+
+    ha.setState("binary_sensor.trigger", "on");
+    const samples = deployer.inspect().history["a:state"];
+    expect(samples?.map((sample) => sample.value.value)).toEqual([false, true]);
+    deployer.stop();
+  });
+});
+
 describe("a sink inside a macro actuates through the Deployer", () => {
   it("each placement reconciles its own light from its own trigger", () => {
     // A macro that turns a light on/off from a boolean input. The light entity is baked into the

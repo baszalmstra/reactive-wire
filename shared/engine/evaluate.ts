@@ -6,7 +6,7 @@
 import type { RuntimeNode, RuntimePin, ValueType } from "../runtime-types.js";
 import type { EntityMap } from "../entities.js";
 import { UN, parseEntityValue, type RWValue } from "../value.js";
-import type { EvalResults, SinkAction, ServiceCall } from "../results.js";
+import { formatServiceCall, type EvalResults, type SinkAction, type ServiceCall } from "../results.js";
 import { expandMacros, joinPath } from "./expand.js";
 import { isMacroInstance, type RuntimeMacroMap } from "../macros.js";
 import { REGISTRY } from "./nodes/index.js";
@@ -48,14 +48,6 @@ export function isTransientSink(type: string): boolean {
   return REGISTRY[type]?.transient === true;
 }
 
-/** A short text summary of a service call for the canvas preview. */
-function callNote(call: ServiceCall): string {
-  const keys = Object.keys(call.data);
-  const args = keys.length ? ` ${keys.map((k) => `${k}=${JSON.stringify(call.data[k])}`).join(", ")}` : "";
-  const target = call.target?.entity_id ? `${call.target.entity_id}${args}` : args.trim();
-  return `${call.domain}.${call.service}(${target})`;
-}
-
 /**
  * The preview text and status for a sink, read from the call already computed for it during
  * this recompute. A sink whose command input is non-ok produces no call and a note explaining
@@ -67,7 +59,7 @@ function describeSink(n: RuntimeNode, results: EvalResults): SinkAction {
   if (blocked) return blocked;
   const call = results.sinks[n.id];
   if (!call) return { call: null, note: "holds — no change", status: "ok" };
-  return { call: callNote(call), status: "ok" };
+  return { call: formatServiceCall(call), status: "ok" };
 }
 
 /**

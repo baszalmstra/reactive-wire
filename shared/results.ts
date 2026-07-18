@@ -24,6 +24,14 @@ export interface ServiceCall {
   target?: { entity_id: string };
 }
 
+/** A short text summary of a Home Assistant service call for runtime and preview UI. */
+export function formatServiceCall(call: ServiceCall): string {
+  const keys = Object.keys(call.data);
+  const args = keys.length ? ` ${keys.map((key) => `${key}=${JSON.stringify(call.data[key])}`).join(", ")}` : "";
+  const target = call.target?.entity_id ? `${call.target.entity_id}${args}` : args.trim();
+  return `${call.domain}.${call.service}(${target})`;
+}
+
 /** Resolved runtime values for every pin, keyed with `pinKey(nodeId, pinId)`, plus per-node health. */
 export interface EvalResults {
   outputs: Record<string, RWValue>;

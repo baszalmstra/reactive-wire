@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { EntityMap } from "../../shared/entities.js";
 import type { HAConnectionStatus } from "../../shared/ha-status.js";
 import type { DocErrorMessage, DocResetAckMessage, DocResetMessage, DocStateMessage, DocUpdateMessage } from "../../shared/collab.js";
+import { isRuntimeStateFrame, type RuntimeStateFrame } from "../../shared/protocol.js";
 
 export interface DeployResult {
   ok: boolean;
@@ -33,6 +34,8 @@ export interface Server {
   /** Server-to-Home-Assistant readiness, separate from this editor's WebSocket. */
   haStatus: HAConnectionStatus;
   entities: EntityMap;
+  /** Authoritative deployed-runtime actions and output history pushed by the server. */
+  runtimeState: RuntimeStateFrame | null;
   lastResult: DeployResult | null;
   docState: DocPacket | null;
   docUpdate: DocPacket | null;
@@ -89,6 +92,7 @@ export function useServer(url: string = DEFAULT_URL): Server {
   const [connected, setConnected] = useState(false);
   const [haStatus, setHAStatus] = useState<HAConnectionStatus>({ phase: "disconnected", epoch: 0, snapshotVersion: null });
   const [entities, setEntities] = useState<EntityMap>({});
+  const [runtimeState, setRuntimeState] = useState<RuntimeStateFrame | null>(null);
   const [lastResult, setLastResult] = useState<DeployResult | null>(null);
   const [docState, setDocState] = useState<DocPacket | null>(null);
   const [docUpdate, setDocUpdate] = useState<DocPacket | null>(null);
@@ -152,7 +156,8 @@ export function useServer(url: string = DEFAULT_URL): Server {
               for (const [entityId, state] of Object.entries(msg.changed as EntityMap)) next[entityId] = state;
               return next;
             });
-          } else if (msg.type === "deployResult") setLastResult(msg as DeployResult);
+          } else if (isRuntimeStateFrame(msg)) setRuntimeState(msg);
+          else if (msg.type === "deployResult") setLastResult(msg as DeployResult);
           else if (msg.type === "docState" && typeof msg.update === "string") setDocState({ update: (msg as DocStateMessage).update, nonce: ++nonceRef.current });
           else if (msg.type === "docUpdate" && typeof msg.update === "string") setDocUpdate({ update: (msg as DocUpdateMessage).update, nonce: ++nonceRef.current });
           else if (msg.type === "docReset" && typeof msg.update === "string" && Number.isSafeInteger(msg.generation) && typeof msg.error === "string") {
@@ -166,6 +171,8 @@ export function useServer(url: string = DEFAULT_URL): Server {
       };
       ws.onclose = () => {
         setConnected(false);
+        setRuntimeState(null);
+        setHAStatus((previous) => ({ phase: "disconnected", epoch: previous.epoch, snapshotVersion: null }));
         if (!stopped) retry = setTimeout(connect, 1500);
       };
       ws.onerror = () => {
@@ -214,5 +221,5 @@ export function useServer(url: string = DEFAULT_URL): Server {
     return true;
   }, []);
 
-  return { connected, haStatus, entities, lastResult, docState, docUpdate, docReset, docError, deploy, sendDocUpdate, acknowledgeDocReset };
+  return { connected, haStatus, entities, runtimeState, lastResult, docState, docUpdate, docReset, docError, deploy, sendDocUpdate, acknowledgeDocReset };
 }
