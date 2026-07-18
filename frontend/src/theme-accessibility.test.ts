@@ -23,14 +23,22 @@ function rgb(value: string): [number, number, number] {
   ];
 }
 
-function contrast(a: string, b: string): number {
-  const luminance = (value: string) => {
-    const [r, g, blue] = rgb(value);
-    return 0.2126 * r + 0.7152 * g + 0.0722 * blue;
-  };
+function contrastRgb(a: [number, number, number], b: [number, number, number]): number {
+  const luminance = ([r, g, blue]: [number, number, number]) => 0.2126 * r + 0.7152 * g + 0.0722 * blue;
   const first = luminance(a);
   const second = luminance(b);
   return (Math.max(first, second) + 0.05) / (Math.min(first, second) + 0.05);
+}
+
+function contrast(a: string, b: string): number {
+  return contrastRgb(rgb(a), rgb(b));
+}
+
+/** Conservative alpha composition in linear sRGB for the subtle rendered status/chip fills. */
+function composite(foreground: string, background: string, alpha: number): [number, number, number] {
+  const fg = rgb(foreground);
+  const bg = rgb(background);
+  return fg.map((channel, index) => channel * alpha + bg[index]! * (1 - alpha)) as [number, number, number];
 }
 
 const aesthetics: Aesthetic[] = ["ide", "blueprint", "warm"];
@@ -53,6 +61,21 @@ describe("theme accessibility", () => {
         expect(contrast(vars[`--rw-h-${health}-fg`]!, vars["--rw-panel"]!), `${aesthetic}/${mode} ${health} text`).toBeGreaterThanOrEqual(4.5);
         expect(contrast(vars["--rw-health-on"]!, vars[`--rw-h-${health}`]!), `${aesthetic}/${mode} glyph on ${health}`).toBeGreaterThanOrEqual(4.5);
       }
+    }
+  });
+
+  it("keeps rendered small-text combinations readable without opacity loss", () => {
+    for (const aesthetic of aesthetics) for (const mode of modes) {
+      const vars = buildThemeVars(aesthetic, mode);
+      expect(
+        contrast(vars["--rw-dim"]!, vars["--rw-panel2"]!),
+        `${aesthetic}/${mode} draft subline`,
+      ).toBeGreaterThanOrEqual(4.5);
+      const warningSurface = composite(vars["--rw-h-warn"]!, vars["--rw-panel"]!, 0.12);
+      expect(
+        contrastRgb(rgb(vars["--rw-h-warn-fg"]!), warningSurface),
+        `${aesthetic}/${mode} reconnect text on warning surface`,
+      ).toBeGreaterThanOrEqual(4.5);
     }
   });
 

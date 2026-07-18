@@ -32,7 +32,7 @@ export function ValueChip({
   const isTyped = value && (value.status === "ok" || value.status === "stale");
   const typeColor = isTyped ? TYPE_VAR[value.type] : undefined;
   const kindClass = f.kind === "error" ? ERR : f.kind === "unavail" || f.kind === "none" ? EMPTY : TINTED;
-  const cls = cn(BASE, kindClass, ANATOMY[anatomy], f.stale && "opacity-55 [filter:grayscale(0.45)]");
+  const cls = cn(BASE, kindClass, ANATOMY[anatomy], f.stale && "border-dashed");
   const style: CSSProperties = { ["--tc" as string]: typeColor };
 
   if (f.kind === "error") {
@@ -72,7 +72,7 @@ export function ValueChip({
   return (
     <span className={cls} style={style}>
       {f.text}
-      {unit && f.kind === "num" ? <span className="opacity-55 ml-px">{unit}</span> : null}
+      {unit && f.kind === "num" ? <span className="ml-px text-rw-faint">{unit}</span> : null}
     </span>
   );
 }

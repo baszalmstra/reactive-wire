@@ -39,7 +39,7 @@ export function StatusPill({ kind, sub }: { kind: StatusKind; sub?: string }) {
       />
       <span className="flex flex-col items-start leading-[1.05]">
         {LABEL[kind]}
-        {sub && <span className="text-[8.5px] font-medium tracking-[.02em] opacity-80 normal-case">{sub}</span>}
+        {sub && <span className="text-[8.5px] font-medium tracking-[.02em] normal-case">{sub}</span>}
       </span>
     </div>
   );

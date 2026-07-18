@@ -20,7 +20,7 @@ export function Banner({ lastSync }: { lastSync: string | null }) {
         )}
       </span>
       <div className="flex-1" />
-      <span className="text-[11px] text-rw-warn/70 shrink-0">Reconnecting…</span>
+      <span className="text-[11px] text-rw-warn shrink-0">Reconnecting…</span>
     </div>
   );
 }
