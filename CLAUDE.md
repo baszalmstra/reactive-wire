@@ -30,7 +30,7 @@ dependencies come through `pixi`.
 
 Climb only as far as the change requires.
 
-- **`pixi run check`** — typecheck (core + editor) + unit tests. Fast; run it for every change.
+- **`pixi run check`** — typecheck (core + editor) + unit tests + frontend lint. Fast; run it for every change.
   Any engine or server change needs a unit test alongside it (see `test/`).
 - **Storybook** (`pixi run storybook`) — for isolated frontend component work, verify the
   component in isolation before wiring it into the canvas.

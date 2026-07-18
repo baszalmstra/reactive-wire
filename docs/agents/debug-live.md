@@ -20,7 +20,9 @@ $env:RW_DATA_DIR = (New-Item -ItemType Directory -Path (Join-Path $env:TEMP (New
 ```
 
 Deploy a graph from the editor (`pixi run fe-dev`, then Deploy) — or enable auto-deploy — before
-expecting any actuation. The server starts with no graph deployed.
+expecting any actuation in manual mode. A new/scratch document starts with no graph deployed. For an
+existing data directory, persisted `autoDeploy: true` is durable authorization: the server validates
+and resumes the enabled live graph at startup without requiring another Deploy click.
 
 ## Query runtime state (debugState)
 
@@ -67,4 +69,4 @@ $env:RW_DATA_DIR = ".rw-data"; npx tsx scripts/decode-doc.ts
 
 It prints a compact overview (per-flow node/edge counts, settings, macro count) plus the full
 snapshot. Use it to confirm what graph the server would auto-deploy and whether `autoDeploy` /
-`deployFlowId` are set as expected.
+`deployedFlowIds` are set as expected. `deployFlowId` is retained only for legacy documents.

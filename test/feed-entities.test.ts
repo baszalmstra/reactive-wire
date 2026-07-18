@@ -40,7 +40,11 @@ async function connect(url: string, supportsDeltas = true): Promise<{ ws: WebSoc
   });
   if (supportsDeltas) {
     ws.send(JSON.stringify({ type: "clientCapabilities", entityFeed: "delta-v1" }));
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    // WebSocket messages are processed in order. A debugState response is a real same-socket
+    // round trip proving the preceding capability frame reached the server before a test mutates HA.
+    const synchronized = nextFrame(ws, "debugState");
+    ws.send(JSON.stringify({ type: "debugState" }));
+    await synchronized;
   }
   return { ws, initial: await initial };
 }

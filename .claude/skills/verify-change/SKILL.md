@@ -5,7 +5,7 @@ description: The verification ladder for Reactive Wire as an executable checklis
 
 Follow the agent-neutral guide at [docs/agents/verify-change.md](../../../docs/agents/verify-change.md).
 
-Quick reference: `pixi run check` (typecheck + unit tests) gates every change; Storybook for
+Quick reference: `pixi run check` (typecheck + unit tests + frontend lint) gates every change; Storybook for
 isolated component work; `pixi run e2e` only for cross-cutting editor flows. Any `shared/engine/`
 or `src/server/` change ships with a unit test in `test/` — a behavioral change without one is not
 done, even if `check` is green.
