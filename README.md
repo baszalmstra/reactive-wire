@@ -127,12 +127,14 @@ production/container setups, point `RW_DATA_DIR` at an absolute path on a durabl
 updates are capped at 2 MB and the compact document state at 8 MB by default; if either limit is hit,
 remove large embedded payloads from the document or restore a smaller backup. If a future incompatible
 document version is encountered, the server refuses to overwrite it rather than silently resetting the
-file. The server still starts with **no graph deployed** — persisted edits are not actuated until you
-Deploy.
+file. In the default manual mode, the server starts with **no graph deployed** and persisted edits are
+not actuated until you Deploy. Enabling **auto-deploy** is durable authorization: that setting is saved
+with the document, and a valid enabled graph resumes live actuation after a server restart.
 
-**Safety:** just running the server (and the editor's live preview) **never changes your
-home** — the auto-started demo graph runs in dry-run. Sinks actuate only when you **Deploy**
-(or enable **auto-deploy**) from the editor, which is an explicit, intentional act.
+**Safety:** just running the server with a manual-mode document (and the editor's live preview)
+**never changes your home** — the auto-started demo graph runs in dry-run. Sinks actuate only after
+you **Deploy** or enable **auto-deploy** from the editor. Both are explicit, intentional acts; disable
+auto-deploy before shutdown if the graph must not resume after restart.
 
 ## Connecting the editor to live Home Assistant
 
@@ -156,9 +158,10 @@ including pointing an entity node at any of your real `entity_id`s. Edits update
 preview immediately.
 
 Press **Deploy** to send the graph to the server and run it **live** against Home Assistant;
-sinks show as live in the editor. **Auto-deploy** is a server-owned, synced document setting:
-when enabled, the server deploys the configured flow after collaborative graph edits from any
-client. With auto-deploy off, edits remain a draft until the next explicit Deploy.
+sinks show as live in the editor. **Auto-deploy** is a durable server-owned, synced document setting:
+when enabled, the server deploys the configured flow after collaborative graph edits from any client
+and resumes that valid live graph after server restart. With auto-deploy off, startup remains
+undeployed and edits remain a draft until the next explicit Deploy.
 
 ## Layout
 

@@ -8,6 +8,7 @@ import { Deployer } from "./runtime.js";
 import { DurableMemoryStore } from "./durable-memory.js";
 import { EditorDocumentStore } from "./doc-store.js";
 import { AutoDeployController } from "./collab-deploy-adapter.js";
+import { applyStartupDeploymentPolicy } from "./startup-policy.js";
 import { log } from "./log.js";
 
 const url = process.env.HA_URL;
@@ -54,8 +55,8 @@ if (url && token) {
   log("info", "server", "no HA_URL/HA_TOKEN set — running in mock mode with simulated entities");
 }
 
-// No graph runs until the editor deploys one. Sinks actuate only on deploy (an explicit act),
-// so just launching the server can't change anything. Async data-source nodes fetch over HTTP
+// Manual mode starts undeployed. Persisted auto-deploy is durable authorization, so an enabled
+// document resumes its validated live graph during startup. Async data-source nodes fetch over HTTP
 // using the platform fetch, driven by the deployer's poller after a graph is deployed.
 const durableMemory = new DurableMemoryStore({ dataDir });
 const deployer = new Deployer(ha, 1000, (url) => fetch(url), durableMemory);
@@ -76,14 +77,20 @@ const stopFeed = startFeed(ha, { port, host, allowedHosts, allowedOrigins, deplo
   },
 });
 
-autoDeploy.maybeDeploy(documentStore.snapshot());
+const startupDeployment = applyStartupDeploymentPolicy(documentStore.snapshot(), autoDeploy);
 
 log("info", "server", "listening", { url: `ws://${host}:${port}` });
 if (deployToken) log("info", "server", "deploy/control WebSocket requires RW_DEPLOY_TOKEN");
 if (trustedIngress && !deployToken) log("info", "server", "trusting upstream ingress authentication for deploy/control WebSocket");
 if (staticDir) log("info", "server", "serving editor frontend", { path: staticDir });
 log("info", "server", "collaborative editor document persistence", { path: documentStore.filePath });
-log("info", "server", "no graph deployed yet — build one in the editor and Deploy to actuate Home Assistant");
+if (startupDeployment.kind === "manual") {
+  log("info", "server", "manual deployment policy — no graph deployed at startup");
+} else if (startupDeployment.kind === "resumed") {
+  log("info", "server", "resumed live graph from persisted auto-deploy authorization");
+} else {
+  log("warn", "server", "persisted auto-deploy graph rejected — no graph deployed at startup", { error: startupDeployment.error });
+}
 
 const shutdown = () => {
   stopFeed();

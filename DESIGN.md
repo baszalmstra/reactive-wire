@@ -84,7 +84,7 @@ re-derives the output.
 
 | D14 | Variadic & generic pins | **Variadic (n-ary) inputs** for associative/commutative reducers (`AND`, `OR`, later `SUM`/`MIN`/`MAX`/`CONCAT`) via **auto-growing pins** (always one trailing empty input; connecting it spawns the next). Kept **homogeneous** (all inputs same type). **Genericity only as connect-time pin resolution**: "open"/`any` pins lock to a concrete type on first connection (covers generic `Select`/`if`, passthrough, `hold`). **Full macro-level type parameters stay deferred** (refines D12). | Directly attacks the core pain (combining many conditions cleanly); cheap to implement (engine folds over connected inputs); avoids a real generic type system while still typing `Select`. |
 
-| D15 | Edit/deploy model | **Hybrid, user's choice.** Live **preview always on** while editing (values flow through the draft; sinks run **dry-run** = show what they *would* write). An **auto-deploy checkbox**: when on, edits apply to the live actuating engine immediately; when off, changes go live only on an explicit **Deploy**. Already-deployed graph keeps running untouched until (auto-)deploy. Default: manual deploy (safe). | Satisfies live-value inspection (D6) and always-on safety (D9) simultaneously; lets power users opt into live-edit immediacy. |
+| D15 | Edit/deploy model | **Hybrid, user's choice.** Live **preview always on** while editing (values flow through the draft; sinks run **dry-run** = show what they *would* write). An **auto-deploy checkbox**: when on, edits apply to the live actuating engine immediately; when off, changes go live only on an explicit **Deploy**. Auto-deploy is durable authorization and a valid enabled graph resumes live after server restart; manual mode starts undeployed. Already-deployed graph keeps running untouched until (auto-)deploy. Default: manual deploy (safe). | Satisfies live-value inspection (D6) and always-on safety (D9) simultaneously; lets power users opt into live-edit immediacy while making restart policy explicit. |
 
 Editor implications of D15: **Deploy button**, **auto-deploy checkbox**, **draft-vs-live
 indicator**, and **dry-run sink visualization** ("would call `light.turn_on(red)`" in
@@ -170,9 +170,10 @@ Tracked as we go. ✅ = resolved, ⏳ = in progress, ⬜ = not yet discussed.
 - ✅ **Q6 HA integration** → `subscribeEntities` feed + `callService` (built; §8).
 - ✅ **Q7 Node catalog (MVP)**: entity source, light sink (reconciling), constants, compare,
   logic (`AND`/`OR`/`NOT`), sum, select. _Build pending:_ time/`now` + duration, edge/hold/fold.
-- ⏳ **Q9 Persistence / format**: collaborative editor document persistence and reload-on-restart
-  are built via Yjs updates. Runtime memory/deployed-graph auto-restart persistence remains separate
-  production hardening (see §9).
+- ✅ **Q9 Persistence / format**: collaborative editor document persistence and reload-on-restart
+  are built via Yjs updates. Persisted `autoDeploy=true` reconstructs and validates the configured
+  graph on boot, then resumes it live; manual deployments are intentionally not restored. Durable
+  stateful-node memory is stored separately (see §9).
 - ⬜ **Q10 Execution location & lifecycle**: when does the graph run? Headless vs needs editor open?
   - ✅ Topology = D9 (headless server is source of truth).
   - 🎯 **Future goal: ship as a Home Assistant add-on** (Supervisor-managed Docker
@@ -422,7 +423,8 @@ over the **existing feed WebSocket** rather than a dedicated binary endpoint (se
 rationale in §9). `autoDeploy`/`deployFlowId` are **server-owned document settings**, so the
 server can auto-deploy the chosen flow independently of any client's active tab. Deploy remains
 an explicit act: a remote collaborator's edit only actuates Home Assistant when `autoDeploy` is
-enabled (see the safety caveat in §9).
+enabled. That enabled setting is durable authorization, so a valid configured graph also resumes
+live during server startup (see the safety caveat in §9).
 
 **Document migration** (`shared/collab-migrations.ts`): the document meta carries a schema
 version. A registry of pure snapshot-level migrations, keyed by the version each step upgrades from,
@@ -542,9 +544,11 @@ then move persistence to binary — do **not** persist the document as JSON.
 
 **Persistence approach.** The server holds the authoritative `Y.Doc` and persists a compacted
 binary snapshot (`Y.encodeStateAsUpdate`) to `RW_DATA_DIR` on each accepted update (atomic
-tmp+rename), reloading it on boot. This is the "custom store around the Yjs update APIs" option
-from the research rather than `y-leveldb` (deprecated) or a scale-out backend (`y-redis`/YHub,
-deferred until multi-instance is actually needed).
+tmp+rename), reloading it on boot. Startup applies an explicit deployment policy: manual documents
+remain undeployed, while persisted `autoDeploy=true` is treated as durable authorization and resumes
+a valid configured graph live. An invalid enabled graph is logged and remains undeployed. This is
+the "custom store around the Yjs update APIs" option from the research rather than `y-leveldb`
+(deprecated) or a scale-out backend (`y-redis`/YHub, deferred until multi-instance is needed).
 
 **Known gaps carried forward** (recurring across review rounds; not yet fixed):
 - **Full-document work per update.** `EditorDocumentStore.applyUpdate` rebuilds a whole `Y.Doc`
