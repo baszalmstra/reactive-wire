@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { FlowTabs, flowPanelId, flowTabId } from "./FlowTabs.js";
 
 afterEach(() => {
@@ -26,7 +26,12 @@ function Harness() {
         onSelect={setActive}
         onAdd={() => {}}
         onRename={(id, name) => setItems((current) => current.map((flow) => flow.id === id ? { ...flow, name } : flow))}
-        onClose={() => {}}
+        onClose={(id) => {
+          const index = items.findIndex((flow) => flow.id === id);
+          const rest = items.filter((flow) => flow.id !== id);
+          setItems(rest);
+          if (id === active) setActive(rest[Math.max(0, index - 1)]!.id);
+        }}
         onToggleDeploy={() => {}}
       />
       <div role="tabpanel" id={flowPanelId(active)} aria-labelledby={flowTabId(active)}>Canvas</div>
@@ -73,20 +78,35 @@ describe("FlowTabs", () => {
     expect(screen.getByRole("tab", { name: "Lighting" }).getAttribute("aria-selected")).toBe("true");
   });
 
-  it("renames with F2 and supports Enter commit and Escape cancel", () => {
+  it("renames with F2 and restores focus after Enter commit and Escape cancel", async () => {
     render(<Harness />);
     const lighting = screen.getByRole("tab", { name: "Lighting" });
     fireEvent.keyDown(lighting, { key: "F2" });
     const editor = screen.getByRole("textbox", { name: "Rename Lighting" });
     fireEvent.change(editor, { target: { value: "Kitchen" } });
     fireEvent.keyDown(editor, { key: "Enter" });
-    expect(screen.getByRole("tab", { name: "Kitchen" })).toBeTruthy();
+    const renamed = screen.getByRole("tab", { name: "Kitchen" });
+    await waitFor(() => expect(document.activeElement).toBe(renamed));
 
     const kitchen = screen.getByRole("tab", { name: "Kitchen" });
     fireEvent.keyDown(kitchen, { key: "F2" });
     const cancelEditor = screen.getByRole("textbox", { name: "Rename Kitchen" });
     fireEvent.change(cancelEditor, { target: { value: "Discarded" } });
     fireEvent.keyDown(cancelEditor, { key: "Escape" });
-    expect(screen.getByRole("tab", { name: "Kitchen" })).toBeTruthy();
+    const restored = screen.getByRole("tab", { name: "Kitchen" });
+    await waitFor(() => expect(document.activeElement).toBe(restored));
+  });
+
+  it("focuses the selected adjacent tab after closing the active flow", async () => {
+    render(<Harness />);
+    const climate = screen.getByRole("tab", { name: "Climate" });
+    fireEvent.click(climate);
+    const close = screen.getByRole("button", { name: "Close Climate" });
+    close.focus();
+    fireEvent.click(close);
+
+    const lighting = screen.getByRole("tab", { name: "Lighting" });
+    await waitFor(() => expect(document.activeElement).toBe(lighting));
+    expect(lighting.getAttribute("aria-selected")).toBe("true");
   });
 });

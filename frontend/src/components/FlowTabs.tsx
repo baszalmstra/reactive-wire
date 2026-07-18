@@ -36,22 +36,45 @@ export function FlowTabs({
   const [draft, setDraft] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
   const tabRefs = useRef(new Map<string, HTMLButtonElement>());
+  const pendingFocusRef = useRef<string | null>(null);
+  const finishingEditRef = useRef(false);
   const deployed = new Set(deployedIds);
 
   useEffect(() => {
-    if (editing) inputRef.current?.select();
-  }, [editing]);
+    if (editing) {
+      inputRef.current?.select();
+      return;
+    }
+    const pending = pendingFocusRef.current;
+    if (!pending) return;
+    const tab = tabRefs.current.get(pending);
+    if (!tab) return;
+    pendingFocusRef.current = null;
+    tab.focus();
+  }, [editing, flows]);
 
   const beginEdit = (id: string, name: string) => {
+    finishingEditRef.current = false;
     setEditing(id);
     setDraft(name);
   };
-  const commit = () => {
+  const finishEdit = (save: boolean) => {
+    if (finishingEditRef.current) return;
+    finishingEditRef.current = true;
     if (editing) {
-      const name = draft.trim();
-      if (name) onRename(editing, name);
+      if (save) {
+        const name = draft.trim();
+        if (name) onRename(editing, name);
+      }
+      pendingFocusRef.current = editing;
     }
     setEditing(null);
+  };
+  const closeAndRestoreFocus = (id: string) => {
+    const index = flows.findIndex((flow) => flow.id === id);
+    const adjacent = flows[index - 1]?.id ?? flows[index + 1]?.id;
+    pendingFocusRef.current = id === activeId ? adjacent ?? null : activeId;
+    onClose(id);
   };
   const selectAndFocus = (id: string) => {
     onSelect(id);
@@ -112,10 +135,15 @@ export function FlowTabs({
                 aria-label={`Rename ${flow.name}`}
                 value={draft}
                 onChange={(event) => setDraft(event.target.value)}
-                onBlur={commit}
+                onBlur={() => finishEdit(true)}
                 onKeyDown={(event) => {
-                  if (event.key === "Enter") commit();
-                  else if (event.key === "Escape") setEditing(null);
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    finishEdit(true);
+                  } else if (event.key === "Escape") {
+                    event.preventDefault();
+                    finishEdit(false);
+                  }
                 }}
                 className="bg-rw-bg border border-rw-line rounded px-1 py-px text-[11.5px] w-[110px] outline-none"
               />
@@ -142,7 +170,7 @@ export function FlowTabs({
             {flows.length > 1 && editing !== flow.id && (
               <button
                 type="button"
-                onClick={() => onClose(flow.id)}
+                onClick={() => closeAndRestoreFocus(flow.id)}
                 aria-label={`Close ${flow.name}`}
                 title="Close flow"
                 className="ml-0.5 text-rw-faint hover:text-rw-error opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity text-[13px] leading-none"

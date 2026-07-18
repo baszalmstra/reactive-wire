@@ -103,7 +103,19 @@ test.describe.serial("Keyboard graph accessibility", () => {
     const editor = page.getByRole("textbox", { name: "Rename Flow 1" });
     await editor.fill("Kitchen");
     await editor.press("Enter");
-    await expect(page.getByRole("tab", { name: "Kitchen" })).toBeVisible();
+    const kitchen = page.getByRole("tab", { name: "Kitchen" });
+    await expect(kitchen).toBeFocused();
+
+    await page.keyboard.press("F2");
+    const cancelEditor = page.getByRole("textbox", { name: "Rename Kitchen" });
+    await cancelEditor.fill("Discarded");
+    await cancelEditor.press("Escape");
+    await expect(kitchen).toBeFocused();
+
+    await page.getByRole("button", { name: "Close Kitchen" }).focus();
+    await page.keyboard.press("Enter");
+    await expect(second).toHaveAttribute("aria-selected", "true");
+    await expect(second).toBeFocused();
 
     const autoDeploy = page.getByRole("checkbox", { name: "auto-deploy" });
     await autoDeploy.focus();

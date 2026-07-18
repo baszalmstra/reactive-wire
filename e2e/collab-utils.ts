@@ -14,6 +14,12 @@ export async function resetWorkspace(page: Page): Promise<void> {
     if ((await overlay.count()) === 0) break;
     await page.mouse.click(4, 4);
   }
+  // Auto-deploy is server-owned document state, so visual cleanup alone is insufficient. Always
+  // return it to the safe manual policy before normalizing the enabled flow set.
+  const autoDeploy = page.getByRole("checkbox", { name: "auto-deploy" });
+  if (await autoDeploy.isChecked()) await autoDeploy.click();
+  await expect(autoDeploy).not.toBeChecked();
+
   // Collapse to a single flow: the strip only renders a close control while more than one flow
   // exists, so closing the second-to-last flow drops the close-control count straight to zero
   // rather than by one. Just close controls until none remain.
@@ -35,6 +41,13 @@ export async function resetWorkspace(page: Page): Promise<void> {
     await editor.press("Enter");
     await expect(strip.locator('div[title="Flow 1"]')).toBeVisible();
   }
+  // Closing the first close control can remove the previously enabled flow and leave a disabled
+  // survivor. Explicitly enable the canonical survivor so later deploy specs cannot inherit an
+  // empty deployment set merely because another spec created a second flow.
+  const enableSurvivor = page.getByRole("button", { name: "Enable Flow 1 for deployment" });
+  if (await enableSurvivor.count()) await enableSurvivor.click();
+  await expect(page.getByRole("button", { name: "Disable Flow 1 for deployment" })).toBeVisible();
+
   // Empty the surviving flow. Force the click so two nodes dropped at the exact same point (e.g.
   // two clients that both added a node at the default drop position) can't shield one another's
   // drag handle from the actionability check.
@@ -44,8 +57,14 @@ export async function resetWorkspace(page: Page): Promise<void> {
     await page.keyboard.press("Delete");
     await expect(nodes).toHaveCount(remaining - 1);
   }
-  // Let the debounced local→server flush carry the emptied document back to the shared doc.
+  // Let the debounced local→server flush carry the emptied document and normalized settings back
+  // to the shared doc, then assert the complete canonical state instead of only visible content.
   await page.waitForTimeout(500);
+  await expect(page.getByRole("tab")).toHaveCount(1);
+  await expect(page.getByRole("tab", { name: "Flow 1" })).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByRole("button", { name: "Disable Flow 1 for deployment" })).toBeVisible();
+  await expect(autoDeploy).not.toBeChecked();
+  await expect(nodes).toHaveCount(0);
 }
 
 /**
