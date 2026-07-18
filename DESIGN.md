@@ -406,8 +406,11 @@ the sinks `sink-light`/`sink-call`/`sink-climate`/`sink-cover`/`sink-input`/`sin
   requests, and carries the collaborative-document frames. Every upgrade passes the
   connection-policy check first.
 - `runtime.ts` — `Deployer`: inlines macros, then re-runs the deployed graph with `evaluate` on
-  every entity change and on a 1 s clock tick, reconciling sinks (preview dry-run vs live
-  actuation) with in-flight de-dup and echo-safety. `stop()` is a terminal, idempotent lifecycle
+  every entity change and on a 1 s clock tick. Each sink owns a serialized delivery channel:
+  reconciling/command work coalesces to the latest desired call, while transient work uses a
+  bounded FIFO with visible overflow state. Thus Home Assistant never receives overlapping calls
+  from one sink. Preview remains dry-run and the non-`Ok` safety gate remains in the engine.
+  `stop()` is a terminal, idempotent lifecycle
   boundary: it unsubscribes sources, invalidates async generations, clears live state, and rejects
   later deployments. A service call already accepted by Home Assistant cannot be recalled, but its
   completion cannot mutate the stopped runtime.

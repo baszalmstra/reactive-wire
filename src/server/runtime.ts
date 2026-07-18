@@ -33,8 +33,16 @@ export interface DebugSink {
   desired: ServiceCall | null;
   note?: string;
   status: string;
-  /** Whether an identical call is currently awaiting a service response. */
+  /** Whether this sink's serialized channel is awaiting a service response. */
   inFlight: boolean;
+  /** Number of deliveries waiting behind the active one. */
+  queueDepth: number;
+  /** Per-sink sequence currently executing, or null while idle. */
+  activeSequence: number | null;
+  /** Sequence that will be assigned to the next delivery. */
+  nextSequence: number;
+  /** Whether the bounded transient queue rejected an event. */
+  overflowed: boolean;
   /** The most recent call this sink attempted or dry-ran. */
   lastCall: ServiceCall | null;
   /** Epoch ms when the most recent call was triggered, or null if it has never triggered. */
@@ -61,6 +69,31 @@ interface SinkFailure {
   key: string;
   message: string;
 }
+
+type SinkMode = "reconciling" | "command" | "transient";
+
+interface Delivery {
+  generation: number;
+  connectionEpoch: number;
+  sequence: number;
+  key: string;
+  failureKey: string;
+  call: ServiceCall;
+}
+
+interface SinkChannel {
+  nodeId: string;
+  mode: SinkMode;
+  active: Delivery | null;
+  /** Reconciling/command sinks keep only the most recent desired work while active. */
+  pendingLatest: Delivery | null;
+  /** Transient sinks preserve transaction order in a bounded FIFO. */
+  queue: Delivery[];
+  nextSequence: number;
+  overflowed: boolean;
+}
+
+const MAX_TRANSIENT_QUEUE = 100;
 
 /** A value that survives JSON serialization, or its string form when it would throw (circular, BigInt). */
 function jsonSafe(value: unknown): unknown {
@@ -160,7 +193,7 @@ export class Deployer {
   private mem: Memory = createMemory();
   private actuate = false;
   private generation = 0;
-  private readonly inFlight = new Map<string, string>();
+  private readonly channels = new Map<string, SinkChannel>();
   private readonly lastNonReconciling = new Map<string, string>();
   private readonly lastReconcilingAttempt = new Map<string, string>();
   private readonly callFailures = new Map<string, SinkFailure>();
@@ -199,7 +232,7 @@ export class Deployer {
     if (this.stopped) throw new Error("Deployer has been stopped");
     const flat = expandMacros(nodes, edges, macros, undefined, true);
     this.generation += 1;
-    this.inFlight.clear();
+    this.channels.clear();
     this.lastNonReconciling.clear();
     this.lastReconcilingAttempt.clear();
     this.callFailures.clear();
@@ -232,7 +265,7 @@ export class Deployer {
       this.tick = null;
     }
     this.poller.stop();
-    this.inFlight.clear();
+    this.channels.clear();
     this.lastNonReconciling.clear();
     this.lastReconcilingAttempt.clear();
     this.callFailures.clear();
@@ -268,11 +301,17 @@ export class Deployer {
           const action = results.actions[n.id];
           const desired = results.sinks[n.id];
           const lastCall = this.lastTriggeredCall.get(n.id) ?? null;
+          const channel = this.channels.get(n.id);
+          const queueDepth = channel ? channel.queue.length + (channel.pendingLatest ? 1 : 0) : 0;
           sinks[n.id] = {
             desired: desired ? debugCall(desired) : null,
-            note: failure ? `last call failed: ${failure.message}` : action?.note,
-            status: failure ? "error" : action?.status ?? "ok",
-            inFlight: this.inFlight.has(n.id),
+            note: failure ? `last call failed: ${failure.message}` : channel?.overflowed ? "transient queue overflowed; newest event rejected" : action?.note,
+            status: failure || channel?.overflowed ? "error" : action?.status ?? "ok",
+            inFlight: !!channel?.active,
+            queueDepth,
+            activeSequence: channel?.active?.sequence ?? null,
+            nextSequence: channel?.nextSequence ?? 1,
+            overflowed: channel?.overflowed ?? false,
             lastCall: lastCall ? debugCall(lastCall) : null,
             lastTriggeredAt: this.lastTriggeredAt.get(n.id) ?? null,
             lastCommand: this.lastNonReconciling.get(n.id) ?? null,
@@ -298,93 +337,138 @@ export class Deployer {
 
   private connectionChanged(status: HAConnectionStatus): void {
     if (this.stopped) return;
-    // An accepted service call cannot be recalled, but it must not carry acknowledgement or
-    // reconciliation state into another connection epoch.
-    this.inFlight.clear();
+    // An accepted service call cannot be recalled. Keep it active until its promise settles so a
+    // reconnect can never start overlapping work for the same sink.
     this.lastReconcilingAttempt.clear();
-    if (status.phase === "ready") this.run();
+    if (status.phase === "ready") {
+      this.run();
+      for (const channel of this.channels.values()) this.pumpChannel(channel);
+    }
   }
 
   private run(): void {
     if (this.stopped || !this.graph || this.ha.connectionStatus().phase !== "ready") return;
     const entities: EntityMap = this.ha.entitiesSnapshot().entities as EntityMap;
     const results = evaluate(this.graph.nodes, this.graph.edges, entities, this.mem, Date.now(), this.poller.sources());
-    // The evaluate above mutated durable nodes' slots in place; persist them (debounced) so the
-    // latest accumulated history is on disk before any restart.
     this.durable?.capture(this.graph.nodes, this.mem);
     this.lastResults = results;
     this.lastRunAt = Date.now();
     const byId = new Map(this.graph.nodes.map((n) => [n.id, n]));
     for (const n of this.graph.nodes) {
-      // Once a reconciling sink no longer wants a call, any remembered failed/outstanding
-      // correction is resolved by the world matching (or by the command becoming unavailable).
-      if (isSink(n.type) && isReconcilingSinkType(n.type) && !results.sinks[n.id]) {
-        this.lastReconcilingAttempt.delete(n.id);
-        this.callFailures.delete(n.id);
-      }
+      if (!isSink(n.type) || !isReconcilingSinkType(n.type) || results.sinks[n.id]) continue;
+      this.lastReconcilingAttempt.delete(n.id);
+      this.callFailures.delete(n.id);
+      const channel = this.channels.get(n.id);
+      if (channel) channel.pendingLatest = null;
     }
-    const generation = this.generation;
-    const connectionEpoch = this.ha.connectionStatus().epoch;
     for (const { nodeId, call } of sinkCalls(this.graph.nodes, results)) {
-      // Reconciling sinks already compare desired values with the target entity snapshot. The
-      // runtime adds a second guard: one correction is attempted for a given desired call and
-      // observed target state, then it waits for either the desired call or the target state to
-      // change. This keeps clock ticks/unrelated entity updates from hammering HA with the same
-      // service call while still allowing a later real drift to be corrected.
       const nodeType = byId.get(nodeId)?.type ?? "";
-      const rememberUntilChange = nodeType === "sink-call";
-      const reconciling = isReconcilingSinkType(nodeType);
+      const mode: SinkMode = isTransientSink(nodeType) ? "transient" : nodeType === "sink-call" ? "command" : "reconciling";
       const key = keyOf(call);
-      const failureKey = reconciling ? reconcilingAttemptKey(call, entities) : key;
+      const failureKey = mode === "reconciling" ? reconcilingAttemptKey(call, entities) : key;
       if (this.callFailures.get(nodeId)?.key !== failureKey) this.callFailures.delete(nodeId);
-      if (this.inFlight.get(nodeId) === key) continue;
-      if (rememberUntilChange && this.lastNonReconciling.get(nodeId) === key) continue;
-      if (reconciling && this.lastReconcilingAttempt.get(nodeId) === failureKey) continue;
-      this.inFlight.set(nodeId, key);
-      if (reconciling) this.lastReconcilingAttempt.set(nodeId, failureKey);
-      this.callFailures.delete(nodeId);
-      this.recordTriggered(nodeId, call);
-      if (this.actuate) {
-        void this.executeCall(generation, connectionEpoch, nodeId, key, failureKey, call, rememberUntilChange);
-      } else {
-        this.inFlight.delete(nodeId);
-        if (rememberUntilChange) this.lastNonReconciling.set(nodeId, key);
-        const targetId = call.target?.entity_id ?? "";
-        log("info", "deployer", "sink call", { mode: "dry-run", service: call.service, entity: targetId, data: call.data });
-      }
+      this.enqueueDelivery(nodeId, mode, key, failureKey, call);
     }
   }
 
-  private async executeCall(
-    generation: number,
-    connectionEpoch: number,
-    nodeId: string,
-    key: string,
-    failureKey: string,
-    call: Parameters<HAClient["callService"]>[0],
-    rememberUntilChange: boolean,
-  ): Promise<void> {
-    const targetId = call.target?.entity_id ?? "";
+  private channelFor(nodeId: string, mode: SinkMode): SinkChannel {
+    let channel = this.channels.get(nodeId);
+    if (!channel) {
+      channel = { nodeId, mode, active: null, pendingLatest: null, queue: [], nextSequence: 1, overflowed: false };
+      this.channels.set(nodeId, channel);
+    }
+    return channel;
+  }
+
+  private enqueueDelivery(nodeId: string, mode: SinkMode, key: string, failureKey: string, call: ServiceCall): void {
+    const channel = this.channelFor(nodeId, mode);
+    if (mode === "command" && this.lastNonReconciling.get(nodeId) === key) return;
+    if (mode === "reconciling" && this.lastReconcilingAttempt.get(nodeId) === failureKey
+      && channel.active?.failureKey !== failureKey && channel.pendingLatest?.failureKey !== failureKey) return;
+    const status = this.ha.connectionStatus();
+    const delivery: Delivery = {
+      generation: this.generation,
+      connectionEpoch: status.epoch,
+      sequence: channel.nextSequence++,
+      key,
+      failureKey,
+      call,
+    };
+    if (mode === "transient") {
+      if (channel.active) {
+        if (channel.queue.length >= MAX_TRANSIENT_QUEUE) {
+          channel.overflowed = true;
+          this.callFailures.set(nodeId, { key, message: `transient queue limit ${MAX_TRANSIENT_QUEUE} reached; newest event rejected` });
+          return;
+        }
+        channel.queue.push(delivery);
+      } else {
+        channel.queue.push(delivery);
+      }
+    } else if (channel.active) {
+      channel.pendingLatest = channel.active.key === key ? null : delivery;
+    } else {
+      channel.pendingLatest = delivery;
+    }
+    this.pumpChannel(channel);
+  }
+
+  private pumpChannel(channel: SinkChannel): void {
+    if (this.stopped || channel.active || channel.nodeId !== this.channels.get(channel.nodeId)?.nodeId) return;
+    if (this.ha.connectionStatus().phase !== "ready") return;
+    const delivery = channel.mode === "transient" ? channel.queue.shift() ?? null : channel.pendingLatest;
+    if (!delivery) return;
+    if (channel.mode !== "transient") channel.pendingLatest = null;
+    if (delivery.generation !== this.generation) return;
+    delivery.connectionEpoch = this.ha.connectionStatus().epoch;
+    channel.active = delivery;
+    if (channel.mode === "reconciling") this.lastReconcilingAttempt.set(channel.nodeId, delivery.failureKey);
+    this.callFailures.delete(channel.nodeId);
+    this.recordTriggered(channel.nodeId, delivery.call);
+    if (!this.actuate) {
+      this.completeDryRun(channel, delivery);
+      return;
+    }
+    void this.executeDelivery(channel, delivery);
+  }
+
+  private completeDryRun(channel: SinkChannel, delivery: Delivery): void {
+    if (channel.mode === "command") this.lastNonReconciling.set(channel.nodeId, delivery.key);
+    const targetId = delivery.call.target?.entity_id ?? "";
+    log("info", "deployer", "sink call", { mode: "dry-run", service: delivery.call.service, entity: targetId, data: delivery.call.data });
+    channel.active = null;
+    this.pumpChannel(channel);
+  }
+
+  private async executeDelivery(channel: SinkChannel, delivery: Delivery): Promise<void> {
+    const targetId = delivery.call.target?.entity_id ?? "";
+    const isCurrent = () => delivery.generation === this.generation
+      && this.channels.get(channel.nodeId) === channel
+      && channel.active === delivery;
     const readyForEpoch = () => {
       const status = this.ha.connectionStatus();
-      return status.phase === "ready" && status.epoch === connectionEpoch;
+      return status.phase === "ready" && status.epoch === delivery.connectionEpoch;
     };
+    let acknowledged = false;
     try {
-      if (generation !== this.generation || !readyForEpoch()) return;
-      await this.ha.callService(call);
-      if (generation === this.generation && readyForEpoch() && this.inFlight.get(nodeId) === key) {
-        if (rememberUntilChange) this.lastNonReconciling.set(nodeId, key);
-        this.callFailures.delete(nodeId);
+      if (!isCurrent() || !readyForEpoch()) return;
+      const response = this.ha.callService(delivery.call);
+      if (response && typeof response.then === "function") await response;
+      acknowledged = true;
+      if (isCurrent() && readyForEpoch()) {
+        if (channel.mode === "command") this.lastNonReconciling.set(channel.nodeId, delivery.key);
+        this.callFailures.delete(channel.nodeId);
       }
-      log("info", "deployer", "sink call", { mode: "live", service: call.service, entity: targetId, data: call.data });
+      log("info", "deployer", "sink call", { mode: "live", service: delivery.call.service, entity: targetId, data: delivery.call.data });
     } catch (err) {
       const msg = serviceErrorMessage(err);
-      if (generation === this.generation && readyForEpoch() && this.inFlight.get(nodeId) === key) {
-        this.callFailures.set(nodeId, { key: failureKey, message: msg });
-      }
-      log("error", "deployer", "sink call failed", { mode: "live", service: call.service, entity: targetId, error: msg });
+      if (isCurrent() && readyForEpoch()) this.callFailures.set(channel.nodeId, { key: delivery.failureKey, message: msg });
+      log("error", "deployer", "sink call failed", { mode: "live", service: delivery.call.service, entity: targetId, error: msg });
     } finally {
-      if (generation === this.generation && readyForEpoch() && this.inFlight.get(nodeId) === key) this.inFlight.delete(nodeId);
+      if (!isCurrent()) return;
+      channel.active = null;
+      if (acknowledged && channel.pendingLatest?.key === delivery.key) channel.pendingLatest = null;
+      this.pumpChannel(channel);
     }
   }
 }

@@ -97,6 +97,67 @@ describe("Deployer — transient notify sink", () => {
   });
 });
 
+describe("Deployer — serialized sink channels", () => {
+  it("never overlaps command calls and runs the latest pending desired call next", async () => {
+    const ha = new MockHA();
+    const resolvers: Array<() => void> = [];
+    let active = 0;
+    let maxActive = 0;
+    ha.callService = (call) => {
+      ha.calls.push(call);
+      active += 1;
+      maxActive = Math.max(maxActive, active);
+      return new Promise<void>((resolve) => resolvers.push(() => { active -= 1; resolve(); }));
+    };
+    ha.setState("binary_sensor.x", "on");
+    const deployer = new Deployer(ha, 100_000);
+    const { nodes, edges } = callGraph();
+    deployer.deploy(nodes, edges, true);
+
+    ha.setState("binary_sensor.x", "off");
+    expect(ha.calls).toHaveLength(1);
+    expect(deployer.inspect().sinks.snk).toMatchObject({ inFlight: true, queueDepth: 1, activeSequence: 1 });
+
+    resolvers.shift()?.();
+    await flushPromises();
+    expect(ha.calls).toHaveLength(2);
+    expect(ha.lastCall()?.service).toBe("turn_off");
+    expect(maxActive).toBe(1);
+    resolvers.shift()?.();
+    await flushPromises();
+    deployer.stop();
+  });
+
+  it("preserves transient transaction order in a FIFO while one call is active", async () => {
+    const ha = new MockHA();
+    const resolvers: Array<() => void> = [];
+    let active = 0;
+    let maxActive = 0;
+    ha.callService = (call) => {
+      ha.calls.push(call);
+      active += 1;
+      maxActive = Math.max(maxActive, active);
+      return new Promise<void>((resolve) => resolvers.push(() => { active -= 1; resolve(); }));
+    };
+    ha.setState("sensor.msg", "A");
+    const deployer = new Deployer(ha, 100_000);
+    const { nodes, edges } = notifyGraph();
+    deployer.deploy(nodes, edges, true);
+    ha.setState("sensor.msg", "B");
+    ha.setState("sensor.msg", "C");
+
+    expect(ha.calls.map((call) => call.data.message)).toEqual(["B"]);
+    expect(deployer.inspect().sinks.snk).toMatchObject({ queueDepth: 1, inFlight: true });
+    resolvers.shift()?.();
+    await flushPromises();
+    expect(ha.calls.map((call) => call.data.message)).toEqual(["B", "C"]);
+    expect(maxActive).toBe(1);
+    resolvers.shift()?.();
+    await flushPromises();
+    deployer.stop();
+  });
+});
+
 describe("Deployer — generic call-service sink", () => {
   it("does not repeat the same generic service call on unrelated recomputes", async () => {
     const ha = new MockHA();
