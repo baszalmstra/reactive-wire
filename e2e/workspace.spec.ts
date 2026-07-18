@@ -26,7 +26,7 @@ test.describe.serial("Reactive Wire workspace: flows and comments", () => {
 
   const newFlow = (page: Page) => page.getByRole("button", { name: "New flow" });
   const closeButtons = (page: Page) => page.locator('button[title="Close flow"]');
-  const tab = (page: Page, name: string) => page.locator(`div[title="${name}"]`);
+  const tab = (page: Page, name: string) => page.getByRole("tab", { name, exact: true });
 
   test("creates a second flow with its own empty canvas", async ({ page }) => {
     await addNumberNode(page);
@@ -42,7 +42,7 @@ test.describe.serial("Reactive Wire workspace: flows and comments", () => {
 
   test("renames a flow through its tab", async ({ page }) => {
     await tab(page, "Flow 1").dblclick();
-    const editor = tab(page, "Flow 1").getByRole("textbox");
+    const editor = page.getByRole("textbox", { name: "Rename Flow 1" });
     await editor.fill("Kitchen");
     await editor.press("Enter");
 

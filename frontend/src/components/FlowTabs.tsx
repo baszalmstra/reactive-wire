@@ -1,6 +1,15 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { cn } from "../cn.js";
 import type { Flow } from "../canvas/flows.js";
+
+/** Stable ARIA ids linking a flow tab to its canvas panel. */
+export function flowTabId(flowId: string): string {
+  return `rw-flow-tab-${encodeURIComponent(flowId)}`;
+}
+
+export function flowPanelId(flowId: string): string {
+  return `rw-flow-panel-${encodeURIComponent(flowId)}`;
+}
 
 /** A tab strip across the top of the canvas, one tab per flow in the document. */
 export function FlowTabs({
@@ -26,6 +35,7 @@ export function FlowTabs({
   const [editing, setEditing] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
+  const tabRefs = useRef(new Map<string, HTMLButtonElement>());
   const deployed = new Set(deployedIds);
 
   useEffect(() => {
@@ -43,63 +53,99 @@ export function FlowTabs({
     }
     setEditing(null);
   };
+  const selectAndFocus = (id: string) => {
+    onSelect(id);
+    requestAnimationFrame(() => tabRefs.current.get(id)?.focus());
+  };
+  const onTabKeyDown = (event: KeyboardEvent<HTMLButtonElement>, id: string, name: string) => {
+    const index = flows.findIndex((flow) => flow.id === id);
+    if (event.key === "F2") {
+      event.preventDefault();
+      beginEdit(id, name);
+      return;
+    }
+    let target = -1;
+    if (event.key === "ArrowRight") target = (index + 1) % flows.length;
+    else if (event.key === "ArrowLeft") target = (index - 1 + flows.length) % flows.length;
+    else if (event.key === "Home") target = 0;
+    else if (event.key === "End") target = flows.length - 1;
+    if (target >= 0) {
+      event.preventDefault();
+      selectAndFocus(flows[target]!.id);
+    }
+  };
 
   return (
-    <div className="flex-none flex items-stretch gap-1 px-2 h-[34px] bg-rw-panel border-b border-rw-line select-none overflow-x-auto">
-      {flows.map((f) => {
-        const active = f.id === activeId;
-        const liveEnabled = deployed.has(f.id);
+    <div
+      role="tablist"
+      aria-label="Flows"
+      className="flex-none flex items-stretch gap-1 px-2 h-[34px] bg-rw-panel border-b border-rw-line select-none overflow-x-auto"
+    >
+      {flows.map((flow) => {
+        const active = flow.id === activeId;
+        const liveEnabled = deployed.has(flow.id);
         return (
           <div
-            key={f.id}
-            onClick={() => onSelect(f.id)}
-            onDoubleClick={() => beginEdit(f.id, f.name)}
-            title={f.name}
+            key={flow.id}
+            title={flow.name}
             className={cn(
-              "group flex items-center gap-1.5 px-3 my-1 rounded-md text-[11.5px] cursor-pointer transition-colors whitespace-nowrap",
+              "group flex items-center gap-1.5 px-2 my-1 rounded-md text-[11.5px] transition-colors whitespace-nowrap",
               active
                 ? "bg-rw-panel2 text-rw-text border border-rw-line"
                 : "text-rw-dim border border-transparent hover:bg-rw-panel2 hover:text-rw-text",
             )}
           >
-            {onToggleDeploy && editing !== f.id && (
+            {onToggleDeploy && editing !== flow.id && (
               <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onToggleDeploy(f.id, !liveEnabled);
-                }}
-                aria-label={`${liveEnabled ? "Disable" : "Enable"} ${f.name} for deployment`}
+                type="button"
+                onClick={() => onToggleDeploy(flow.id, !liveEnabled)}
+                aria-label={`${liveEnabled ? "Disable" : "Enable"} ${flow.name} for deployment`}
                 title={liveEnabled ? "Included in live deployment" : "Not deployed — click to include"}
                 className={cn("rw-flow-live-toggle", liveEnabled && "on")}
               >
                 ●
               </button>
             )}
-            {editing === f.id ? (
+            {editing === flow.id ? (
               <input
                 ref={inputRef}
+                aria-label={`Rename ${flow.name}`}
                 value={draft}
-                onChange={(e) => setDraft(e.target.value)}
+                onChange={(event) => setDraft(event.target.value)}
                 onBlur={commit}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") commit();
-                  else if (e.key === "Escape") setEditing(null);
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") commit();
+                  else if (event.key === "Escape") setEditing(null);
                 }}
-                onClick={(e) => e.stopPropagation()}
                 className="bg-rw-bg border border-rw-line rounded px-1 py-px text-[11.5px] w-[110px] outline-none"
               />
             ) : (
-              <span className="max-w-[150px] overflow-hidden text-ellipsis">{f.name}</span>
-            )}
-            {flows.length > 1 && editing !== f.id && (
               <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onClose(f.id);
+                type="button"
+                role="tab"
+                id={flowTabId(flow.id)}
+                aria-controls={flowPanelId(flow.id)}
+                aria-selected={active}
+                tabIndex={active ? 0 : -1}
+                ref={(element) => {
+                  if (element) tabRefs.current.set(flow.id, element);
+                  else tabRefs.current.delete(flow.id);
                 }}
-                aria-label={`Close ${f.name}`}
+                onClick={() => onSelect(flow.id)}
+                onDoubleClick={() => beginEdit(flow.id, flow.name)}
+                onKeyDown={(event) => onTabKeyDown(event, flow.id, flow.name)}
+                className="max-w-[150px] overflow-hidden text-ellipsis cursor-pointer bg-transparent border-0 p-0 text-inherit font-inherit"
+              >
+                {flow.name}
+              </button>
+            )}
+            {flows.length > 1 && editing !== flow.id && (
+              <button
+                type="button"
+                onClick={() => onClose(flow.id)}
+                aria-label={`Close ${flow.name}`}
                 title="Close flow"
-                className="ml-0.5 text-rw-faint hover:text-rw-error opacity-0 group-hover:opacity-100 transition-opacity text-[13px] leading-none"
+                className="ml-0.5 text-rw-faint hover:text-rw-error opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity text-[13px] leading-none"
               >
                 ×
               </button>
@@ -108,6 +154,7 @@ export function FlowTabs({
         );
       })}
       <button
+        type="button"
         onClick={onAdd}
         aria-label="New flow"
         title="New flow"

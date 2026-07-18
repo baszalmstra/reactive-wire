@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { Meta, StoryObj } from "@storybook/react";
-import { FlowTabs } from "./FlowTabs.js";
+import { FlowTabs, flowPanelId, flowTabId } from "./FlowTabs.js";
 
 const meta: Meta<typeof FlowTabs> = {
   title: "Chrome/FlowTabs",
@@ -37,6 +37,14 @@ function Demo({ initial }: { initial: { id: string; name: string }[] }) {
           })
         }
       />
+      <div
+        role="tabpanel"
+        id={flowPanelId(active)}
+        aria-labelledby={flowTabId(active)}
+        style={{ minHeight: 100, padding: 16, color: "var(--rw-dim)" }}
+      >
+        Active canvas: {flows.find((flow) => flow.id === active)?.name}. Use arrow keys to switch tabs and F2 to rename.
+      </div>
     </div>
   );
 }

@@ -52,6 +52,12 @@
 .rw-modal::backdrop { background: rgba(6, 7, 11, .55); }
 .rw-modal:focus { outline: none; }
 
+/* Keyboard focus remains visible across the editor instead of relying on hover-only styling. */
+.rw-root :where(button, input, select, textarea, [role="button"], [role="tab"]):focus-visible {
+  outline: 2px solid var(--rw-sel);
+  outline-offset: 2px;
+}
+
 /* Animations and the dynamic canvas grid can't be expressed as utilities. */
 @keyframes rw-blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
 @keyframes rw-dash { to { stroke-dashoffset: -14.5; } }
@@ -114,8 +120,20 @@
 .rw-canvas-action:hover:not(:disabled) { background: var(--rw-panel2); color: var(--rw-text); border-color: var(--rw-line); }
 .rw-canvas-action:disabled { opacity: .42; cursor: default; }
 .rw-autodeploy { display: flex; align-items: center; gap: 7px; padding: 0 4px; color: var(--rw-dim); font-size: 11.5px; cursor: pointer; }
-.rw-autodeploy input { display: none; }
+.rw-autodeploy input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
 .rw-checkbox { width: 15px; height: 15px; border-radius: 4px; border: 1.5px solid var(--rw-line); display: inline-block; position: relative; transition: all .12s; }
+.rw-autodeploy input:focus-visible + .rw-checkbox { outline: 2px solid var(--rw-sel); outline-offset: 2px; }
 .rw-autodeploy input:checked + .rw-checkbox { background: var(--rw-accent); border-color: var(--rw-accent); }
 .rw-autodeploy input:checked + .rw-checkbox::after { content: ''; position: absolute; left: 4px; top: 1px; width: 4px; height: 8px; border: solid var(--rw-accent-text); border-width: 0 2px 2px 0; transform: rotate(43deg); }
 .rw-deploy-group { gap: 8px; }
@@ -255,8 +273,11 @@
 
 /* React Flow: let our node card own its look (no default node box or focus ring). */
 .react-flow__node { font-family: var(--font-sans); cursor: default; }
-.react-flow__node:focus,
-.react-flow__node:focus-visible { outline: none; }
+.rw-root .react-flow__node:focus,
+.rw-root .react-flow__node:focus-visible {
+  outline: 2px solid var(--rw-sel);
+  outline-offset: 3px;
+}
 
 /* Pins: the handle is a larger transparent hit area sitting above node content, with the
    visual dot as a non-interactive child — so hovering anywhere on the pin shows the connect

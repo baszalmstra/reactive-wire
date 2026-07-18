@@ -249,6 +249,7 @@ export function MacroEditor({
               onNodesChange={onNodesChange}
               onEdgesChange={onEdgesChange}
               onConnect={onConnect}
+              connectOnClick
               connectionLineStyle={{ stroke: TYPE_VAR.any, strokeWidth: 2.2 }}
               isValidConnection={isValidConnection}
               nodeTypes={nodeTypes}

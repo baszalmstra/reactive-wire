@@ -12,11 +12,13 @@ import { useResults } from "./results-context.js";
 import type { PinDef } from "../../../shared/node-types.js";
 import type { RWNodeType } from "./validation.js";
 import { pinKey } from "../../../shared/identity.js";
+import { TYPE_LABEL } from "../../../shared/theme.js";
 
 const HEADER = 40;
 const PAD_T = 10;
 const ROW = 28;
 const pinTop = (i: number) => HEADER + PAD_T + ROW * i + ROW / 2;
+const accessibleTypeLabel = (pin: PinDef) => pin.type === "bool" ? "boolean" : TYPE_LABEL[pin.type].toLowerCase();
 
 // The visual dot inside the (larger, transparent) handle hit area.
 function knobClass(pin: PinDef, toneClass: string): string {
@@ -69,6 +71,15 @@ export function RWNode({ id, data, selected }: NodeProps<RWNodeType>) {
             type="target"
             position={Position.Left}
             id={p.id}
+            role="button"
+            tabIndex={0}
+            aria-label={`${def.title}: ${p.label || p.id} input, ${accessibleTypeLabel(p)}`}
+            onKeyDown={(event) => {
+              if (event.key !== "Enter" && event.key !== " ") return;
+              event.preventDefault();
+              event.stopPropagation();
+              event.currentTarget.click();
+            }}
             className="rw-port"
             style={{ top: pinTop(i), ["--tc" as string]: tone.color }}
           >
@@ -84,6 +95,15 @@ export function RWNode({ id, data, selected }: NodeProps<RWNodeType>) {
             type="source"
             position={Position.Right}
             id={p.id}
+            role="button"
+            tabIndex={0}
+            aria-label={`${def.title}: ${p.label || p.id} output, ${accessibleTypeLabel(p)}`}
+            onKeyDown={(event) => {
+              if (event.key !== "Enter" && event.key !== " ") return;
+              event.preventDefault();
+              event.stopPropagation();
+              event.currentTarget.click();
+            }}
             className="rw-port"
             style={{ top: pinTop(i), ["--tc" as string]: tone.color }}
           >

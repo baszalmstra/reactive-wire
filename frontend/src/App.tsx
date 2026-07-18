@@ -52,7 +52,7 @@ import { Banner } from "./components/Banner.js";
 import { Toast, type ToastMessage } from "./components/Toast.js";
 import { DeployGuard } from "./components/DeployGuard.js";
 import { StatusPill, deriveStatus } from "./components/StatusPill.js";
-import { FlowTabs } from "./components/FlowTabs.js";
+import { FlowTabs, flowPanelId, flowTabId } from "./components/FlowTabs.js";
 import { Icon } from "./components/Icon.js";
 import { type EditorNode } from "./canvas/flows.js";
 import { useValueHistory } from "./canvas/use-value-history.js";
@@ -843,7 +843,14 @@ export function App() {
             />
           </Palette>
         </div>
-        <div className={cn("relative flex-1 min-h-0", isMobile && "rw-mobile-stage")} onDrop={onDrop} onDragOver={onDragOver}>
+        <div
+          role="tabpanel"
+          id={flowPanelId(activeFlowId)}
+          aria-labelledby={flowTabId(activeFlowId)}
+          className={cn("relative flex-1 min-h-0", isMobile && "rw-mobile-stage")}
+          onDrop={onDrop}
+          onDragOver={onDragOver}
+        >
           <div className="rw-canvas-actions rw-hide-mobile" aria-label="Canvas actions">
             <button className="rw-canvas-action" onClick={addComment} title="Add a comment box · wraps the selected node (C)">
               <span className="rw-tool-glyph">▢</span>
@@ -865,8 +872,11 @@ export function App() {
                 onNodesChange={onNodesChange}
                 onEdgesChange={onEdgesChange}
                 onConnect={onConnect}
+                connectOnClick
                 onConnectStart={onConnectStart}
                 onConnectEnd={onConnectEnd}
+                onClickConnectStart={onConnectStart}
+                onClickConnectEnd={onConnectEnd}
                 onNodeDragStart={onNodeDragStart}
                 onNodeDrag={onNodeDrag}
                 onNodeDragStop={onNodeDragStop}
