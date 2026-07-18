@@ -33,8 +33,9 @@ export async function resetWorkspace(page: Page): Promise<void> {
   // and `addFlow`'s count-based naming ("Flow 2", "Flow 3", …) stays predictable — otherwise a flow
   // a prior test renamed would leak its name into the next test.
   const strip = page.locator('button[aria-label="New flow"]').locator("xpath=..");
-  const soleTab = strip.locator("div[title]").first();
-  if ((await soleTab.getAttribute("title")) !== "Flow 1") {
+  const soleTab = strip.getByRole("tab").first();
+  if ((await soleTab.textContent()) !== "Flow 1") {
+    // The rename handler belongs to the tab button, not its titled wrapper.
     await soleTab.dblclick();
     const editor = strip.getByRole("textbox");
     await editor.fill("Flow 1");

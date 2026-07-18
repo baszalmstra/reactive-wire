@@ -123,10 +123,11 @@ export function FlowTabs({
                 type="button"
                 onClick={() => onToggleDeploy(flow.id, !liveEnabled)}
                 aria-label={`${liveEnabled ? "Disable" : "Enable"} ${flow.name} for deployment`}
-                title={liveEnabled ? "Included in live deployment" : "Not deployed — click to include"}
+                aria-pressed={liveEnabled}
+                title={liveEnabled ? "Included in the next deployment — click to exclude" : "Excluded from deployment — click to include"}
                 className={cn("rw-flow-live-toggle", liveEnabled && "on")}
               >
-                ●
+                {liveEnabled ? "Included" : "Excluded"}
               </button>
             )}
             {editing === flow.id ? (
