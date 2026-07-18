@@ -141,4 +141,20 @@ describe("Deployer with a fetch source", () => {
     expect(ha.lastCall()?.target?.entity_id).toBe("light.lr");
     deployer.stop();
   });
+
+  it("ignores a fetch that completes after terminal shutdown", async () => {
+    const ha = new MockHA();
+    let resolveFetch: ((value: Awaited<ReturnType<FetchFn>>) => void) | undefined;
+    const fetchFn: FetchFn = () => new Promise((resolve) => { resolveFetch = resolve; });
+    const deployer = new Deployer(ha, 100_000, fetchFn);
+    deployer.deploy(nodes, edges, true);
+    expect(ha.calls).toHaveLength(0);
+
+    deployer.stop();
+    resolveFetch?.({ ok: true, status: 200, text: () => Promise.resolve("25") });
+    await flushMicrotasks();
+
+    expect(ha.calls).toHaveLength(0);
+    expect(deployer.inspect()).toMatchObject({ deployed: false, mode: "dry-run", nodes: {}, sinks: {} });
+  });
 });

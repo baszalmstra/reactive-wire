@@ -396,7 +396,10 @@ the sinks `sink-light`/`sink-call`/`sink-climate`/`sink-cover`/`sink-input`/`sin
   connection-policy check first.
 - `runtime.ts` — `Deployer`: inlines macros, then re-runs the deployed graph with `evaluate` on
   every entity change and on a 1 s clock tick, reconciling sinks (preview dry-run vs live
-  actuation) with in-flight de-dup and echo-safety.
+  actuation) with in-flight de-dup and echo-safety. `stop()` is a terminal, idempotent lifecycle
+  boundary: it unsubscribes sources, invalidates async generations, clears live state, and rejects
+  later deployments. A service call already accepted by Home Assistant cannot be recalled, but its
+  completion cannot mutate the stopped runtime.
 - `poller.ts` — the async data-source driver: for each `fetch` node it polls the URL on the
   node's interval, decodes the body, and writes the latest `SourceResult` (loading→`unavailable`,
   failure→`error`, success→`ok`) into a source map the synchronous engine reads. Overlapping/

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { Deployer } from "../src/server/runtime.js";
+import { Deployer, type DurableMemory } from "../src/server/runtime.js";
 import { MockHA } from "../src/ha/mock.js";
 import type { NodeData } from "../shared/node-types.js";
 import type { ViewEdge } from "../shared/engine/evaluate.js";
@@ -208,6 +208,78 @@ describe("Deployer — reconciling light sink", () => {
       deployer?.stop();
       errorSpy.mockRestore();
     }
+  });
+});
+
+describe("Deployer lifecycle", () => {
+  it("terminally deactivates callbacks, ticks, actuation, and durable work", async () => {
+    vi.useFakeTimers();
+    try {
+      const ha = new MockHA();
+      let entityCallback: (() => void) | undefined;
+      const unsubscribe = vi.fn();
+      vi.spyOn(ha, "onEntities").mockImplementation((callback) => {
+        entityCallback = callback;
+        return unsubscribe;
+      });
+      const durable: DurableMemory = {
+        restore: vi.fn(),
+        capture: vi.fn(),
+        stop: vi.fn(),
+      };
+      ha.setState("binary_sensor.x", "on");
+      const deployer = new Deployer(ha, 1_000, undefined, durable);
+      const { nodes, edges } = callGraph();
+      deployer.deploy(nodes, edges, true);
+      await flushPromises();
+      expect(ha.calls).toHaveLength(1);
+
+      deployer.stop();
+      expect(unsubscribe).toHaveBeenCalledTimes(1);
+      expect(durable.stop).toHaveBeenCalledTimes(1);
+      expect(deployer.inspect()).toMatchObject({
+        deployed: false,
+        mode: "dry-run",
+        evaluatedAt: null,
+        nodes: {},
+        sinks: {},
+      });
+
+      // Even a callback retained by an ill-behaved feed and clock advancement cannot revive it.
+      entityCallback?.();
+      vi.advanceTimersByTime(5_000);
+      expect(ha.calls).toHaveLength(1);
+
+      // Shutdown is idempotent, while deployment is permanently rejected afterwards.
+      deployer.stop();
+      expect(unsubscribe).toHaveBeenCalledTimes(1);
+      expect(durable.stop).toHaveBeenCalledTimes(1);
+      expect(() => deployer.deploy(nodes, edges, true)).toThrow("Deployer has been stopped");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("ignores completion of a service call accepted before shutdown", async () => {
+    const ha = new MockHA();
+    let resolveCall: (() => void) | undefined;
+    ha.callService = (call) => {
+      ha.calls.push(call);
+      return new Promise<void>((resolve) => { resolveCall = resolve; });
+    };
+    ha.setState("binary_sensor.x", "on");
+    const deployer = new Deployer(ha, 100_000);
+    const { nodes, edges } = callGraph();
+    deployer.deploy(nodes, edges, true);
+    expect(deployer.inspect().sinks.snk?.inFlight).toBe(true);
+
+    deployer.stop();
+    const stopped = deployer.inspect();
+    resolveCall?.();
+    await flushPromises();
+
+    expect(ha.calls).toHaveLength(1);
+    expect(deployer.inspect()).toEqual(stopped);
   });
 });
 

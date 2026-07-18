@@ -163,8 +163,10 @@ export class Deployer {
   private readonly callFailures = new Map<string, SinkFailure>();
   private readonly lastTriggeredAt = new Map<string, number>();
   private readonly lastTriggeredCall = new Map<string, ServiceCall>();
-  private readonly tick: ReturnType<typeof setInterval>;
+  private tick: ReturnType<typeof setInterval> | null;
   private readonly poller: Poller;
+  private readonly unsubscribeEntities: () => void;
+  private stopped = false;
   private lastResults: EvalResults | null = null;
   private lastRunAt: number | null = null;
 
@@ -174,7 +176,7 @@ export class Deployer {
     fetchFn: FetchFn = noFetch,
     private readonly durable?: DurableMemory,
   ) {
-    ha.onEntities(() => this.run());
+    this.unsubscribeEntities = ha.onEntities(() => this.run());
     this.poller = new Poller(fetchFn, () => this.run());
     // A clock tick re-evaluates on a fixed interval so derivations that depend on time (now,
     // elapsed durations) advance even when no entity changes — without it, "open for 10 min"
@@ -189,6 +191,7 @@ export class Deployer {
    * ids. When `actuate` is true sinks call services; otherwise they dry-run.
    */
   deploy(nodes: NodeData[], edges: ViewEdge[], actuate: boolean, macros: MacroMap = {}): void {
+    if (this.stopped) throw new Error("Deployer has been stopped");
     const flat = expandMacros(nodes, edges, macros, undefined, true);
     this.generation += 1;
     this.inFlight.clear();
@@ -207,17 +210,31 @@ export class Deployer {
     this.run();
   }
 
-  /** Stop the clock tick and all source polling. */
+  /**
+   * Permanently deactivate this runtime. An already accepted HA service call cannot be recalled,
+   * but its eventual completion belongs to the invalidated generation and cannot update state.
+   */
   stop(): void {
+    if (this.stopped) return;
+    this.stopped = true;
+    this.actuate = false;
+    this.graph = null;
     this.generation += 1;
+    this.unsubscribeEntities();
+    if (this.tick !== null) {
+      clearInterval(this.tick);
+      this.tick = null;
+    }
+    this.poller.stop();
     this.inFlight.clear();
     this.lastNonReconciling.clear();
     this.lastReconcilingAttempt.clear();
     this.callFailures.clear();
     this.lastTriggeredAt.clear();
     this.lastTriggeredCall.clear();
-    clearInterval(this.tick);
-    this.poller.stop();
+    this.lastResults = null;
+    this.lastRunAt = null;
+    this.mem = createMemory();
     this.durable?.stop();
   }
 
@@ -273,7 +290,7 @@ export class Deployer {
   }
 
   private run(): void {
-    if (!this.graph) return;
+    if (this.stopped || !this.graph) return;
     const entities: EntityMap = this.ha.entitiesSnapshot();
     const results = evaluate(this.graph.nodes, this.graph.edges, entities, this.mem, Date.now(), this.poller.sources());
     // The evaluate above mutated durable nodes' slots in place; persist them (debounced) so the
