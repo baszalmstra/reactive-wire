@@ -36,6 +36,54 @@ test.describe.serial("Keyboard graph accessibility", () => {
     await expect(target).not.toHaveCSS("outline-width", "0px");
   });
 
+  test("keeps destructive canvas shortcuts scoped while modal layers are open", async ({ page }) => {
+    const mainCanvas = page.getByRole("tabpanel").locator(".react-flow__node");
+    const number = await addNode(page, "Number");
+    await number.focus();
+    await expect(mainCanvas).toHaveCount(1);
+
+    await page.getByRole("button", { name: "Deploy enabled" }).click();
+    const deployDialog = page.getByRole("dialog", { name: "Deploy to your home" });
+    await expect(deployDialog).toBeVisible();
+    await deployDialog.getByRole("button", { name: "Cancel" }).focus();
+    await page.keyboard.press("Delete");
+    await page.keyboard.press("Backspace");
+    await expect(mainCanvas).toHaveCount(1);
+    await page.keyboard.press("Escape");
+
+    await page.getByRole("button", { name: /^Entity \+$/ }).click();
+    const configDialog = page.getByRole("dialog", { name: "Choose entity" });
+    await expect(configDialog).toBeVisible();
+    await configDialog.getByRole("button", { name: "Cancel" }).focus();
+    const configuredCount = await mainCanvas.count();
+    await page.keyboard.press("Delete");
+    await page.keyboard.press("Backspace");
+    await expect(mainCanvas).toHaveCount(configuredCount);
+    await page.keyboard.press("Escape");
+
+    await number.locator(".rw-drag").click();
+    const group = page.getByRole("button", { name: "Group" });
+    await expect(group).toBeEnabled();
+    await group.click();
+    await expect(mainCanvas).toHaveCount(configuredCount);
+    const placement = mainCanvas.filter({ hasText: "Macro 1" });
+    await expect(placement).toHaveCount(1);
+    await placement.locator(".rw-drag").dblclick();
+
+    const macroDialog = page.getByRole("dialog", { name: "Editing macro" });
+    await expect(macroDialog).toBeVisible();
+    const macroNodes = macroDialog.locator(".react-flow__node");
+    const before = await macroNodes.count();
+    expect(before).toBeGreaterThan(0);
+    const inner = macroNodes.first();
+    await inner.click({ force: true });
+    await expect(inner).toHaveClass(/selected/);
+    await inner.focus();
+    await page.keyboard.press("Delete");
+    await expect(macroNodes).toHaveCount(before - 1);
+    await expect(mainCanvas).toHaveCount(configuredCount);
+  });
+
   test("supports roving flow tabs, F2 rename, and checkbox keyboard focus", async ({ page }) => {
     const first = page.getByRole("tab", { name: "Flow 1" });
     await expect(first).toHaveAttribute("aria-selected", "true");

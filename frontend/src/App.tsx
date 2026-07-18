@@ -891,7 +891,7 @@ export function App() {
                 nodeTypes={nodeTypes}
                 edgeTypes={edgeTypes}
                 colorMode={mode}
-                deleteKeyCode={["Backspace", "Delete"]}
+                deleteKeyCode={modalOpen ? null : ["Backspace", "Delete"]}
                 elevateNodesOnSelect={false}
                 multiSelectionKeyCode={["Control", "Meta", "Shift"]}
                 selectionKeyCode="Shift"
