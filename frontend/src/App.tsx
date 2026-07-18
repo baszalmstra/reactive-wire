@@ -20,7 +20,7 @@ import { createMemory } from "../../shared/engine/engine-support.js";
 import { createRecord } from "../../shared/record.js";
 import { pinKey } from "../../shared/identity.js";
 import { combineFlowGraphs, type RuntimeFlowGraph } from "../../shared/engine/flow-graphs.js";
-import { simulate } from "./example/sim.js";
+import { useSimulatedEntities } from "./example/use-simulated-entities.js";
 import { nodeGeom, type NodeData } from "../../shared/node-types.js";
 import type { EntityMap } from "../../shared/entities.js";
 import { entityStateType } from "../../shared/value.js";
@@ -216,19 +216,11 @@ export function App() {
     closeFlow(id);
   }, [closeFlow]);
 
-  // Offline simulated entities, used when not connected to the server's live feed.
-  const [simEntities, setSimEntities] = useState<EntityMap>(() => simulate(0));
-  const phase = useRef(0);
-  useEffect(() => {
-    const id = setInterval(() => {
-      phase.current += 0.06;
-      setSimEntities(simulate(phase.current));
-    }, 90);
-    return () => clearInterval(id);
-  }, []);
-
   const server = useServer();
   const hasSeenServer = server.connected || lastSync !== null;
+  // Offline simulation is retired permanently after the first live feed has been observed. A
+  // reconnect gap keeps the last server snapshot rather than restarting 90 ms canvas updates.
+  const simEntities = useSimulatedEntities(!hasSeenServer);
   const entities = server.connected ? server.entities : hasSeenServer ? server.entities : simEntities;
   const paletteTemplates = PALETTE;
 
@@ -712,6 +704,11 @@ export function App() {
   const valueHistory = useValueHistory(results, observedPins);
   const displayEdges = useMemo(() => withRWEdgeData(edges, rwNodes, results), [edges, rwNodes, results]);
 
+  const resultsContextValue = useMemo(
+    () => ({ results, actuating, entities, onConfig, onSetValue }),
+    [results, actuating, entities, onConfig, onSetValue],
+  );
+
   return (
     <div
       id="rw-root"
@@ -864,7 +861,7 @@ export function App() {
             </button>
           </div>
           <CommentCtx.Provider value={commentOps}>
-            <ResultsProvider value={{ results, actuating, entities, onConfig, onSetValue }}>
+            <ResultsProvider value={resultsContextValue}>
               <ReactFlow<EditorNode, Edge>
                 onInit={(inst) => {
                   rf.current = inst;

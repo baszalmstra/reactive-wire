@@ -72,7 +72,26 @@ export function useCollabDocument(options: {
     showToast,
   } = options;
 
-  const collabDoc = useRef(new Y.Doc());
+  const collabDoc = useRef<Y.Doc | null>(null);
+  const getCollabDoc = useCallback((): Y.Doc => {
+    if (!collabDoc.current) throw new Error("Collaborative document is not mounted");
+    return collabDoc.current;
+  }, []);
+  // Allocate the Y.Doc only after React commits this hook. Render attempts discarded by StrictMode
+  // or concurrent rendering therefore cannot leak live Yjs documents.
+  useEffect(() => {
+    const doc = new Y.Doc();
+    collabDoc.current = doc;
+    return () => {
+      if (collabDoc.current === doc) collabDoc.current = null;
+      collabReady.current = false;
+      applyingCollab.current = false;
+      lastCollabSnapshot.current = null;
+      appliedDocStateNonce.current = null;
+      appliedDocUpdateNonce.current = null;
+      doc.destroy();
+    };
+  }, []);
   const collabReady = useRef(false);
   const applyingCollab = useRef(false);
   const lastCollabSnapshot = useRef<EditorDocumentSnapshot | null>(null);
@@ -118,30 +137,31 @@ export function useCollabDocument(options: {
     const next = localDocumentSnapshot();
     if (allowBeforeReady && !collabReady.current && !editorSnapshotHasUserContent(next)) return;
     if (editorSnapshotsEqual(lastCollabSnapshot.current, next)) return;
-    const previous = lastCollabSnapshot.current ?? snapshotFromEditorDoc(collabDoc.current);
-    applyEditorSnapshotDiff(collabDoc.current, previous, next, collabLocalOrigin);
-    lastCollabSnapshot.current = snapshotFromEditorDoc(collabDoc.current);
-  }, [localDocumentSnapshot]);
+    const doc = getCollabDoc();
+    const previous = lastCollabSnapshot.current ?? snapshotFromEditorDoc(doc);
+    applyEditorSnapshotDiff(doc, previous, next, collabLocalOrigin);
+    lastCollabSnapshot.current = snapshotFromEditorDoc(doc);
+  }, [localDocumentSnapshot, getCollabDoc]);
 
   const sendLocalUpdatesMissingFromServerState = useCallback((serverState: Uint8Array) => {
     const serverDoc = new Y.Doc();
     Y.applyUpdate(serverDoc, serverState);
-    const missing = Y.encodeStateAsUpdate(collabDoc.current, Y.encodeStateVector(serverDoc));
+    const missing = Y.encodeStateAsUpdate(getCollabDoc(), Y.encodeStateVector(serverDoc));
     // Yjs encodes an empty diff as [0, 0]. Anything larger contains local/offline edits the
     // server has not seen yet, so upload it after reconnecting instead of silently diverging.
     if (missing.length > 2) server.sendDocUpdate(missing);
     serverDoc.destroy();
-  }, [server.sendDocUpdate]);
+  }, [server.sendDocUpdate, getCollabDoc]);
 
   useEffect(() => {
-    const doc = collabDoc.current;
+    const doc = getCollabDoc();
     const onUpdate = (update: Uint8Array, origin: unknown) => {
       if (origin === collabServerOrigin || !collabReady.current) return;
       server.sendDocUpdate(update);
     };
     doc.on("update", onUpdate);
     return () => doc.off("update", onUpdate);
-  }, [server.sendDocUpdate]);
+  }, [server.sendDocUpdate, getCollabDoc]);
 
   useEffect(() => {
     if (!server.docState || appliedDocStateNonce.current === server.docState.nonce) return;
@@ -149,15 +169,16 @@ export function useCollabDocument(options: {
     try {
       flushLocalDocumentToCollab(true);
       const update = decodeUpdateBase64(server.docState.update, DEFAULT_MAX_DOC_STATE_BYTES);
-      Y.applyUpdate(collabDoc.current, update, collabServerOrigin);
+      const doc = getCollabDoc();
+      Y.applyUpdate(doc, update, collabServerOrigin);
       sendLocalUpdatesMissingFromServerState(update);
       collabReady.current = true;
       // applyRemoteDocumentSnapshot sets the diff baseline to the reconciled projection it renders.
-      applyRemoteDocumentSnapshot(snapshotFromEditorDoc(collabDoc.current));
+      applyRemoteDocumentSnapshot(snapshotFromEditorDoc(doc));
     } catch (err) {
       showToast(`Document sync failed: ${err instanceof Error ? err.message : String(err)}`, "error");
     }
-  }, [server.docState, applyRemoteDocumentSnapshot, flushLocalDocumentToCollab, sendLocalUpdatesMissingFromServerState, showToast]);
+  }, [server.docState, applyRemoteDocumentSnapshot, flushLocalDocumentToCollab, sendLocalUpdatesMissingFromServerState, showToast, getCollabDoc]);
 
   useEffect(() => {
     if (!server.docUpdate || appliedDocUpdateNonce.current === server.docUpdate.nonce) return;
@@ -166,12 +187,13 @@ export function useCollabDocument(options: {
       // Preserve any local edit waiting in the debounce window before rendering the remote update;
       // otherwise a remote packet can replace unsent local React state and cause data loss.
       flushLocalDocumentToCollab();
-      Y.applyUpdate(collabDoc.current, decodeUpdateBase64(server.docUpdate.update), collabServerOrigin);
-      applyRemoteDocumentSnapshot(snapshotFromEditorDoc(collabDoc.current));
+      const doc = getCollabDoc();
+      Y.applyUpdate(doc, decodeUpdateBase64(server.docUpdate.update), collabServerOrigin);
+      applyRemoteDocumentSnapshot(snapshotFromEditorDoc(doc));
     } catch (err) {
       showToast(`Document sync failed: ${err instanceof Error ? err.message : String(err)}`, "error");
     }
-  }, [server.docUpdate, applyRemoteDocumentSnapshot, flushLocalDocumentToCollab, showToast]);
+  }, [server.docUpdate, applyRemoteDocumentSnapshot, flushLocalDocumentToCollab, showToast, getCollabDoc]);
 
   useEffect(() => {
     if (!server.docError) return;

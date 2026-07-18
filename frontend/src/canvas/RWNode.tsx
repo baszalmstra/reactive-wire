@@ -8,7 +8,7 @@ import { HealthDot, MemBadge } from "../components/Badges.js";
 import { ValueChip } from "../components/ValueChip.js";
 import { DirSelect, LightGlyph, OpSelect, PinValueEditor, SinkPanel, UnitSelect } from "../components/Widgets.js";
 import { portTone } from "../components/port-style.js";
-import { useResults } from "./results-context.js";
+import { useNodeResults } from "./results-context.js";
 import type { PinDef } from "../../../shared/node-types.js";
 import type { RWNodeType } from "./validation.js";
 import { pinKey } from "../../../shared/identity.js";
@@ -28,7 +28,7 @@ function knobClass(pin: PinDef, toneClass: string): string {
 /** A graph node rendered on the React Flow canvas, with a Handle per typed pin. */
 export function RWNode({ id, data, selected }: NodeProps<RWNodeType>) {
   const def = data.def;
-  const { results, actuating, entities, onConfig, onSetValue } = useResults();
+  const { results, actuating, entities, onConfig, onSetValue } = useNodeResults(id, def);
   const g = nodeGeom(def);
   const health = results.health[id] ?? "ok";
 

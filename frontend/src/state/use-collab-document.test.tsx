@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { StrictMode, useRef, useState, type ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { act, renderHook } from "@testing-library/react";
 import * as Y from "yjs";
@@ -85,6 +85,23 @@ function useHarness(server: Server) {
 function outputIds(node: EditorNode): string[] {
   return (node as { data: { def: NodeData } }).data.def.outputs.map((p) => p.id);
 }
+
+describe("useCollabDocument lifecycle", () => {
+  it("creates committed Y.Docs safely under StrictMode and destroys each mounted instance", () => {
+    const destroy = vi.spyOn(Y.Doc.prototype, "destroy");
+    const server = makeServer(serverStateWith([]), () => true);
+    const wrapper = ({ children }: { children: ReactNode }) => <StrictMode>{children}</StrictMode>;
+
+    const hook = renderHook(() => useHarness(server), { wrapper });
+    const strictModeCleanupCount = destroy.mock.calls.length;
+    expect(strictModeCleanupCount).toBeGreaterThanOrEqual(1);
+    hook.rerender();
+    expect(destroy).toHaveBeenCalledTimes(strictModeCleanupCount);
+    hook.unmount();
+    expect(destroy).toHaveBeenCalledTimes(strictModeCleanupCount + 1);
+    destroy.mockRestore();
+  });
+});
 
 describe("useCollabDocument template-drift healing", () => {
   it("does not write reconciled defs back to the document when a drifted doc is opened", async () => {
