@@ -9,6 +9,12 @@ export interface EntitiesFrame {
   entities: EntityMap;
 }
 
+/** Full snapshot emitted by servers predating versioned entity feeds. */
+export interface LegacyEntitiesFrame {
+  type: "entities";
+  entities: EntityMap;
+}
+
 export interface EntityDeltaFrame {
   type: "entityDelta";
   version: number;
@@ -28,7 +34,7 @@ export interface DeployResultFrame {
   error?: string;
 }
 
-export type ServerFrame = EntitiesFrame | EntityDeltaFrame | HAStatusFrame | DeployResultFrame | DocStateMessage | DocUpdateMessage | DocErrorMessage;
+export type ServerFrame = EntitiesFrame | LegacyEntitiesFrame | EntityDeltaFrame | HAStatusFrame | DeployResultFrame | DocStateMessage | DocUpdateMessage | DocErrorMessage;
 
 export interface DeployClientMessage {
   type: "deploy";
@@ -40,7 +46,13 @@ export interface DebugStateRequestMessage {
   type: "debugState";
 }
 
-export type ClientFrame = DeployClientMessage | DocUpdateMessage | DebugStateRequestMessage;
+/** Opt-in required before the server sends compact entity deltas to this connection. */
+export interface ClientCapabilitiesMessage {
+  type: "clientCapabilities";
+  entityFeed: "delta-v1";
+}
+
+export type ClientFrame = DeployClientMessage | DocUpdateMessage | DebugStateRequestMessage | ClientCapabilitiesMessage;
 
 function optionalString(value: unknown): string | undefined {
   return typeof value === "string" ? value : undefined;
@@ -78,8 +90,10 @@ export function isDeployResultFrame(value: unknown): value is DeployResultFrame 
     && (value.error === undefined || typeof value.error === "string");
 }
 
-export function isEntitiesFrame(value: unknown): value is EntitiesFrame {
-  return isRecord(value) && value.type === "entities" && typeof value.version === "number" && Number.isSafeInteger(value.version) && value.version >= 0 && isEntityMap(value.entities);
+export function isEntitiesFrame(value: unknown): value is EntitiesFrame | LegacyEntitiesFrame {
+  if (!isRecord(value) || value.type !== "entities" || !isEntityMap(value.entities)) return false;
+  return value.version === undefined
+    || (typeof value.version === "number" && Number.isSafeInteger(value.version) && value.version >= 0);
 }
 
 export function isHAStatusFrame(value: unknown): value is HAStatusFrame {
@@ -117,10 +131,14 @@ export function isDebugStateRequestMessage(value: unknown): value is DebugStateR
   return isRecord(value) && value.type === "debugState";
 }
 
+export function isClientCapabilitiesMessage(value: unknown): value is ClientCapabilitiesMessage {
+  return isRecord(value) && value.type === "clientCapabilities" && value.entityFeed === "delta-v1";
+}
+
 export function decodeClientFrame(raw: string): ClientFrame | null {
   const value = parseJsonRecord(raw);
   if (!value) return null;
-  if (isDeployClientMessage(value) || isDocUpdateMessage(value) || isDebugStateRequestMessage(value)) return value;
+  if (isDeployClientMessage(value) || isDocUpdateMessage(value) || isDebugStateRequestMessage(value) || isClientCapabilitiesMessage(value)) return value;
   return null;
 }
 

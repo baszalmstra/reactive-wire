@@ -96,21 +96,36 @@ export function useServer(url: string = DEFAULT_URL): Server {
 
     const connect = () => {
       entityVersionRef.current = null;
+      let seenHAStatus = false;
       const ws = new WebSocket(urlWithToken(url, DEPLOY_TOKEN));
       wsRef.current = ws;
-      ws.onopen = () => setConnected(true);
+      ws.onopen = () => {
+        // Servers send deltas only after this explicit opt-in. Older servers safely ignore the
+        // unknown frame and continue their legacy full-snapshot stream.
+        ws.send(JSON.stringify({ type: "clientCapabilities", entityFeed: "delta-v1" }));
+        setConnected(true);
+      };
       ws.onmessage = (ev) => {
         try {
           const msg = JSON.parse(ev.data as string);
           if (msg.type === "haStatus" && msg.status && typeof msg.status === "object"
             && (msg.status.phase === "disconnected" || msg.status.phase === "syncing" || msg.status.phase === "ready")
             && Number.isSafeInteger(msg.status.epoch)) {
+            seenHAStatus = true;
             setHAStatus(msg.status as HAConnectionStatus);
-          } else if (msg.type === "entities" && Number.isSafeInteger(msg.version) && msg.version >= 0 && msg.entities && typeof msg.entities === "object") {
-            const current = entityVersionRef.current;
-            if (current === null || msg.version >= current) {
-              entityVersionRef.current = msg.version;
+          } else if (msg.type === "entities" && msg.entities && typeof msg.entities === "object") {
+            if (Number.isSafeInteger(msg.version) && msg.version >= 0) {
+              const current = entityVersionRef.current;
+              if (current === null || msg.version >= current) {
+                entityVersionRef.current = msg.version;
+                setEntities(msg.entities as EntityMap);
+              }
+            } else if (msg.version === undefined) {
+              // Legacy servers have neither versions nor explicit HA readiness. Accept each full
+              // snapshot, but show conservative syncing status rather than claiming safe actuation.
+              entityVersionRef.current = null;
               setEntities(msg.entities as EntityMap);
+              if (!seenHAStatus) setHAStatus({ phase: "syncing", epoch: 0, snapshotVersion: null });
             }
           } else if (msg.type === "entityDelta" && Number.isSafeInteger(msg.version) && msg.version >= 0
             && msg.changed && typeof msg.changed === "object" && Array.isArray(msg.removed)) {

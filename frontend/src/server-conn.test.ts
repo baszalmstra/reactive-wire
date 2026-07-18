@@ -89,6 +89,22 @@ describe("useServer", () => {
     expect(result.current.haStatus.phase).toBe("disconnected");
   });
 
+  it("negotiates deltas but remains compatible with an unversioned legacy server", () => {
+    const { result } = renderHook(() => useServer("ws://test.local"));
+    act(() => latest().emitOpen());
+    expect(latest().sent[0]).toBe(JSON.stringify({ type: "clientCapabilities", entityFeed: "delta-v1" }));
+
+    const first = { "light.a": { state: "off", attributes: {} } };
+    act(() => latest().emit({ type: "entities", entities: first }));
+    expect(result.current.entities).toEqual(first);
+    // Without an explicit readiness frame, do not claim that old-server actuation is safely ready.
+    expect(result.current.haStatus).toEqual({ phase: "syncing", epoch: 0, snapshotVersion: null });
+
+    const second = { "light.a": { state: "on", attributes: { brightness: 4 } } };
+    act(() => latest().emit({ type: "entities", entities: second }));
+    expect(result.current.entities).toEqual(second);
+  });
+
   it("applies ordered entity deltas including additions, updates, and removals", () => {
     const { result } = renderHook(() => useServer("ws://test.local"));
     act(() => latest().emitOpen());

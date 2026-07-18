@@ -404,9 +404,12 @@ the sinks `sink-light`/`sink-call`/`sink-climate`/`sink-cover`/`sink-input`/`sin
   `RW_DATA_DIR`); starts the feed; holds the `Deployer`, the `EditorDocumentStore`, and the
   `AutoDeployController`.
 - `feed.ts` — WebSocket (default `:7420`): sends a versioned entity snapshot on connect and
-  ordered compact deltas afterward, accepts `deploy`
-  requests, and carries the collaborative-document frames. Every upgrade passes the
-  connection-policy check first.
+  ordered compact deltas after a client explicitly negotiates `delta-v1`, accepts `deploy`
+  requests, and carries the collaborative-document frames. Unknown/older editor clients continue
+  receiving full snapshots on every entity change, so an already-open tab does not freeze during a
+  server upgrade. New editors also accept unversioned legacy snapshots; without the newer
+  `haStatus` frame they conservatively show HA as syncing rather than claiming live readiness.
+  Every upgrade passes the connection-policy check first.
 - `runtime.ts` — `Deployer`: compiles macro-expanded graphs once, retains results, and schedules
   ordered dirty-closure transactions from entity deltas, fetch completions, observed clock roots,
   and sink retries. Graphs without clock-dependent nodes have no clock timer. Debug state exposes

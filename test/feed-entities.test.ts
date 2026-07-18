@@ -31,13 +31,17 @@ function nextFrame(ws: WebSocket, type: string): Promise<Record<string, unknown>
   });
 }
 
-async function connect(url: string): Promise<{ ws: WebSocket; initial: Record<string, unknown> }> {
+async function connect(url: string, supportsDeltas = true): Promise<{ ws: WebSocket; initial: Record<string, unknown> }> {
   const ws = new WebSocket(url, { headers: { origin: "http://localhost:5173" } });
   const initial = nextFrame(ws, "entities");
   await new Promise<void>((resolve, reject) => {
     ws.once("open", resolve);
     ws.once("error", reject);
   });
+  if (supportsDeltas) {
+    ws.send(JSON.stringify({ type: "clientCapabilities", entityFeed: "delta-v1" }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
   return { ws, initial: await initial };
 }
 
@@ -67,6 +71,26 @@ describe("versioned entity feed", () => {
       const removed = nextFrame(ws, "entityDelta");
       ha.remove("light.a");
       expect(await removed).toEqual({ type: "entityDelta", version: 3, changed: {}, removed: ["light.a"] });
+    } finally {
+      ws.close();
+      stop();
+    }
+  });
+
+  it("keeps legacy clients current with full snapshots until they negotiate deltas", async () => {
+    const port = await freePort();
+    const ha = new MockHA();
+    ha.setState("light.a", "off");
+    const stop = startFeed(ha, { port, host: "127.0.0.1" });
+    const { ws } = await connect(`ws://127.0.0.1:${port}`, false);
+    try {
+      const next = nextFrame(ws, "entities");
+      ha.setState("light.a", "on", { brightness: 9 });
+      expect(await next).toEqual({
+        type: "entities",
+        version: 2,
+        entities: { "light.a": { state: "on", attributes: { brightness: 9 } } },
+      });
     } finally {
       ws.close();
       stop();

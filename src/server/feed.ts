@@ -16,6 +16,7 @@ import type { AppliedDocumentUpdate } from "./doc-store.js";
 import { parseJsonRecord } from "../../shared/json.js";
 import {
   frameToken,
+  isClientCapabilitiesMessage,
   isDebugStateRequestMessage,
   isDeployClientMessage,
   isDocUpdateMessage,
@@ -163,11 +164,14 @@ export function startFeed(ha: EntityFeed & HAClient, portOrOptions: number | Fee
       })()
     : new WebSocketServer({ port: options.port, host: options.host, maxPayload, verifyClient });
 
+  const deltaEntityClients = new Set<WebSocket>();
+
   wss.on("connection", (ws, req) => {
     const connectionTokenOk = tokenMatches(requestToken(req), options.deployToken);
     const entitySnapshot = ha.entitiesSnapshot();
     ws.send(JSON.stringify({ type: "entities", version: entitySnapshot.version, entities: entitySnapshot.entities }));
     ws.send(JSON.stringify({ type: "haStatus", status: ha.connectionStatus() }));
+    ws.once("close", () => deltaEntityClients.delete(ws));
     if (handlers.documentStore) {
       try {
         const frame: DocStateMessage = { type: "docState", update: encodeUpdateBase64(handlers.documentStore.encodeState()) };
@@ -183,6 +187,11 @@ export function startFeed(ha: EntityFeed & HAClient, portOrOptions: number | Fee
         return;
       }
       const tokenOk = connectionTokenOk || tokenMatches(frameToken(msg), options.deployToken);
+
+      if (isClientCapabilitiesMessage(msg)) {
+        deltaEntityClients.add(ws);
+        return;
+      }
 
       if (msg.type === "docUpdate") {
         if (!handlers.documentStore) {
@@ -273,16 +282,30 @@ export function startFeed(ha: EntityFeed & HAClient, portOrOptions: number | Fee
   });
 
   const unsub = ha.onEntities((update) => {
-    const msg = JSON.stringify(update.kind === "full"
-      ? { type: "entities", version: update.version, entities: update.entities }
-      : { type: "entityDelta", version: update.version, changed: update.changed, removed: update.removed });
+    const deltaMessage = update.kind === "delta"
+      ? JSON.stringify({ type: "entityDelta", version: update.version, changed: update.changed, removed: update.removed })
+      : null;
+    const fullFromUpdate = update.kind === "full"
+      ? JSON.stringify({ type: "entities", version: update.version, entities: update.entities })
+      : null;
+    let currentFull: string | null = fullFromUpdate;
     for (const client of wss.clients) {
       if (client.readyState !== WebSocket.OPEN) continue;
       if (client.bufferedAmount > maxPayload) {
         client.close(1009, "client is too far behind");
         continue;
       }
-      client.send(msg);
+      if (deltaMessage && deltaEntityClients.has(client)) {
+        client.send(deltaMessage);
+      } else {
+        // Unknown clients may be an already-open editor from before the server upgrade. Keep its
+        // legacy full-snapshot stream live until it explicitly opts into ordered deltas.
+        currentFull ??= (() => {
+          const snapshot = ha.entitiesSnapshot();
+          return JSON.stringify({ type: "entities", version: snapshot.version, entities: snapshot.entities });
+        })();
+        client.send(currentFull);
+      }
     }
   });
 
