@@ -4,6 +4,7 @@ import type { NodeData, PinDef } from "../../shared/node-types.js";
 import type { ValueType } from "../../shared/theme.js";
 import { isSafeIdentifier } from "../../shared/record.js";
 import { expandMacros } from "../../shared/engine/expand.js";
+import { validateExpandedGraph, validateReachableMacros } from "../../shared/engine/validate-graph.js";
 
 export interface DeployRequest {
   nodes: NodeData[];
@@ -179,10 +180,13 @@ export function sanitizeDeployRequest(raw: unknown): DeployValidation {
       }
     }
     const graph: DeployRequest = { nodes, edges, ...(macros ? { macros } : {}) };
-    // Validate the fully inlined resource footprint before the graph reaches the always-on runtime.
-    // expandMacros enforces cumulative limits while materializing, so multiplicative macro fan-out
-    // is stopped after a bounded amount of work rather than allocating the theoretical full graph.
-    expandMacros(nodes, edges, macros ?? {});
+    const macroValidation = validateReachableMacros(nodes, macros ?? {});
+    if (!macroValidation.ok) throw new Error(macroValidation.error.message);
+    // Validate the fully inlined resource footprint and semantics before the graph reaches the
+    // always-on runtime. Expansion is bounded, then the canonical flat graph must be a typed DAG.
+    const flat = expandMacros(nodes, edges, macros ?? {});
+    const semanticValidation = validateExpandedGraph(flat.nodes, flat.edges);
+    if (!semanticValidation.ok) throw new Error(semanticValidation.error.message);
     return { ok: true, graph };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : String(err) };

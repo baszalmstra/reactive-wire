@@ -24,6 +24,21 @@ function rw(id: string): CollabNode {
   return { id, type: "rw", position: { x: 0, y: 0 }, data: { def: def(id) } };
 }
 
+function passthroughRw(id: string): CollabNode {
+  const node: NodeData = {
+    id,
+    type: "passthrough",
+    title: "Passthrough",
+    subtitle: "",
+    icon: "const",
+    x: 0,
+    y: 0,
+    inputs: [{ id: "in", label: "in", type: "num" }],
+    outputs: [{ id: "in", label: "out", type: "num" }],
+  };
+  return { id, type: "rw", position: { x: 0, y: 0 }, data: { def: node } };
+}
+
 /** A collab node whose def carries no input/output arrays, as an unfinished editor node can. */
 function partialRw(id: string): CollabNode {
   return { id, type: "rw", position: { x: 0, y: 0 }, data: { def: { id, type: "const-number" } } };
@@ -46,7 +61,7 @@ function snapshot(overrides: Partial<EditorDocumentSnapshot> = {}): EditorDocume
       {
         id: "flow-a",
         name: "A",
-        nodes: [rw("a"), rw("b"), comment("c")],
+        nodes: [rw("a"), passthroughRw("b"), comment("c")],
         edges: [
           { id: "ok", source: "a", sourceHandle: "out", target: "b", targetHandle: "in" },
           { id: "dangling", source: "a", sourceHandle: "out", target: "missing", targetHandle: "in" },

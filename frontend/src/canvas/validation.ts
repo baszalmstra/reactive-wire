@@ -2,6 +2,9 @@ import type { Node, Edge, Connection } from "@xyflow/react";
 import type { NodeData } from "../../../shared/node-types.js";
 import type { ValueType } from "../../../shared/theme.js";
 import { TYPE_LABEL } from "../../../shared/theme.js";
+import { typesCompatible, wouldCreateCycle } from "../../../shared/engine/validate-graph.js";
+
+export { typesCompatible } from "../../../shared/engine/validate-graph.js";
 
 export type RWNodeData = { def: NodeData };
 export type RWNodeType = Node<RWNodeData, "rw">;
@@ -11,38 +14,9 @@ function pinTypeOf(node: RWNodeType, handle: string, side: "source" | "target"):
   return list.find((p) => p.id === handle)?.type;
 }
 
-/**
- * Two pin types may connect if they match, or either is the unresolved `any`. Each concrete
- * type connects only to its own kind — a Duration feeds only a Duration (or a generic `any` pin
- * that will resolve to Duration), never a plain number, so there is no silent coercion between
- * a dimensionless number and a span of time.
- */
-export function typesCompatible(a: ValueType | undefined, b: ValueType | undefined): boolean {
-  if (!a || !b) return false;
-  return a === b || a === "any" || b === "any";
-}
-
 /** Would adding source -> target create a cycle? True if target already reaches source. */
 export function wouldCycle(edges: Edge[], source: string, target: string): boolean {
-  const adj = new Map<string, string[]>();
-  for (const e of edges) {
-    const list = adj.get(e.source) ?? [];
-    list.push(e.target);
-    adj.set(e.source, list);
-  }
-  const seen = new Set<string>([target]);
-  const stack = [target];
-  while (stack.length) {
-    const n = stack.pop()!;
-    if (n === source) return true;
-    for (const m of adj.get(n) ?? []) {
-      if (!seen.has(m)) {
-        seen.add(m);
-        stack.push(m);
-      }
-    }
-  }
-  return false;
+  return wouldCreateCycle(edges, source, target);
 }
 
 /** A connection is valid when pin types are compatible and it would not create a cycle. */

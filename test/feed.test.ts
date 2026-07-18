@@ -32,6 +32,32 @@ describe("deploy graph validation", () => {
     if (!result.ok) expect(result.error).toContain("unknown node");
   });
 
+  it("enforces the shared typed-DAG semantics at the deployment boundary", () => {
+    const number = { id: "n", type: "const-number", title: "Number", subtitle: "", icon: "const", x: 0, y: 0, inputs: [], outputs: [{ id: "out", label: "out", type: "num", editable: true }], values: { out: 1 } };
+    const not = (id: string) => ({ id, type: "not", title: "NOT", subtitle: "", icon: "cmp", x: 0, y: 0, inputs: [{ id: "in", label: "in", type: "bool" }], outputs: [{ id: "out", label: "not", type: "bool" }] });
+
+    const mismatch = sanitizeDeployRequest({
+      nodes: [number, not("not")],
+      edges: [{ id: "e", from: { node: "n", pin: "out" }, to: { node: "not", pin: "in" } }],
+    });
+    expect(mismatch.ok).toBe(false);
+    if (!mismatch.ok) expect(mismatch.error).toContain("connects num to bool");
+
+    const cyclic = sanitizeDeployRequest({
+      nodes: [not("a"), not("b")],
+      edges: [
+        { id: "ab", from: { node: "a", pin: "out" }, to: { node: "b", pin: "in" } },
+        { id: "ba", from: { node: "b", pin: "out" }, to: { node: "a", pin: "in" } },
+      ],
+    });
+    expect(cyclic.ok).toBe(false);
+    if (!cyclic.ok) expect(cyclic.error).toContain("creates a cycle");
+
+    const unknownType = sanitizeDeployRequest({ nodes: [{ ...number, type: "not-registered" }], edges: [] });
+    expect(unknownType.ok).toBe(false);
+    if (!unknownType.ok) expect(unknownType.error).toContain("Unknown node type");
+  });
+
   it("rejects prototype-sensitive graph identifiers", () => {
     const reservedNode = sanitizeDeployRequest({
       nodes: [{ id: "__proto__", type: "const-number", title: "Number", subtitle: "", icon: "const", x: 0, y: 0, inputs: [], outputs: [] }],
@@ -105,7 +131,7 @@ describe("deploy graph validation", () => {
         "id": "n1", "type": "const-number", "title": "Number", "subtitle": "", "icon": "const", "x": 0, "y": 0,
         "config": { "safe": 1, "__proto__": { "polluted": true }, "constructor": { "prototype": { "polluted": true } } },
         "values": { "out": 7, "prototype": { "polluted": true } },
-        "inputs": [], "outputs": [{ "id": "out", "label": "out", "type": "definitely-not-a-type" }]
+        "inputs": [], "outputs": [{ "id": "out", "label": "out", "type": "num" }]
       }],
       "edges": []
     }`);
@@ -117,7 +143,7 @@ describe("deploy graph validation", () => {
     if (result.ok) {
       expect(result.graph.nodes[0]?.config).toEqual({ safe: 1 });
       expect(result.graph.nodes[0]?.values).toEqual({ out: 7 });
-      expect(result.graph.nodes[0]?.outputs[0]?.type).toBe("any");
+      expect(result.graph.nodes[0]?.outputs[0]?.type).toBe("num");
     }
   });
 });

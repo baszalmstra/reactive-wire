@@ -1,0 +1,101 @@
+import { describe, expect, it } from "vitest";
+import type { NodeData } from "../shared/node-types.js";
+import type { ViewEdge } from "../shared/engine/evaluate.js";
+import { validateExpandedGraph, validateReachableMacros } from "../shared/engine/validate-graph.js";
+
+function numberNode(id: string): NodeData {
+  return {
+    id,
+    type: "const-number",
+    title: "Number",
+    subtitle: "",
+    icon: "const",
+    x: 0,
+    y: 0,
+    inputs: [],
+    outputs: [{ id: "out", label: "out", type: "num", editable: true }],
+    values: { out: 1 },
+  };
+}
+
+function notNode(id: string): NodeData {
+  return {
+    id,
+    type: "not",
+    title: "NOT",
+    subtitle: "",
+    icon: "cmp",
+    x: 0,
+    y: 0,
+    inputs: [{ id: "in", label: "in", type: "bool" }],
+    outputs: [{ id: "out", label: "not", type: "bool" }],
+  };
+}
+
+function edge(id: string, from: string, to: string): ViewEdge {
+  return { id, from: { node: from, pin: "out" }, to: { node: to, pin: "in" } };
+}
+
+describe("shared graph semantics", () => {
+  it("accepts a canonical typed DAG", () => {
+    expect(validateExpandedGraph([notNode("a"), notNode("b")], [edge("e", "a", "b")])).toEqual({ ok: true });
+  });
+
+  it("rejects unknown node types and non-canonical static pins", () => {
+    expect(validateExpandedGraph([{ ...numberNode("n"), type: "not-registered" }], [])).toMatchObject({ ok: false });
+    const spoofed = numberNode("n");
+    spoofed.outputs[0] = { ...spoofed.outputs[0]!, type: "bool" };
+    const result = validateExpandedGraph([spoofed], []);
+    expect(result).toMatchObject({ ok: false });
+    if (!result.ok) expect(result.error.code).toBe("invalid-pin");
+  });
+
+  it("rejects missing endpoints, wrong directions, and incompatible types", () => {
+    const missing = validateExpandedGraph([numberNode("n"), notNode("not")], [
+      { id: "e", from: { node: "n", pin: "missing" }, to: { node: "not", pin: "in" } },
+    ]);
+    expect(missing).toMatchObject({ ok: false });
+    if (!missing.ok) expect(missing.error.code).toBe("invalid-edge");
+
+    const wrongDirection = validateExpandedGraph([notNode("a"), notNode("b")], [
+      { id: "e", from: { node: "a", pin: "in" }, to: { node: "b", pin: "in" } },
+    ]);
+    expect(wrongDirection).toMatchObject({ ok: false });
+
+    const mismatch = validateExpandedGraph([numberNode("n"), notNode("not")], [edge("e", "n", "not")]);
+    expect(mismatch).toMatchObject({ ok: false });
+    if (!mismatch.ok) expect(mismatch.error.code).toBe("type-mismatch");
+  });
+
+  it("rejects duplicate input wiring regardless of edge order", () => {
+    const nodes = [notNode("a"), notNode("b"), notNode("target")];
+    const edges = [edge("first", "a", "target"), edge("second", "b", "target")];
+    for (const ordered of [edges, [...edges].reverse()]) {
+      const result = validateExpandedGraph(nodes, ordered);
+      expect(result).toMatchObject({ ok: false });
+      if (!result.ok) expect(result.error.code).toBe("duplicate-input-source");
+    }
+  });
+
+  it("rejects cycles", () => {
+    const result = validateExpandedGraph(
+      [notNode("a"), notNode("b")],
+      [edge("ab", "a", "b"), edge("ba", "b", "a")],
+    );
+    expect(result).toMatchObject({ ok: false });
+    if (!result.ok) expect(result.error.code).toBe("cycle");
+  });
+
+  it("rejects unknown and recursively dependent macros before expansion", () => {
+    const placement = { ...numberNode("placement"), type: "macro", config: { macroId: "missing" } };
+    expect(validateReachableMacros([placement], {})).toMatchObject({ ok: false });
+
+    const recursivePlacement = { ...numberNode("inner"), type: "macro", config: { macroId: "loop" } };
+    const recursive = validateReachableMacros(
+      [{ ...numberNode("root"), type: "macro", config: { macroId: "loop" } }],
+      { loop: { id: "loop", name: "Loop", inputs: [], outputs: [], nodes: [recursivePlacement], edges: [], stateful: false } },
+    );
+    expect(recursive).toMatchObject({ ok: false });
+    if (!recursive.ok) expect(recursive.error.code).toBe("recursive-macro");
+  });
+});
