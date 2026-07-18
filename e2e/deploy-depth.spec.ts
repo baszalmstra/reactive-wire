@@ -48,8 +48,8 @@ async function setSinkOn(sink: Locator, on: boolean): Promise<void> {
 /** Push the current graph through the deploy guard and wait for the UI to flip to LIVE. */
 async function deployViaGuard(page: Page): Promise<void> {
   await page.locator("button.rw-deploy").click();
-  const guard = page.locator("div.fixed.inset-0.z-50");
-  await expect(guard.getByText("Deploy to your home")).toBeVisible();
+  const guard = page.getByRole("dialog", { name: "Deploy to your home" });
+  await expect(guard).toBeVisible();
   // The confirm button's label is "Deploy" for a clean graph or "Deploy anyway" when soft warnings
   // are present (a blocked graph would read "Resolve errors to deploy" and is excluded here).
   const confirm = guard.getByRole("button", { name: /^Deploy( anyway)?$/ });
@@ -169,8 +169,8 @@ test.describe.serial("Deploy depth: cross-layer against server debugState", () =
     // Baseline the server's generation, then open the guard and back out.
     const before = (await debugState(PORT)).generation;
     await page.locator("button.rw-deploy").click();
-    const guard = page.locator("div.fixed.inset-0.z-50");
-    await expect(guard.getByText("Deploy to your home")).toBeVisible();
+    const guard = page.getByRole("dialog", { name: "Deploy to your home" });
+    await expect(guard).toBeVisible();
     await guard.getByRole("button", { name: "Cancel" }).click();
     await expect(guard).toHaveCount(0);
 
@@ -188,8 +188,8 @@ test.describe.serial("Deploy depth: cross-layer against server debugState", () =
     await page.getByRole("button", { name: "Add" }).click();
 
     await page.locator("button.rw-deploy").click();
-    const guard = page.locator("div.fixed.inset-0.z-50");
-    await expect(guard.getByText("Deploy to your home")).toBeVisible();
+    const guard = page.getByRole("dialog", { name: "Deploy to your home" });
+    await expect(guard).toBeVisible();
 
     // The guard names the warning, explains warnings deploy as-is, and offers "Deploy anyway"
     // (a soft warning does not block the deploy — that button stays enabled).

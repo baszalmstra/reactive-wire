@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState, type CSSProperties, type DragEvent } from "react";
+import { useCallback, useId, useMemo, useRef, useState, type CSSProperties, type DragEvent } from "react";
 import {
   ReactFlow,
   Background,
@@ -28,6 +28,7 @@ import { MacroBoundaryPanel, type BoundaryPin } from "./MacroBoundaryPanel.js";
 import type { ValueType } from "../../../shared/theme.js";
 import { macroDefFromFlow, macroDefToFlow } from "./macro-editing.js";
 import { RWEdge, withRWEdgeData } from "./RWEdge.js";
+import { ModalDialog } from "../components/ModalDialog.js";
 
 const nodeTypes = { rw: RWNode };
 const edgeTypes = { rw: RWEdge };
@@ -55,6 +56,8 @@ export function MacroEditor({
   onSave: (def: MacroDef) => void;
   onClose: () => void;
 }) {
+  const titleId = useId();
+  const descriptionId = useId();
   const initial = useMemo(() => macroDefToFlow(def), [def]);
   const [nodes, setNodes, onNodesChange] = useNodesState<RWNodeType>(initial.nodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initial.edges);
@@ -195,19 +198,29 @@ export function MacroEditor({
   const grid = gridStyle(aesthetic);
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col bg-rw-bg text-rw-text text-[13px]" style={themeVars}>
+    <ModalDialog
+      open
+      onClose={onClose}
+      labelledBy={titleId}
+      describedBy={descriptionId}
+      closeOnBackdrop={false}
+      className="fixed inset-0 m-0 w-screen h-screen overflow-hidden"
+    >
+      <div className="h-full flex flex-col bg-rw-bg text-rw-text text-[13px]" style={themeVars}>
       <header className="h-[52px] flex-none flex items-center gap-[10px] px-[14px] bg-rw-panel border-b border-rw-line select-none">
         <span className="text-rw-accent flex">
           <Icon name="macro" size={18} />
         </span>
-        <span className="font-bold text-[13px]">Editing macro</span>
+        <h2 id={titleId} className="font-bold text-[13px]">Editing macro</h2>
         <input
           value={name}
+          aria-label="Macro name"
+          data-dialog-initial
           onChange={(e) => setName(e.target.value)}
           placeholder="Macro name"
           className="ml-1 bg-rw-panel2 border border-rw-line rounded-md px-2.5 h-[30px] text-[12px] font-mono outline-none focus:border-rw-accent"
         />
-        <span className="text-[11px] text-rw-faint">
+        <span id={descriptionId} className="text-[11px] text-rw-faint">
           Wire the Inputs / Outputs boundary nodes to define this macro's typed interface.
         </span>
         <div className="flex-1" />
@@ -276,6 +289,7 @@ export function MacroEditor({
           onAddOutput={() => addBoundary(MACRO_OUT)}
         />
       </div>
-    </div>
+      </div>
+    </ModalDialog>
   );
 }

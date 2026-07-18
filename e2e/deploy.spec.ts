@@ -38,8 +38,8 @@ test.describe.serial("Deploy path against the mock server", () => {
 
     // Open the deploy guard from the toolbar and confirm.
     await page.locator("button.rw-deploy").click();
-    const guard = page.locator("div.fixed.inset-0.z-50");
-    await expect(guard.getByText("Deploy to your home")).toBeVisible();
+    const guard = page.getByRole("dialog", { name: "Deploy to your home" });
+    await expect(guard).toBeVisible();
     const confirm = guard.getByRole("button").last();
     await expect(confirm).toBeEnabled();
     await confirm.click();

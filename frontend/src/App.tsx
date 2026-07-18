@@ -657,9 +657,12 @@ export function App() {
     clientId,
   });
 
-  // Keyboard shortcuts: undo/redo and add-comment, ignored while typing in a field.
+  const modalOpen = deployOpen || pending !== null || editingMacro !== null;
+
+  // Keyboard shortcuts: undo/redo and add-comment, ignored while typing or while a modal owns focus.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (modalOpen) return;
       const el = e.target as HTMLElement | null;
       const tag = el?.tagName?.toLowerCase();
       // Never steal keys while typing into a field (a node value editor, the macro name, a comment
@@ -682,7 +685,7 @@ export function App() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [undo, redo, addComment]);
+  }, [undo, redo, addComment, modalOpen]);
 
   const themeVars = buildThemeVars(aesthetic, mode) as CSSProperties;
   const grid = gridStyle(aesthetic);

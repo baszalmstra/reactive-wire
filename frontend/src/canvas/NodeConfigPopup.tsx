@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 import type { RequiredConfig } from "./node-templates.js";
 import type { EntityMap } from "../../../shared/entities.js";
 import { EntityPicker } from "./EntityPicker.js";
+import { ModalDialog } from "../components/ModalDialog.js";
 
 /**
  * A modal to fill a node's required config right after it's created. Switches on
@@ -19,20 +20,25 @@ export function NodeConfigPopup({
   onCancel: () => void;
 }) {
   const [value, setValue] = useState("");
+  const titleId = useId();
+  const descriptionId = useId();
   const submit = () => {
     if (value) onConfirm(value);
   };
 
   return (
-    <div
-      className="fixed inset-0 z-[80] bg-[rgba(6,7,11,.55)] flex items-center justify-center"
-      onMouseDown={onCancel}
+    <ModalDialog
+      open
+      onClose={onCancel}
+      labelledBy={titleId}
+      describedBy={descriptionId}
+      className="w-[420px] max-w-[92vw] rounded-[14px] shadow-rw overflow-visible"
     >
-      <div
-        className="w-[420px] max-w-[92vw] bg-rw-panel border border-rw-line rounded-[14px] shadow-rw overflow-visible"
-        onMouseDown={(e) => e.stopPropagation()}
-      >
-        <div className="px-[18px] pt-4 pb-1 font-bold text-[15px]">Choose {requires.label.toLowerCase()}</div>
+      <div className="bg-rw-panel border border-rw-line rounded-[14px] overflow-visible">
+        <h2 id={titleId} className="px-[18px] pt-4 pb-1 font-bold text-[15px]">Choose {requires.label.toLowerCase()}</h2>
+        <p id={descriptionId} className="px-[18px] pt-1 text-[11.5px] text-rw-dim">
+          Select the required value before adding this node.
+        </p>
         <div className="px-[18px] pt-2 pb-2">
           {requires.kind === "entity" && (
             <EntityPicker value={value} onChange={setValue} entities={entities} domains={requires.domains} autoFocus onSubmit={submit} />
@@ -54,6 +60,6 @@ export function NodeConfigPopup({
           </button>
         </div>
       </div>
-    </div>
+    </ModalDialog>
   );
 }

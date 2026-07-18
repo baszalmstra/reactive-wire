@@ -1,5 +1,7 @@
+import { useId } from "react";
 import { cn } from "../cn.js";
 import { problemCounts, type Problem } from "../canvas/problems.js";
+import { ModalDialog } from "./ModalDialog.js";
 
 /**
  * A confirmation modal shown before a deploy. Hard errors block the deploy outright; soft
@@ -18,29 +20,34 @@ export function DeployGuard({
   onCancel: () => void;
   onConfirm: () => void;
 }) {
-  if (!open) return null;
+  const titleId = useId();
+  const summaryId = useId();
   const { errors, warns } = problemCounts(problems);
   const blocked = errors > 0;
   const ordered = [...problems].sort((a, b) => (a.severity === b.severity ? 0 : a.severity === "error" ? -1 : 1));
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45" onMouseDown={onCancel}>
-      <div
-        className="w-[460px] max-w-[92vw] max-h-[80vh] flex flex-col rounded-2xl border border-rw-line bg-rw-panel shadow-rw text-rw-text"
-        onMouseDown={(e) => e.stopPropagation()}
-      >
+    <ModalDialog
+      open={open}
+      onClose={onCancel}
+      labelledBy={titleId}
+      describedBy={summaryId}
+      className="w-[460px] max-w-[92vw] max-h-[80vh] rounded-2xl shadow-rw"
+    >
+      <div className="max-h-[80vh] flex flex-col rounded-2xl border border-rw-line bg-rw-panel text-rw-text overflow-hidden">
         <div className="flex items-center gap-2 px-4 h-12 border-b border-rw-line-soft shrink-0">
-          <span className="font-bold text-[13px]">Deploy to your home</span>
+          <h2 id={titleId} className="font-bold text-[13px]">Deploy to your home</h2>
           <div className="flex-1" />
           <button
             onClick={onCancel}
+            aria-label="Close deploy dialog"
             className="w-6 h-6 inline-flex items-center justify-center rounded-md text-rw-dim hover:bg-rw-panel2 hover:text-rw-text cursor-pointer"
           >
             ✕
           </button>
         </div>
 
-        <div className="px-4 pt-3 text-[12px] text-rw-dim">{summary}</div>
+        <div id={summaryId} className="px-4 pt-3 text-[12px] text-rw-dim">{summary}</div>
 
         <div className="px-4 pt-3">
           {blocked ? (
@@ -87,6 +94,7 @@ export function DeployGuard({
         <div className="flex items-center justify-end gap-2 px-4 py-3 mt-3 border-t border-rw-line-soft shrink-0">
           <button
             onClick={onCancel}
+            data-dialog-initial
             className="h-8 px-3.5 rounded-lg text-[12px] border border-rw-line text-rw-dim hover:bg-rw-panel2 hover:text-rw-text cursor-pointer"
           >
             Cancel
@@ -100,6 +108,6 @@ export function DeployGuard({
           </button>
         </div>
       </div>
-    </div>
+    </ModalDialog>
   );
 }

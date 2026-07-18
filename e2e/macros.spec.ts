@@ -93,8 +93,8 @@ test.describe.serial("Macros and grouping against the mock server", () => {
 
     // Double-clicking a placement opens its definition canvas.
     await placements(page, "Macro 1").first().locator(".rw-drag").dblclick();
-    const editor = page.locator("div.fixed.inset-0.z-50");
-    await expect(editor.getByText("Editing macro")).toBeVisible();
+    const editor = page.getByRole("dialog", { name: "Editing macro" });
+    await expect(editor).toBeVisible();
 
     // The grouped inner Sum lives inside the definition, flanked by the Input / Output boundary nodes.
     // (Match by the "Math" subtitle: the Output boundary's "sum" pin label would match "SUM" too.)
@@ -118,8 +118,8 @@ test.describe.serial("Macros and grouping against the mock server", () => {
 
     // Edit the definition: add an output pin to its interface and rename it.
     await placement.first().locator(".rw-drag").dblclick();
-    const editor = page.locator("div.fixed.inset-0.z-50");
-    await expect(editor.getByText("Editing macro")).toBeVisible();
+    const editor = page.getByRole("dialog", { name: "Editing macro" });
+    await expect(editor).toBeVisible();
     await editor.getByRole("button", { name: "+ add output" }).click();
     await editor.locator('input[placeholder="Macro name"]').fill("Doubler");
     await editor.getByRole("button", { name: "Save macro" }).click();
