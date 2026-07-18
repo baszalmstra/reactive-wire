@@ -12,8 +12,12 @@ import { expandMacros } from "./expand.js";
 import { isMacroInstance, type MacroMap } from "../macros.js";
 import { REGISTRY } from "./nodes/index.js";
 import type { EvalCtx, NodeDef, SinkCtx } from "./node-def.js";
+import { copyRecord, createRecord, ownValue, setOwn } from "../record.js";
 import {
+  ensureMemoryValue,
   inputHelperType,
+  memoryValue,
+  setMemoryValue,
   statePolicy,
   type Memory,
   type NodeMemory,
@@ -88,7 +92,7 @@ function sinkCommandStatus(n: NodeData, results: EvalResults): SinkAction | null
 
 /** An input pin's ok value, or null if it is unset / non-ok. Used to read a desired dimension. */
 function okInput(results: EvalResults, nodeId: string, pinId: string): RWValue | null {
-  const v = results.inputs[`${nodeId}:${pinId}`];
+  const v = ownValue(results.inputs, `${nodeId}:${pinId}`);
   return v && v.status === "ok" ? v : null;
 }
 
@@ -107,7 +111,7 @@ function buildSinkCall(n: NodeData, def: NodeDef, results: EvalResults, entities
     cfg: n.config ?? {},
     okInput: (pinId) => okInput(results, n.id, pinId),
     entities,
-    mem: () => (memory[n.id] = memory[n.id] ?? {}),
+    mem: () => ensureMemoryValue(memory, n.id),
   };
   return def.evalSink(ctx);
 }
@@ -146,21 +150,22 @@ export function evaluate(
   if (nodes.some((n) => isMacroInstance(n.type))) {
     return evaluateWithMacros(nodes, edges, entities, memory, now, sources, macros);
   }
-  const byId = Object.fromEntries(nodes.map((n) => [n.id, n]));
-  const incoming: Record<string, { node: string; pin: string }> = {};
+  const byId = createRecord<NodeData>();
+  for (const n of nodes) setOwn(byId, n.id, n);
+  const incoming = createRecord<{ node: string; pin: string }>();
   edges.forEach((e) => {
-    incoming[`${e.to.node}:${e.to.pin}`] = e.from;
+    setOwn(incoming, `${e.to.node}:${e.to.pin}`, e.from);
   });
-  const outCache: Record<string, RWValue> = {};
-  const inCache: Record<string, RWValue | null> = {};
-  const visiting: Record<string, boolean> = {};
+  const outCache = createRecord<RWValue>();
+  const inCache = createRecord<RWValue | null>();
+  const visiting = createRecord<boolean>();
 
   function outVal(nodeId: string, pinId: string): RWValue {
     const key = `${nodeId}:${pinId}`;
     if (key in outCache) return outCache[key]!;
     if (visiting[key]) return ER("any", "cycle");
     visiting[key] = true;
-    const n = byId[nodeId];
+    const n = ownValue(byId, nodeId);
     const v = n ? computeOut(n, pinId) : UN("any");
     visiting[key] = false;
     outCache[key] = v;
@@ -221,7 +226,7 @@ export function evaluate(
   // comes from the node's config, except under "reseed-from-world" where it is read from the
   // configured entity's current state so the node boots aligned with the real world.
   function seedBool(n: NodeData, cfg: Record<string, unknown>): NodeMemory {
-    let mem = memory[n.id];
+    let mem = memoryValue(memory, n.id);
     if (mem && mem.seeded) return mem;
     let initial = !!cfg.initial;
     // Under reseed-from-world, defer marking the slot seeded until the configured entity is
@@ -237,8 +242,8 @@ export function evaluate(
     // While not yet seeded the slot tracks the (still-config) fallback; once the world value
     // arrives it overrides, so the state isn't frozen on a pre-seed fallback.
     const state = seeded || mem === undefined ? initial : mem.state;
-    mem = memory[n.id] = { state, prev: mem?.prev ?? false, seeded };
-    return mem;
+    mem = { state, prev: mem?.prev ?? false, seeded };
+    return setMemoryValue(memory, n.id, mem);
   }
 
   // Resolve one output pin by dispatching to its node definition with a context that carries
@@ -257,7 +262,7 @@ export function evaluate(
       resolveType: (declared, fallbackPins) => resolveType(n, declared, fallbackPins),
       resolveGroupType: (fallback) => resolveGroupType(n, fallback),
       seedBool: () => seedBool(n, cfg),
-      mem: () => (memory[n.id] = memory[n.id] ?? {}),
+      mem: () => ensureMemoryValue(memory, n.id),
       entities,
       now,
       sources,
@@ -265,9 +270,9 @@ export function evaluate(
     return def.eval(ctx);
   }
 
-  const outputs: Record<string, RWValue> = {};
-  const inputs: Record<string, RWValue | null> = {};
-  const connected: Record<string, boolean> = {};
+  const outputs = createRecord<RWValue>();
+  const inputs = createRecord<RWValue | null>();
+  const connected = createRecord<boolean>();
   nodes.forEach((n) => {
     n.outputs.forEach((p) => { outputs[`${n.id}:${p.id}`] = outVal(n.id, p.id); });
     n.inputs.forEach((p) => {
@@ -276,7 +281,7 @@ export function evaluate(
     });
   });
 
-  const health: EvalResults["health"] = {};
+  const health = createRecord<"ok" | "warn" | "error">();
   nodes.forEach((n) => {
     let h: "ok" | "warn" | "error" = "ok";
     n.outputs.forEach((p) => {
@@ -292,7 +297,14 @@ export function evaluate(
     health[n.id] = h;
   });
 
-  const results: EvalResults = { outputs, inputs, health, actions: {}, connected, sinks: {} };
+  const results: EvalResults = {
+    outputs,
+    inputs,
+    health,
+    actions: createRecord<SinkAction>(),
+    connected,
+    sinks: createRecord<ServiceCall | null>(),
+  };
   // Compute each sink's desired call once (advancing edge-triggered sinks' memory exactly
   // once), then derive its preview note from that same call so display and actuation agree.
   nodes.forEach((n) => {
@@ -328,12 +340,12 @@ function evaluateWithMacros(
   const flat = expandMacros(nodes, edges, macros);
   const inner = evaluate(flat.nodes, flat.edges, entities, memory, now, sources, macros);
 
-  const outputs: Record<string, RWValue> = { ...inner.outputs };
-  const inputs: Record<string, RWValue | null> = { ...inner.inputs };
-  const connected: Record<string, boolean> = { ...inner.connected };
-  const health: EvalResults["health"] = { ...inner.health };
-  const actions = { ...inner.actions };
-  const sinks = { ...inner.sinks };
+  const outputs = copyRecord(inner.outputs);
+  const inputs = copyRecord(inner.inputs);
+  const connected = copyRecord(inner.connected);
+  const health = copyRecord(inner.health);
+  const actions = copyRecord(inner.actions);
+  const sinks = copyRecord(inner.sinks);
 
   // Whether an input pin has an incoming edge, taken from the original graph (the placement's
   // own wiring), since the flat graph routes inputs through passthrough nodes.

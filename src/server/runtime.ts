@@ -1,4 +1,5 @@
 import { evaluate, isSink, isTransientSink, sinkCalls, type Memory, type ViewEdge } from "../../shared/engine/evaluate.js";
+import { createMemory } from "../../shared/engine/engine-support.js";
 import { expandMacros } from "../../shared/engine/expand.js";
 import type { MacroMap } from "../../shared/macros.js";
 import type { Health, NodeData } from "../../shared/node-types.js";
@@ -152,7 +153,7 @@ export interface DurableMemory {
  */
 export class Deployer {
   private graph: { nodes: NodeData[]; edges: ViewEdge[] } | null = null;
-  private mem: Memory = {};
+  private mem: Memory = createMemory();
   private actuate = false;
   private generation = 0;
   private readonly inFlight = new Map<string, string>();
@@ -197,7 +198,7 @@ export class Deployer {
     this.lastTriggeredCall.clear();
     this.graph = { nodes: flat.nodes, edges: flat.edges };
     this.actuate = actuate;
-    this.mem = {};
+    this.mem = createMemory();
     // Durable slots are restored before the first run so an accumulated fold/scan resumes from its
     // persisted history rather than reseeding; stale slots for departed nodes are dropped here.
     this.durable?.restore(flat.nodes, this.mem);

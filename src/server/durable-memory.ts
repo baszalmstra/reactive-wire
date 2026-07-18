@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { statePolicy, type Memory, type NodeMemory } from "../../shared/engine/engine-support.js";
+import { setMemoryValue, statePolicy, type Memory, type NodeMemory } from "../../shared/engine/engine-support.js";
+import { copyRecord, createRecord } from "../../shared/record.js";
 import type { NodeData } from "../../shared/node-types.js";
 import type { DurableMemory } from "./runtime.js";
 import { log } from "./log.js";
@@ -31,7 +32,7 @@ export interface DurableMemoryStoreOptions {
  */
 export class DurableMemoryStore implements DurableMemory {
   readonly filePath: string;
-  private slots: Record<string, StoredSlot> = {};
+  private slots = createRecord<StoredSlot>();
   private readonly debounceMs: number;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private lastWritten = "";
@@ -45,11 +46,11 @@ export class DurableMemoryStore implements DurableMemory {
   /** Restore durable slots into `mem` and forget slots that no longer belong to the deployed graph. */
   restore(nodes: NodeData[], mem: Memory): void {
     const durable = durableTypes(nodes);
-    const kept: Record<string, StoredSlot> = {};
+    const kept = createRecord<StoredSlot>();
     for (const [id, type] of durable) {
       const slot = this.slots[id];
       if (slot && slot.type === type) {
-        mem[id] = structuredClone(slot.mem);
+        setMemoryValue(mem, id, structuredClone(slot.mem));
         kept[id] = slot;
       }
     }
@@ -60,7 +61,7 @@ export class DurableMemoryStore implements DurableMemory {
   /** Capture the current durable slots from `mem` after a tick, scheduling a debounced write on change. */
   capture(nodes: NodeData[], mem: Memory): void {
     const durable = durableTypes(nodes);
-    const next: Record<string, StoredSlot> = {};
+    const next = createRecord<StoredSlot>();
     for (const [id, type] of durable) {
       const slot = mem[id];
       if (slot === undefined) continue;
@@ -100,12 +101,12 @@ export class DurableMemoryStore implements DurableMemory {
           log("warn", "durable-memory", "ignoring durable memory from an incompatible version", { version: parsed.version });
           return;
         }
-        this.slots = parsed.slots;
+        this.slots = copyRecord(parsed.slots);
         this.lastWritten = JSON.stringify(this.slots);
       }
     } catch {
       // A corrupt or unreadable durable file must not stop the runtime; start from an empty set.
-      this.slots = {};
+      this.slots = createRecord();
     }
   }
 

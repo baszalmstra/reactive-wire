@@ -1,4 +1,5 @@
 import type { NodeDef } from "../node-def.js";
+import { createRecord, setOwn } from "../../record.js";
 import { entity } from "./entity.js";
 import { fetch } from "./fetch.js";
 import { compare } from "./compare.js";
@@ -71,6 +72,8 @@ const INTERNAL_DEFS: NodeDef[] = [passthrough, macroIn, macroOut];
 export const paletteDefs: readonly NodeDef[] = PALETTE_DEFS;
 
 /** Every definition the engine can dispatch over, keyed by node type. */
-export const REGISTRY: Record<string, NodeDef> = Object.fromEntries(
-  [...PALETTE_DEFS, ...INTERNAL_DEFS].map((d) => [d.type, d]),
-);
+export const REGISTRY: Record<string, NodeDef> = (() => {
+  const registry = createRecord<NodeDef>();
+  for (const def of [...PALETTE_DEFS, ...INTERNAL_DEFS]) setOwn(registry, def.type, def);
+  return registry;
+})();

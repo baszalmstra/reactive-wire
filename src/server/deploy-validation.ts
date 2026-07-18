@@ -2,6 +2,7 @@ import type { ViewEdge } from "../../shared/engine/evaluate.js";
 import type { MacroDef, MacroMap } from "../../shared/macros.js";
 import type { NodeData, PinDef } from "../../shared/node-types.js";
 import type { ValueType } from "../../shared/theme.js";
+import { isSafeIdentifier } from "../../shared/record.js";
 
 export interface DeployRequest {
   nodes: NodeData[];
@@ -31,6 +32,13 @@ function isRecord(v: unknown): v is RawRecord {
 function asString(v: unknown, fallback = "", max = 240): string {
   const s = typeof v === "string" ? v : fallback;
   return s.slice(0, max);
+}
+
+function asIdentifier(v: unknown, label: string, fallback = "", max = 240): string {
+  const id = asString(v, fallback, max).trim();
+  if (!id) throw new Error(`${label} must be a non-empty string`);
+  if (!isSafeIdentifier(id)) throw new Error(`${label} uses a reserved identifier`);
+  return id;
 }
 
 function asNumber(v: unknown, fallback = 0): number {
@@ -63,8 +71,7 @@ function sanitizePins(raw: unknown, label: string): PinDef[] {
   if (raw.length > MAX_PINS) throw new Error(`${label} has too many pins`);
   return raw.map((p, i) => {
     if (!isRecord(p)) throw new Error(`${label}[${i}] must be an object`);
-    const id = asString(p.id).trim();
-    if (!id) throw new Error(`${label}[${i}].id must be a non-empty string`);
+    const id = asIdentifier(p.id, `${label}[${i}].id`);
     const rawType = asString(p.type, "any");
     const type = VALUE_TYPES.has(rawType as ValueType) ? (rawType as ValueType) : "any";
     const pin: PinDef = { id, label: asString(p.label, id), type };
@@ -79,10 +86,8 @@ function sanitizePins(raw: unknown, label: string): PinDef[] {
 
 function sanitizeNode(raw: unknown, index: number): NodeData {
   if (!isRecord(raw)) throw new Error(`nodes[${index}] must be an object`);
-  const id = asString(raw.id).trim();
-  const type = asString(raw.type).trim();
-  if (!id) throw new Error(`nodes[${index}].id must be a non-empty string`);
-  if (!type) throw new Error(`nodes[${index}].type must be a non-empty string`);
+  const id = asIdentifier(raw.id, `nodes[${index}].id`);
+  const type = asIdentifier(raw.type, `nodes[${index}].type`);
   const node: NodeData = {
     id,
     type,
@@ -100,7 +105,11 @@ function sanitizeNode(raw: unknown, index: number): NodeData {
   if (Number.isFinite(Number(raw.w)) && Number(raw.w) > 0) node.w = asNumber(raw.w);
   if (Number.isFinite(Number(raw.bodyExtra)) && Number(raw.bodyExtra) >= 0) node.bodyExtra = asNumber(raw.bodyExtra);
   if (raw.widget === "color" || raw.widget === "sink") node.widget = raw.widget;
-  if (Array.isArray(raw.typeGroup)) node.typeGroup = raw.typeGroup.map((x) => asString(x).trim()).filter(Boolean).slice(0, MAX_PINS);
+  if (Array.isArray(raw.typeGroup)) {
+    node.typeGroup = raw.typeGroup
+      .slice(0, MAX_PINS)
+      .map((x, i) => asIdentifier(x, `nodes[${index}].typeGroup[${i}]`));
+  }
   return node;
 }
 
@@ -110,14 +119,13 @@ function sanitizeEdges(raw: unknown, nodeIds: Set<string>, label = "edges"): Vie
   if (raw.length > MAX_EDGES) throw new Error(`${label} has too many entries`);
   return raw.map((e, i) => {
     if (!isRecord(e) || !isRecord(e.from) || !isRecord(e.to)) throw new Error(`${label}[${i}] must have from/to objects`);
-    const fromNode = asString(e.from.node).trim();
-    const fromPin = asString(e.from.pin).trim();
-    const toNode = asString(e.to.node).trim();
-    const toPin = asString(e.to.pin).trim();
-    if (!fromNode || !fromPin || !toNode || !toPin) throw new Error(`${label}[${i}] endpoints must name node and pin`);
+    const fromNode = asIdentifier(e.from.node, `${label}[${i}].from.node`);
+    const fromPin = asIdentifier(e.from.pin, `${label}[${i}].from.pin`);
+    const toNode = asIdentifier(e.to.node, `${label}[${i}].to.node`);
+    const toPin = asIdentifier(e.to.pin, `${label}[${i}].to.pin`);
     if (!nodeIds.has(fromNode) || !nodeIds.has(toNode)) throw new Error(`${label}[${i}] references an unknown node`);
     return {
-      id: asString(e.id, `${fromNode}:${fromPin}->${toNode}:${toPin}`),
+      id: asIdentifier(e.id, `${label}[${i}].id`, `${fromNode}:${fromPin}->${toNode}:${toPin}`),
       from: { node: fromNode, pin: fromPin },
       to: { node: toNode, pin: toPin },
     };
@@ -139,8 +147,7 @@ function sanitizeGraph(raw: RawRecord, label = "graph"): { nodes: NodeData[]; ed
 
 function sanitizeMacro(key: string, raw: unknown): MacroDef {
   if (!isRecord(raw)) throw new Error(`macros.${key} must be an object`);
-  const id = asString(raw.id, key).trim();
-  if (!id) throw new Error(`macros.${key}.id must be a non-empty string`);
+  const id = asIdentifier(raw.id, `macros.${key}.id`, key);
   const { nodes, edges } = sanitizeGraph(raw, `macros.${key}`);
   return {
     id,
@@ -164,7 +171,8 @@ export function sanitizeDeployRequest(raw: unknown): DeployValidation {
       if (entries.length > MAX_MACROS) throw new Error("graph.macros has too many entries");
       macros = {};
       for (const [key, value] of entries) {
-        if (!SAFE_KEY.test(key)) continue;
+        asIdentifier(key, `macros.${key} key`);
+        if (!SAFE_KEY.test(key)) throw new Error(`macros.${key} uses an invalid key`);
         const macro = sanitizeMacro(key, value);
         macros[macro.id] = macro;
       }

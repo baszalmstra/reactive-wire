@@ -43,6 +43,42 @@ function withNodes(...nodes: CollabNode[]): EditorDocumentSnapshot {
 }
 
 describe("collaborative editor document model", () => {
+  it("drops prototype-sensitive flow, node, edge, and macro identifiers", () => {
+    const snapshot = sanitizeEditorDocumentSnapshot({
+      version: 1,
+      activeFlowId: "__proto__",
+      flows: [
+        { id: "__proto__", name: "Bad", nodes: [], edges: [] },
+        {
+          id: "safe",
+          name: "Safe",
+          nodes: [node("constructor", 0), node("ok", 1)],
+          edges: [{ id: "prototype", source: "ok", target: "ok" }],
+        },
+      ],
+      macros: {
+        safe: { id: "__proto__", name: "Bad", inputs: [], outputs: [], nodes: [], edges: [], stateful: false },
+        badNode: {
+          id: "badNode", name: "Bad node", inputs: [], outputs: [], stateful: false,
+          nodes: [{ id: "constructor", type: "const-number", title: "Number", subtitle: "", icon: "const", x: 0, y: 0, inputs: [], outputs: [] }], edges: [],
+        },
+        badPin: { id: "badPin", name: "Bad pin", inputs: [{ id: "prototype", label: "in", type: "num" }], outputs: [], nodes: [], edges: [], stateful: false },
+        badEdge: {
+          id: "badEdge", name: "Bad edge", inputs: [], outputs: [], nodes: [], stateful: false,
+          edges: [{ id: "edge", from: { node: "a", pin: "__proto__" }, to: { node: "b", pin: "in" } }],
+        },
+      },
+      settings: { autoDeploy: false, deployedFlowIds: ["__proto__", "safe"] },
+    });
+
+    expect(snapshot.flows.map((flow) => flow.id)).toEqual(["safe"]);
+    expect(snapshot.activeFlowId).toBe("safe");
+    expect(snapshot.flows[0]!.nodes.map((item) => item.id)).toEqual(["ok"]);
+    expect(snapshot.flows[0]!.edges).toEqual([]);
+    expect(snapshot.macros).toEqual({});
+    expect(snapshot.settings.deployedFlowIds).toEqual(["safe"]);
+  });
+
   it("drops dangling edges when sanitizing collaborative snapshots", () => {
     const snapshot = sanitizeEditorDocumentSnapshot({
       version: 1,

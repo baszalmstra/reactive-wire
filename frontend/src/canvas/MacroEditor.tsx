@@ -13,6 +13,7 @@ import {
 } from "@xyflow/react";
 import { TYPE_VAR, gridStyle, type Aesthetic } from "../../../shared/theme.js";
 import { evaluate, type ViewEdge } from "../../../shared/engine/evaluate.js";
+import { createMemory } from "../../../shared/engine/engine-support.js";
 import type { NodeData } from "../../../shared/node-types.js";
 import { RWNode } from "./RWNode.js";
 import { Palette } from "./Palette.js";
@@ -62,7 +63,7 @@ export function MacroEditor({
   const idc = useRef(0);
 
   // A no-side-effect memory map: the definition preview shows shapes, not persisted runtime state.
-  const memory = useRef({});
+  const memory = useRef(createMemory());
   const viewEdges: ViewEdge[] = edges.map((e) => ({
     id: e.id,
     from: { node: e.source, pin: e.sourceHandle ?? "" },

@@ -16,6 +16,8 @@ import {
 import { buildThemeVars, gridStyle, TYPE_VAR, type Aesthetic, type Mode } from "../../shared/theme.js";
 import { cn } from "./cn.js";
 import { evaluate, type Memory, type ViewEdge } from "../../shared/engine/evaluate.js";
+import { createMemory } from "../../shared/engine/engine-support.js";
+import { createRecord } from "../../shared/record.js";
 import { combineFlowGraphs, type RuntimeFlowGraph } from "../../shared/engine/flow-graphs.js";
 import { simulate } from "./example/sim.js";
 import { nodeGeom, type NodeData } from "../../shared/node-types.js";
@@ -54,7 +56,7 @@ import { Icon } from "./components/Icon.js";
 import { type EditorNode } from "./canvas/flows.js";
 import { useValueHistory } from "./canvas/use-value-history.js";
 import { syncMacroInstances } from "./canvas/macro-editing.js";
-import type { EvalResults, SinkAction } from "../../shared/results.js";
+import { emptyResults as createEmptyResults, type EvalResults, type SinkAction } from "../../shared/results.js";
 import { useUndoRedo } from "./state/use-undo-redo.js";
 import { useFlows } from "./state/use-flows.js";
 import { useCollabDocument } from "./state/use-collab-document.js";
@@ -81,8 +83,6 @@ function staleResults(r: EvalResults): EvalResults {
   };
   return { ...r, outputs: stale(r.outputs) as EvalResults["outputs"], inputs: stale(r.inputs) };
 }
-
-const emptyResults = (): EvalResults => ({ outputs: {}, inputs: {}, health: {}, actions: {}, connected: {}, sinks: {} });
 
 type SinkTriggerRecord = {
   /** The call currently desired by this sink, cleared once the sink holds. */
@@ -175,7 +175,7 @@ export function App() {
   // Stateful-node memory is kept per flow so identical node ids in different flows never share state.
   // It is advanced from a committed effect, not during React render, so StrictMode/aborted
   // renders cannot consume edge pulses or toggle transitions.
-  const memories = useRef<Record<string, Memory>>({});
+  const memories = useRef<Record<string, Memory>>(createRecord());
 
   const { canUndo, canRedo, pushHistory, undo, redo, onBeforeDelete, setPast, setFuture } = useUndoRedo({
     nodesRef,
@@ -258,7 +258,7 @@ export function App() {
     to: { node: e.target, pin: e.targetHandle ?? "" },
   })), [edges]);
   const nodeDefs = useMemo(() => rwNodes.map((n) => n.data.def), [rwNodes]);
-  const [liveResults, setLiveResults] = useState<EvalResults>(() => emptyResults());
+  const [liveResults, setLiveResults] = useState<EvalResults>(() => createEmptyResults());
   const sinkTriggerRecords = useRef<Record<string, SinkTriggerRecord>>({});
   const previewCommit = useRef<{
     activeFlowId: string;
@@ -283,7 +283,7 @@ export function App() {
     }
     if (previous && previous.activeFlowId !== activeFlowId) sinkTriggerRecords.current = {};
     previewCommit.current = { activeFlowId, nodeDefs, viewEdges, entities, now, macros: macroLib.macros };
-    const flowMemory = (memories.current[activeFlowId] ??= {});
+    const flowMemory = (memories.current[activeFlowId] ??= createMemory());
     const evaluated = evaluate(nodeDefs, viewEdges, entities, flowMemory, now, {}, macroLib.macros);
     setLiveResults(withSinkTriggerTimes(evaluated, sinkTriggerRecords.current, now));
   }, [activeFlowId, nodeDefs, viewEdges, entities, now, macroLib.macros]);

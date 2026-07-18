@@ -1,5 +1,6 @@
 import type { NodeData, PinDef } from "./node-types.js";
 import type { ViewEdge } from "./engine/evaluate.js";
+import { ownValue } from "./record.js";
 
 /**
  * A macro is a reusable subgraph with a typed boundary. Its inner graph is plain nodes and
@@ -56,7 +57,7 @@ export function macroHasMemory(def: MacroDef, macros: MacroMap, seen: Set<string
   for (const n of def.nodes) {
     if (n.stateful) return true;
     if (isMacroInstance(n.type)) {
-      const inner = macros[String(n.config?.macroId ?? "")];
+      const inner = ownValue(macros, String(n.config?.macroId ?? ""));
       if (inner && macroHasMemory(inner, macros, seen)) return true;
     }
   }

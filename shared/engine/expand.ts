@@ -1,6 +1,7 @@
 import type { NodeData } from "../node-types.js";
 import type { ViewEdge } from "./evaluate.js";
 import { MACRO_IN, MACRO_OUT, isMacroInstance, type MacroMap } from "../macros.js";
+import { createRecord, ownValue } from "../record.js";
 
 /**
  * The separator between an instance path and an inner node id in an expanded graph. Inner ids
@@ -65,7 +66,7 @@ interface BoundaryContext {
 export function expandMacros(nodes: NodeData[], edges: ViewEdge[], macros: MacroMap): ExpandResult {
   const outNodes: NodeData[] = [];
   const outEdges: ViewEdge[] = [];
-  const instances: Record<string, InstanceBinding> = {};
+  const instances = createRecord<InstanceBinding>();
   expandInto(nodes, edges, macros, "", new Set(), outNodes, outEdges, instances, null);
   return { nodes: outNodes, edges: outEdges, instances };
 }
@@ -99,12 +100,12 @@ function expandInto(
   // definition's boundary pins map to expanded pins so sibling edges can be rerouted through it.
   const bindings = new Map<string, InstanceBinding>();
   for (const inst of macroNodes) {
-    const def = macros[String(inst.config?.macroId ?? "")];
+    const def = ownValue(macros, String(inst.config?.macroId ?? ""));
     const instPath = local(inst.id);
     if (!def || active.has(def.id)) {
       // Unknown macro or a self-reference: leave a binding with no internal pins so external
       // wires resolve to nothing (the placement's outputs read as unavailable) rather than crash.
-      bindings.set(inst.id, { prefix: instPath, outputs: {}, inputs: {} });
+      bindings.set(inst.id, { prefix: instPath, outputs: createRecord(), inputs: createRecord() });
       continue;
     }
     const binding = expandInstance(def, inst, instPath, macros, active, outNodes, outEdges, instances);
@@ -200,14 +201,14 @@ function expandInstance(
   const boundaryIn = def.nodes.filter((n) => n.type === MACRO_IN);
   const boundaryOut = def.nodes.filter((n) => n.type === MACRO_OUT);
 
-  const binding: InstanceBinding = { prefix: instPath, outputs: {}, inputs: {} };
+  const binding: InstanceBinding = { prefix: instPath, outputs: createRecord(), inputs: createRecord() };
 
   // A macro-in node has one output pin per macro input. Each is realized as a passthrough node:
   // the external wire feeding the macro input targets the passthrough's input, and every inner
   // consumer reads from its output, so one source fans out unchanged. An unwired macro input
   // falls back to the literal the placement set on that pin, exactly like a primitive node's
   // editable default — so a literal supplied on a placement flows into its subgraph.
-  const passOut: Record<string, { node: string; pin: string }> = {};
+  const passOut = createRecord<{ node: string; pin: string }>();
   for (const b of boundaryIn) {
     for (const pin of b.outputs) {
       const passId = joinPath(instPath, `in${PATH_SEP}${b.id}${PATH_SEP}${pin.id}`);

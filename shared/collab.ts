@@ -1,5 +1,6 @@
 import * as Y from "yjs";
 import type { MacroMap } from "./macros.js";
+import { isSafeIdentifier } from "./record.js";
 
 export interface CollabEdge {
   id: string;
@@ -87,6 +88,11 @@ function safeString(v: unknown, fallback = "", max = 240): string {
   return (typeof v === "string" ? v : fallback).slice(0, max);
 }
 
+function safeIdentifier(v: unknown, fallback = "", max = 240): string {
+  const id = safeString(v, fallback, max).trim();
+  return isSafeIdentifier(id) ? id : "";
+}
+
 function safeJson<T = unknown>(value: T, depth = 0): unknown {
   if (value === undefined) return null;
   if (value === null || typeof value === "string" || typeof value === "number" || typeof value === "boolean") return value;
@@ -109,7 +115,7 @@ function safeJson<T = unknown>(value: T, depth = 0): unknown {
 function sanitizeNode(raw: unknown): CollabNode | null {
   const record = asRecord(raw);
   if (!record) return null;
-  const id = safeString(record.id).trim();
+  const id = safeIdentifier(record.id);
   if (!id) return null;
   const node = safeJson({ ...record, id, selected: undefined }) as CollabNode;
   node.id = id;
@@ -124,15 +130,65 @@ function sanitizeNode(raw: unknown): CollabNode | null {
 function sanitizeEdge(raw: unknown): CollabEdge | null {
   const record = asRecord(raw);
   if (!record) return null;
-  const id = safeString(record.id).trim();
-  const source = safeString(record.source).trim();
-  const target = safeString(record.target).trim();
+  const id = safeIdentifier(record.id);
+  const source = safeIdentifier(record.source);
+  const target = safeIdentifier(record.target);
   if (!id || !source || !target) return null;
   const edge = safeJson({ ...record, id, source, target }) as CollabEdge;
   edge.id = id;
   edge.source = source;
   edge.target = target;
   return edge;
+}
+
+function sanitizeMacroPin(raw: unknown): MacroMap[string]["inputs"][number] | null {
+  const record = asRecord(raw);
+  if (!record) return null;
+  const id = safeIdentifier(record.id);
+  if (!id) return null;
+  return { ...(safeJson(record) as MacroMap[string]["inputs"][number]), id };
+}
+
+function sanitizeMacroNode(raw: unknown): MacroMap[string]["nodes"][number] | null {
+  const record = asRecord(raw);
+  if (!record) return null;
+  const id = safeIdentifier(record.id);
+  const type = safeIdentifier(record.type);
+  if (!id || !type || !Array.isArray(record.inputs) || !Array.isArray(record.outputs)) return null;
+  const inputs = record.inputs.map(sanitizeMacroPin);
+  const outputs = record.outputs.map(sanitizeMacroPin);
+  if (inputs.some((pin) => !pin) || outputs.some((pin) => !pin)) return null;
+  const node = safeJson(record) as MacroMap[string]["nodes"][number];
+  node.id = id;
+  node.type = type;
+  node.inputs = inputs as MacroMap[string]["nodes"][number]["inputs"];
+  node.outputs = outputs as MacroMap[string]["nodes"][number]["outputs"];
+  if (Array.isArray(record.typeGroup)) {
+    const typeGroup = record.typeGroup.map((pinId) => safeIdentifier(pinId));
+    if (typeGroup.some((pinId) => !pinId)) return null;
+    node.typeGroup = typeGroup;
+  }
+  if (type === "macro") {
+    const config = asRecord(record.config);
+    const macroId = safeIdentifier(config?.macroId);
+    if (!config || !macroId) return null;
+    node.config = { ...(safeJson(config) as Record<string, unknown>), macroId };
+  }
+  return node;
+}
+
+function sanitizeMacroEdge(raw: unknown): MacroMap[string]["edges"][number] | null {
+  const record = asRecord(raw);
+  const from = asRecord(record?.from);
+  const to = asRecord(record?.to);
+  if (!record || !from || !to) return null;
+  const id = safeIdentifier(record.id);
+  const fromNode = safeIdentifier(from.node);
+  const fromPin = safeIdentifier(from.pin);
+  const toNode = safeIdentifier(to.node);
+  const toPin = safeIdentifier(to.pin);
+  if (!id || !fromNode || !fromPin || !toNode || !toPin) return null;
+  return { id, from: { node: fromNode, pin: fromPin }, to: { node: toNode, pin: toPin } };
 }
 
 function sanitizeMacroMap(raw: unknown): MacroMap {
@@ -142,11 +198,28 @@ function sanitizeMacroMap(raw: unknown): MacroMap {
   let count = 0;
   for (const [key, value] of Object.entries(record)) {
     if (count++ >= MAX_MACROS) break;
-    if (!SAFE_KEY.test(key) || !isRecord(value)) continue;
-    const macro = safeJson(value) as MacroMap[string];
-    const id = safeString((macro as { id?: unknown }).id, key).trim();
-    if (!id) continue;
-    out[id] = { ...macro, id };
+    const macroRecord = asRecord(value);
+    if (!SAFE_KEY.test(key) || !isSafeIdentifier(key) || !macroRecord) continue;
+    const id = safeIdentifier(macroRecord.id, key);
+    if (!id || !Array.isArray(macroRecord.inputs) || !Array.isArray(macroRecord.outputs)
+      || !Array.isArray(macroRecord.nodes) || !Array.isArray(macroRecord.edges)) continue;
+    const inputs = macroRecord.inputs.map(sanitizeMacroPin);
+    const outputs = macroRecord.outputs.map(sanitizeMacroPin);
+    const nodes = macroRecord.nodes.map(sanitizeMacroNode);
+    const edges = macroRecord.edges.map(sanitizeMacroEdge);
+    // A malformed definition is excluded as a unit. Partially retaining it could silently change
+    // its graph or boundary contract and later deploy something different from what was authored.
+    if (inputs.some((pin) => !pin) || outputs.some((pin) => !pin)
+      || nodes.some((node) => !node) || edges.some((edge) => !edge)) continue;
+    out[id] = {
+      id,
+      name: safeString(macroRecord.name, id, 80),
+      inputs: inputs as MacroMap[string]["inputs"],
+      outputs: outputs as MacroMap[string]["outputs"],
+      nodes: nodes as MacroMap[string]["nodes"],
+      edges: edges as MacroMap[string]["edges"],
+      stateful: macroRecord.stateful === true,
+    };
   }
   return out;
 }
@@ -154,7 +227,7 @@ function sanitizeMacroMap(raw: unknown): MacroMap {
 function uniqueValidFlowIds(rawIds: unknown[], flowIds: Set<string>): string[] {
   const out: string[] = [];
   for (const raw of rawIds) {
-    const id = safeString(raw).trim();
+    const id = safeIdentifier(raw);
     if (!id || !flowIds.has(id) || out.includes(id)) continue;
     out.push(id);
   }
@@ -186,7 +259,7 @@ export function sanitizeEditorDocumentSnapshot(raw: unknown): EditorDocumentSnap
   for (const f of flowsRaw) {
     const flowRecord = asRecord(f);
     if (!flowRecord) continue;
-    const id = safeString(flowRecord.id).trim();
+    const id = safeIdentifier(flowRecord.id);
     if (!id || flows.some((x) => x.id === id)) continue;
     const nodes = (Array.isArray(flowRecord.nodes) ? flowRecord.nodes : []).slice(0, MAX_NODES_PER_FLOW).map(sanitizeNode).filter((n): n is CollabNode => !!n);
     const nodeIds = new Set(nodes.map((n) => n.id));
@@ -197,7 +270,7 @@ export function sanitizeEditorDocumentSnapshot(raw: unknown): EditorDocumentSnap
     flows.push({ id, name: safeString(flowRecord.name, "Flow", 80), nodes, edges });
   }
   if (flows.length === 0) flows.push(emptyEditorDocumentSnapshot().flows[0]!);
-  const activeFlowId = safeString(record.activeFlowId, flows[0]!.id).trim();
+  const activeFlowId = safeIdentifier(record.activeFlowId, flows[0]!.id);
   const validActiveFlowId = flows.some((f) => f.id === activeFlowId) ? activeFlowId : flows[0]!.id;
   const settingsRecord = asRecord(record.settings);
   const deployedFlowIds = readDeploymentFlowIds(settingsRecord, flows, validActiveFlowId);
@@ -455,6 +528,7 @@ function readEditorDocSnapshot(doc: Y.Doc): EditorDocumentSnapshot {
   const seen = new Set<string>();
   const outFlows: CollabFlow[] = [];
   const readFlow = (id: string): void => {
+    if (!isSafeIdentifier(id)) return;
     const yFlow = flows.get(id);
     if (!(yFlow instanceof Y.Map) || seen.has(id)) return;
     seen.add(id);
@@ -472,6 +546,7 @@ function readEditorDocSnapshot(doc: Y.Doc): EditorDocumentSnapshot {
   for (const id of Array.from(flows.keys()).sort()) readFlow(id);
   const macroObj: MacroMap = {};
   for (const [id, value] of Array.from(macros.entries()).slice(0, MAX_MACROS)) {
+    if (!isSafeIdentifier(id)) continue;
     const sanitized = sanitizeMacroMap({ [id]: value });
     Object.assign(macroObj, sanitized);
   }

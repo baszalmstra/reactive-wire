@@ -1,6 +1,7 @@
 import type { NodeData } from "../node-types.js";
 import type { ValueType } from "../theme.js";
 import type { RWValue, Status } from "../value.js";
+import { createRecord, ownValue, setOwn } from "../record.js";
 export { durationSeconds } from "../duration.js";
 
 /**
@@ -24,6 +25,27 @@ export interface NodeMemory {
   accumulated?: boolean;
 }
 export type Memory = Record<string, NodeMemory>;
+
+/** Create node memory without an Object prototype, so every possible key is an own data key. */
+export function createMemory(): Memory {
+  return createRecord<NodeMemory>();
+}
+
+/** Read a node memory slot without falling through to Object.prototype. */
+export function memoryValue(memory: Memory, nodeId: string): NodeMemory | undefined {
+  return ownValue(memory, nodeId);
+}
+
+/** Store a node memory slot without invoking the legacy __proto__ setter. */
+export function setMemoryValue(memory: Memory, nodeId: string, value: NodeMemory): NodeMemory {
+  setOwn(memory, nodeId, value);
+  return value;
+}
+
+/** Return this node's slot, creating a prototype-safe own slot when absent. */
+export function ensureMemoryValue(memory: Memory, nodeId: string): NodeMemory {
+  return memoryValue(memory, nodeId) ?? setMemoryValue(memory, nodeId, {});
+}
 
 /**
  * The latest result an async data-source node has fetched, keyed by node id. The fetching

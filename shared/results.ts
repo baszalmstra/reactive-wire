@@ -1,5 +1,6 @@
 import type { RWValue, Status } from "./value.js";
 import type { Health } from "./node-types.js";
+import { createRecord } from "./record.js";
 
 export interface SinkAction {
   call: string | null;
@@ -39,4 +40,11 @@ export interface EvalResults {
   sinks: Record<string, ServiceCall | null>;
 }
 
-export const emptyResults = (): EvalResults => ({ outputs: {}, inputs: {}, health: {}, actions: {}, connected: {}, sinks: {} });
+export const emptyResults = (): EvalResults => ({
+  outputs: createRecord(),
+  inputs: createRecord(),
+  health: createRecord(),
+  actions: createRecord(),
+  connected: createRecord(),
+  sinks: createRecord(),
+});

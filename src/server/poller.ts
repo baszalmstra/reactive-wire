@@ -1,5 +1,6 @@
 import type { NodeData } from "../../shared/node-types.js";
 import type { SourceMap, SourceResult } from "../../shared/engine/evaluate.js";
+import { createRecord } from "../../shared/record.js";
 
 /** A minimal HTTP fetch the poller depends on, so tests can inject a mock with no network. */
 export type FetchFn = (url: string) => Promise<{ ok: boolean; status: number; text: () => Promise<string> }>;
@@ -42,8 +43,8 @@ function decodeBody(text: string): unknown {
  */
 export class Poller {
   private readonly timers: ReturnType<typeof setInterval>[] = [];
-  private readonly results: Record<string, SourceResult> = {};
-  private readonly sequence: Record<string, number> = {};
+  private readonly results = createRecord<SourceResult>();
+  private readonly sequence = createRecord<number>();
   private generation = 0;
 
   constructor(

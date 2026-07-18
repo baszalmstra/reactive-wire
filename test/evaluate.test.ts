@@ -25,6 +25,23 @@ const down = { state: "below_horizon", attributes: { elevation: -5 } };
 const up = { state: "above_horizon", attributes: { elevation: 5 } };
 
 describe("evaluate (single engine) — canonical example", () => {
+  it("stores reserved direct-engine node ids without mutating Object.prototype", () => {
+    const memory: Memory = {};
+    const directNodes: NodeData[] = [
+      { id: "source", type: "const-bool", title: "", subtitle: "", icon: "const", x: 0, y: 0, values: { out: true }, inputs: [], outputs: [{ id: "out", label: "", type: "bool" }] },
+      { id: "__proto__", type: "edge", title: "", subtitle: "", icon: "mem", x: 0, y: 0, inputs: [{ id: "in", label: "", type: "any" }], outputs: [{ id: "out", label: "", type: "bool" }] },
+    ];
+    const directEdges: ViewEdge[] = [
+      { id: "e", from: { node: "source", pin: "out" }, to: { node: "__proto__", pin: "in" } },
+    ];
+
+    evaluate(directNodes, directEdges, {}, memory, 0);
+
+    expect(Object.hasOwn(memory, "__proto__")).toBe(true);
+    expect((Object.prototype as { seeded?: boolean }).seeded).toBeUndefined();
+    expect((Object.prototype as { prevVal?: unknown }).prevVal).toBeUndefined();
+  });
+
   it("turns the light red when the sun is down and someone is present", () => {
     const c = calls({ "sun.sun": down, "binary_sensor.room": { state: "on", attributes: {} } });
     expect(c).toHaveLength(1);

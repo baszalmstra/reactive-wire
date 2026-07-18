@@ -32,6 +32,35 @@ describe("deploy graph validation", () => {
     if (!result.ok) expect(result.error).toContain("unknown node");
   });
 
+  it("rejects prototype-sensitive graph identifiers", () => {
+    const reservedNode = sanitizeDeployRequest({
+      nodes: [{ id: "__proto__", type: "const-number", title: "Number", subtitle: "", icon: "const", x: 0, y: 0, inputs: [], outputs: [] }],
+      edges: [],
+    });
+    expect(reservedNode.ok).toBe(false);
+    if (!reservedNode.ok) expect(reservedNode.error).toContain("reserved identifier");
+
+    const reservedPin = sanitizeDeployRequest({
+      nodes: [{ id: "n", type: "const-number", title: "Number", subtitle: "", icon: "const", x: 0, y: 0, inputs: [], outputs: [{ id: "constructor", label: "out", type: "num" }] }],
+      edges: [],
+    });
+    expect(reservedPin.ok).toBe(false);
+
+    const reservedMacro = sanitizeDeployRequest({
+      nodes: [],
+      edges: [],
+      macros: { safe: { id: "prototype", name: "Bad", inputs: [], outputs: [], nodes: [], edges: [] } },
+    });
+    expect(reservedMacro.ok).toBe(false);
+
+    const reservedMacroKey = sanitizeDeployRequest(JSON.parse(`{
+      "nodes": [], "edges": [],
+      "macros": { "__proto__": { "id": "safe", "name": "Bad", "inputs": [], "outputs": [], "nodes": [], "edges": [] } }
+    }`));
+    expect(reservedMacroKey.ok).toBe(false);
+    if (!reservedMacroKey.ok) expect(reservedMacroKey.error).toContain("reserved identifier");
+  });
+
   it("drops prototype-polluting keys from config and values", () => {
     const payload = JSON.parse(`{
       "nodes": [{

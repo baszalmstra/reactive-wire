@@ -2,6 +2,7 @@ import { UN, ER, parseEntityValue } from "../../value.js";
 import type { NodeDef } from "../node-def.js";
 import { readPath } from "../engine-support.js";
 import { base } from "./template-base.js";
+import { ownValue } from "../../record.js";
 
 export const fetch: NodeDef = {
   type: "fetch",
@@ -20,7 +21,7 @@ export const fetch: NodeDef = {
     // node, looked up by node id. The engine never fetches — it only reads the last body.
     const pin = n.outputs.find((p) => p.id === pinId);
     const type = pin?.type ?? "any";
-    const src = sources[n.id];
+    const src = ownValue(sources, n.id);
     if (!src || src.status === "unavailable") return UN(type);
     if (src.status === "error") return ER(type, src.msg ?? "fetch failed");
     const picked = readPath(src.body, String(cfg.path ?? ""));
