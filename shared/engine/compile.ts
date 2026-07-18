@@ -3,7 +3,7 @@ import type { RuntimeMacroMap } from "../macros.js";
 import { pinKey } from "../identity.js";
 import { createRecord } from "../record.js";
 import { statePolicy } from "./engine-support.js";
-import { expandMacros } from "./expand.js";
+import { expandMacros, type InstanceBinding } from "./expand.js";
 import { REGISTRY } from "./nodes/index.js";
 import type { ViewEdge } from "./evaluate.js";
 
@@ -27,6 +27,8 @@ export interface CompiledGraph {
   readonly transactionRoots: ReadonlySet<string>;
   readonly sinkIds: readonly string[];
   readonly durableNodes: RuntimeNode[];
+  /** Expanded endpoint bindings for macro placement pins, keyed by namespaced placement id. */
+  readonly instances: Readonly<Record<string, InstanceBinding>>;
 }
 
 function cloneJson<T>(value: T): T {
@@ -63,6 +65,7 @@ export function compileGraph(
   const flat = expandMacros(nodes, edges, macros, undefined, true);
   const ownedNodes = flat.nodes.map((node) => freezeDeep(cloneJson(node)));
   const ownedEdges = flat.edges.map((edge) => freezeDeep(cloneJson(edge)));
+  const instances = freezeDeep(cloneJson(flat.instances));
   freezeDeep(ownedNodes);
   freezeDeep(ownedEdges);
 
@@ -112,6 +115,7 @@ export function compileGraph(
     transactionRoots,
     sinkIds,
     durableNodes,
+    instances,
   });
 }
 

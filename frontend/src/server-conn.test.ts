@@ -89,6 +89,37 @@ describe("useServer", () => {
     expect(result.current.haStatus.phase).toBe("disconnected");
   });
 
+  it("accepts authoritative runtime sink state and retained output history", () => {
+    const { result } = renderHook(() => useServer("ws://test.local"));
+    act(() => latest().emitOpen());
+    const runtimeState = {
+      type: "runtimeState",
+      deployed: true,
+      generation: 2,
+      mode: "live",
+      graphFingerprint: "test-graph",
+      sinks: {
+        "flow/sink": {
+          desired: null,
+          status: "ok",
+          lastCall: { domain: "light", service: "turn_on", data: {}, target: { entity_id: "light.room" } },
+          lastTriggeredAt: 1234,
+        },
+      },
+      history: {
+        "flow/source:out": [{ value: { type: "num", status: "ok", value: 42 }, t: 1200 }],
+      },
+    };
+
+    act(() => latest().emit(runtimeState));
+    expect(result.current.runtimeState).toEqual(runtimeState);
+
+    // Malformed runtime state cannot replace the last authoritative snapshot.
+    act(() => latest().emit({ ...runtimeState, history: { bad: [{ value: { type: "num", status: "ok" }, t: 1300 }] } }));
+    act(() => latest().emit({ ...runtimeState, history: { bad: [{ value: { type: "bool", status: "ok", value: "false" }, t: 1300 }] } }));
+    expect(result.current.runtimeState).toEqual(runtimeState);
+  });
+
   it("negotiates deltas but remains compatible with an unversioned legacy server", () => {
     const { result } = renderHook(() => useServer("ws://test.local"));
     act(() => latest().emitOpen());
@@ -195,11 +226,17 @@ describe("useServer", () => {
   });
 
   it("reconnects with a backoff after the socket closes", () => {
-    renderHook(() => useServer("ws://test.local"));
+    const { result } = renderHook(() => useServer("ws://test.local"));
     act(() => latest().emitOpen());
+    act(() => latest().emit({
+      type: "runtimeState", deployed: true, generation: 1, mode: "live", graphFingerprint: "test-graph", sinks: {}, history: {},
+    }));
+    act(() => latest().emit({ type: "haStatus", status: { phase: "ready", epoch: 3, snapshotVersion: 1 } }));
     expect(FakeWebSocket.instances).toHaveLength(1);
 
     act(() => latest().serverClose());
+    expect(result.current.runtimeState).toBeNull();
+    expect(result.current.haStatus).toEqual({ phase: "disconnected", epoch: 3, snapshotVersion: null });
     // No immediate reconnect; the retry is scheduled behind the backoff.
     expect(FakeWebSocket.instances).toHaveLength(1);
 

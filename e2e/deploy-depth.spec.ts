@@ -137,6 +137,17 @@ test.describe.serial("Deploy depth: cross-layer against server debugState", () =
     expect(sink!.desired!.domain).toBe("light");
     expect(sink!.desired!.service).toBe("turn_off");
     expect(sink!.desired!.target?.entity_id).toBe("light.bedroom");
+
+    // A passive page reload must recover the same live deployment and server-owned trigger time;
+    // opening the editor neither deploys nor fabricates a fresh timestamp.
+    const triggeredBefore = await lightSink.getByText(/^triggered /).textContent();
+    await page.waitForTimeout(1_100);
+    await page.reload();
+    await expect(page.getByLabel("Home Assistant connected")).toBeVisible();
+    await expect(page.locator(".rw-deploy-group")).toContainText("LIVE");
+    const reloadedSink = page.locator(".react-flow__node", { hasText: "reconciling sink" }).last();
+    const triggeredAfter = await reloadedSink.getByText(/^triggered /).textContent();
+    expect(triggeredAfter?.split(" · ")[0]).toBe(triggeredBefore?.split(" · ")[0]);
   });
 
   test("the runtime's entity output stays consistent with the server's live feed", async ({ page }) => {

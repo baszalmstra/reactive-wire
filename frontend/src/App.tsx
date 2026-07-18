@@ -20,6 +20,7 @@ import { createMemory } from "../../shared/engine/engine-support.js";
 import { createRecord } from "../../shared/record.js";
 import { pinKey } from "../../shared/identity.js";
 import { combineFlowGraphs, type RuntimeFlowGraph } from "../../shared/engine/flow-graphs.js";
+import { runtimeGraphFingerprint } from "../../shared/engine/graph-fingerprint.js";
 import { useSimulatedEntities } from "./example/use-simulated-entities.js";
 import { nodeGeom, type NodeData } from "../../shared/node-types.js";
 import type { EntityMap } from "../../shared/entities.js";
@@ -58,11 +59,12 @@ import { Icon } from "./components/Icon.js";
 import { type EditorNode } from "./canvas/flows.js";
 import { useValueHistory } from "./canvas/use-value-history.js";
 import { syncMacroInstances } from "./canvas/macro-editing.js";
-import { emptyResults as createEmptyResults, type EvalResults, type SinkAction } from "../../shared/results.js";
+import { emptyResults as createEmptyResults, type EvalResults } from "../../shared/results.js";
 import { useUndoRedo } from "./state/use-undo-redo.js";
 import { useFlows } from "./state/use-flows.js";
 import { useCollabDocument } from "./state/use-collab-document.js";
 import { useCommentFrames } from "./state/use-comment-frames.js";
+import { mergeServerHistory, withServerSinkActions } from "./runtime-results.js";
 
 const nodeTypes = { rw: RWNode, comment: CommentNode };
 const edgeTypes = { rw: RWEdge };
@@ -84,41 +86,6 @@ function staleResults(r: EvalResults): EvalResults {
     return out;
   };
   return { ...r, outputs: stale(r.outputs) as EvalResults["outputs"], inputs: stale(r.inputs) };
-}
-
-type SinkTriggerRecord = {
-  /** The call currently desired by this sink, cleared once the sink holds. */
-  activeCall: string | null;
-  /** Most recent call text shown after the sink starts holding. */
-  lastCall?: string;
-  /** When the active/last call first appeared in the preview. */
-  lastTriggeredAt?: number;
-};
-
-function withSinkTriggerTimes(results: EvalResults, records: Record<string, SinkTriggerRecord>, at: number): EvalResults {
-  const actions: Record<string, SinkAction> = {};
-  for (const [nodeId, action] of Object.entries(results.actions)) {
-    const record = records[nodeId] ?? { activeCall: null };
-    if (action.call) {
-      if (record.activeCall !== action.call) {
-        record.activeCall = action.call;
-        record.lastCall = action.call;
-        record.lastTriggeredAt = at;
-      }
-    } else {
-      record.activeCall = null;
-    }
-    records[nodeId] = record;
-    actions[nodeId] = {
-      ...action,
-      lastCall: record.lastCall,
-      lastTriggeredAt: record.lastTriggeredAt,
-    };
-  }
-  for (const nodeId of Object.keys(records)) {
-    if (!(nodeId in results.actions)) delete records[nodeId];
-  }
-  return { ...results, actions };
 }
 
 function withInitialSize(node: EditorNode): EditorNode {
@@ -274,7 +241,6 @@ export function App() {
 
   const nodeDefs = useMemo(() => rwNodes.map((n) => n.data.def), [rwNodes]);
   const [liveResults, setLiveResults] = useState<EvalResults>(() => createEmptyResults());
-  const sinkTriggerRecords = useRef<Record<string, SinkTriggerRecord>>({});
   const previewCommit = useRef<{
     activeFlowId: string;
     nodeDefs: NodeData[];
@@ -296,23 +262,10 @@ export function App() {
     ) {
       return;
     }
-    if (previous && previous.activeFlowId !== activeFlowId) sinkTriggerRecords.current = {};
     previewCommit.current = { activeFlowId, nodeDefs, viewEdges, entities, now, macros: macroLib.macros };
     const flowMemory = (memories.current[activeFlowId] ??= createMemory());
-    const evaluated = evaluate(nodeDefs, viewEdges, entities, flowMemory, now, {}, macroLib.macros);
-    setLiveResults(withSinkTriggerTimes(evaluated, sinkTriggerRecords.current, now));
+    setLiveResults(evaluate(nodeDefs, viewEdges, entities, flowMemory, now, {}, macroLib.macros));
   }, [activeFlowId, nodeDefs, viewEdges, entities, now, macroLib.macros]);
-  // While a previously connected feed is down, keep the last server values greyed as stale.
-  // Before any server has connected, the app remains in local demo mode with live simulated values.
-  const haReady = server.haStatus.phase === "ready";
-  const results = (server.connected && haReady) || !hasSeenServer ? liveResults : staleResults(liveResults);
-
-  const problems = deriveProblems(nodeDefs, results, server.connected && haReady);
-  const { errors: errorCount, warns: warnCount } = problemCounts(problems);
-
-  // The active flow is actuating only when it is part of the live deployment set and the server is live.
-  const actuating = activeFlowDeployed && (autoDeploy || liveDeployed) && server.connected && haReady;
-
   const deploy = server.deploy;
 
   useCollabDocument({
@@ -363,22 +316,34 @@ export function App() {
       });
   }, [activeFlowId, deployedFlowIds, flows]);
 
-  // Signature of the deployable graph: structure + config + wiring, ignoring node positions.
-  // Changes only on meaningful edits in enabled flows — not on entity-feed re-renders or node drags.
+  // Fingerprint the exact namespaced runtime graph sent to the server. Matching it prevents an old
+  // deployment's telemetry from being presented as if it belonged to an edited local draft.
   const macrosRef = useRef<MacroMap>(macroLib.macros);
   macrosRef.current = macroLib.macros;
 
   const graphSig = useMemo(() => {
-    const deployFlows = deployableFlowGraphs(nodes, edges);
-    return JSON.stringify({
-      flows: deployFlows.map((flow) => ({
-        id: flow.flowId,
-        n: flow.nodes.map((n) => ({ id: n.id, t: n.type, c: n.config ?? null, v: n.values ?? null })),
-        e: flow.edges.map((x) => ({ s: x.from.node, sh: x.from.pin, t: x.to.node, th: x.to.pin })),
-      })),
-      m: macroLib.macros,
-    });
+    const graph = combineFlowGraphs(deployableFlowGraphs(nodes, edges));
+    return runtimeGraphFingerprint(graph.nodes, graph.edges, macroLib.macros);
   }, [deployableFlowGraphs, nodes, edges, macroLib.macros]);
+  const runtimeMatchesDraft = server.runtimeState?.graphFingerprint === graphSig;
+
+  // While a previously connected feed is down, keep the last server values greyed as stale.
+  // Before any server has connected, the app remains in local demo mode with live simulated values.
+  const haReady = server.haStatus.phase === "ready";
+  const previewResults = (server.connected && haReady) || !hasSeenServer ? liveResults : staleResults(liveResults);
+  const results = server.runtimeState && runtimeMatchesDraft
+    ? withServerSinkActions(previewResults, server.runtimeState, activeFlowId, !server.connected)
+    : previewResults;
+
+  const problems = deriveProblems(nodeDefs, results, server.connected && haReady);
+  const { errors: errorCount, warns: warnCount } = problemCounts(problems);
+
+  // New servers authoritatively identify the deployed graph; old servers retain the legacy
+  // per-browser deploy status until they are upgraded.
+  const serverActuating = server.runtimeState
+    ? server.runtimeState.deployed && server.runtimeState.mode === "live" && runtimeMatchesDraft
+    : autoDeploy || liveDeployed;
+  const actuating = activeFlowDeployed && serverActuating && server.connected && haReady;
 
   const deployNow = useCallback(() => {
     const graph = combineFlowGraphs(deployableFlowGraphs(nodesRef.current, edgesRef.current));
@@ -722,7 +687,11 @@ export function App() {
     () => (selectedDef ? selectedDef.outputs.map((p) => pinKey(selectedDef.id, p.id)) : []),
     [selectedDef],
   );
-  const valueHistory = useValueHistory(results, observedPins);
+  const localValueHistory = useValueHistory(results, observedPins);
+  const valueHistory = useMemo(() => {
+    if (!server.runtimeState || !runtimeMatchesDraft) return localValueHistory;
+    return mergeServerHistory(localValueHistory, server.runtimeState, activeFlowId, observedPins);
+  }, [activeFlowId, localValueHistory, observedPins, runtimeMatchesDraft, server.runtimeState]);
   const displayEdges = useRWEdgeData(edges, rwNodes, results);
 
   const resultsContextValue = useMemo(

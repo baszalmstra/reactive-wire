@@ -22,6 +22,7 @@ import {
   isDeployClientMessage,
   isDocResetAckMessage,
   isDocUpdateMessage,
+  type RuntimeStateFrame,
 } from "../../shared/protocol.js";
 import { type EntityFeed, type HAClient } from "../ha/client.js";
 import {
@@ -62,8 +63,32 @@ export interface FeedHandlers {
   documentStore?: EditorDocSyncStore;
   /** Called after a collaborative document update is accepted. Return a deploy result to broadcast. */
   onDocumentChange?: (snapshot: EditorDocumentSnapshot) => { ok: boolean; unsupported?: string[]; error?: string } | void;
-  /** Returns a read-only snapshot of runtime state, answering a debugState query. When absent, introspection is disabled. */
+  /** Returns a read-only snapshot of runtime state, answering debug queries and the editor runtime feed. */
   inspect?: () => DebugStateSnapshot;
+  /** Subscribes the feed to authoritative runtime changes. */
+  subscribeRuntime?: (listener: () => void) => () => void;
+}
+
+function runtimeStateFrame(snapshot: DebugStateSnapshot): RuntimeStateFrame {
+  const sinks: RuntimeStateFrame["sinks"] = {};
+  for (const [nodeId, sink] of Object.entries(snapshot.sinks)) {
+    sinks[nodeId] = {
+      desired: sink.desired,
+      ...(sink.note ? { note: sink.note.slice(0, 512) } : {}),
+      status: sink.status,
+      lastCall: sink.lastCall,
+      lastTriggeredAt: sink.lastTriggeredAt,
+    };
+  }
+  return {
+    type: "runtimeState",
+    deployed: snapshot.deployed,
+    generation: snapshot.generation,
+    mode: snapshot.mode,
+    graphFingerprint: snapshot.graphFingerprint,
+    sinks,
+    history: snapshot.history,
+  };
 }
 
 function deployResultFrame(result: { ok: boolean; unsupported?: string[]; error?: string }): string {
@@ -180,12 +205,32 @@ export function startFeed(ha: EntityFeed & HAClient, portOrOptions: number | Fee
   const deltaEntityClients = new Set<WebSocket>();
   const resetPending = new WeakMap<WebSocket, number>();
   let resetGeneration = 0;
+  let feedStopped = false;
+
+  const sendBoundedRuntimeFrame = (ws: WebSocket, frame: string): void => {
+    const frameBytes = Buffer.byteLength(frame);
+    // Runtime telemetry is best-effort. A graph-wide snapshot that cannot fit must not disconnect
+    // the editor into a reconnect loop; keep entity/document sync alive and try a later snapshot.
+    if (frameBytes > maxPayload) return;
+    if (ws.bufferedAmount + frameBytes > maxPayload) {
+      ws.close(1009, "client is too far behind");
+      return;
+    }
+    ws.send(frame);
+  };
 
   wss.on("connection", (ws, req) => {
     const connectionTokenOk = tokenMatches(requestToken(req), options.deployToken);
     const entitySnapshot = ha.entitiesSnapshot();
     ws.send(JSON.stringify({ type: "entities", version: entitySnapshot.version, entities: entitySnapshot.entities }));
     ws.send(JSON.stringify({ type: "haStatus", status: ha.connectionStatus() }));
+    if (handlers.inspect) {
+      try {
+        sendBoundedRuntimeFrame(ws, JSON.stringify(runtimeStateFrame(handlers.inspect())));
+      } catch {
+        // Runtime telemetry is best-effort and must not prevent the editor feed from connecting.
+      }
+    }
     ws.once("close", () => deltaEntityClients.delete(ws));
     if (handlers.documentStore) {
       try {
@@ -315,6 +360,27 @@ export function startFeed(ha: EntityFeed & HAClient, portOrOptions: number | Fee
     });
   });
 
+  let runtimeBroadcastQueued = false;
+  const unsubRuntime = handlers.subscribeRuntime?.(() => {
+    if (!handlers.inspect || feedStopped || runtimeBroadcastQueued || wss.clients.size === 0) return;
+    runtimeBroadcastQueued = true;
+    // Coalesce the trigger/evaluation/completion notifications from one transaction and keep
+    // telemetry serialization outside the server's final pre-actuation boundary.
+    queueMicrotask(() => {
+      runtimeBroadcastQueued = false;
+      if (feedStopped || wss.clients.size === 0) return;
+      let frame: string;
+      try {
+        frame = JSON.stringify(runtimeStateFrame(handlers.inspect!()));
+      } catch {
+        return;
+      }
+      for (const client of wss.clients) {
+        if (client.readyState === WebSocket.OPEN) sendBoundedRuntimeFrame(client, frame);
+      }
+    });
+  }) ?? (() => {});
+
   const unsub = ha.onEntities((update) => {
     const deltaMessage = update.kind === "delta"
       ? JSON.stringify({ type: "entityDelta", version: update.version, changed: update.changed, removed: update.removed })
@@ -351,6 +417,8 @@ export function startFeed(ha: EntityFeed & HAClient, portOrOptions: number | Fee
   });
 
   return () => {
+    feedStopped = true;
+    unsubRuntime();
     unsub();
     unsubConnection();
     wss.close();

@@ -1,12 +1,14 @@
 import { evaluateIncremental, isSink, isTransientSink, sinkCalls, type Memory, type ViewEdge } from "../../shared/engine/evaluate.js";
 import { compileGraph, type CompiledGraph } from "../../shared/engine/compile.js";
+import { runtimeGraphFingerprint } from "../../shared/engine/graph-fingerprint.js";
 import { createMemory, memoryValue, setMemoryValue } from "../../shared/engine/engine-support.js";
 import type { RuntimeMacroMap } from "../../shared/macros.js";
 import type { Health } from "../../shared/node-types.js";
-import type { RuntimeNode } from "../../shared/runtime-types.js";
+import type { RuntimeNode, ValueType } from "../../shared/runtime-types.js";
 import type { EntityMap } from "../../shared/entities.js";
 import type { EvalResults, ServiceCall } from "../../shared/results.js";
-import type { RWValue } from "../../shared/value.js";
+import type { RuntimeValueSample } from "../../shared/protocol.js";
+import type { RWValue, Status } from "../../shared/value.js";
 import { pinKey } from "../../shared/identity.js";
 import { type EntityFeed, type EntityUpdate, type HAClient, type HAConnectionStatus } from "../ha/client.js";
 import { log } from "./log.js";
@@ -14,8 +16,8 @@ import { Poller, type FetchFn } from "./poller.js";
 
 /** A pin value flattened for a debugState response: its type, status, and a JSON-safe value. */
 export interface DebugValue {
-  type: string;
-  status: string;
+  type: ValueType;
+  status: Status;
   value: unknown;
   msg?: string;
 }
@@ -32,7 +34,7 @@ export interface DebugSink {
   /** The service call the sink wants to make right now, or null when it holds. */
   desired: ServiceCall | null;
   note?: string;
-  status: string;
+  status: Status;
   /** Whether this sink's serialized channel is awaiting a service response. */
   inFlight: boolean;
   /** Number of deliveries waiting behind the active one. */
@@ -68,6 +70,8 @@ export interface DeployerSnapshot {
   deployed: boolean;
   generation: number;
   mode: "live" | "dry-run";
+  /** Identity of the exact graph submitted for this generation, or null while undeployed. */
+  graphFingerprint: string | null;
   /** Home Assistant transport/snapshot readiness; live mode is paused unless this is ready. */
   haStatus: HAConnectionStatus;
   /** Epoch ms of the last recompute, or null if the graph has never run. */
@@ -80,6 +84,8 @@ export interface DeployerSnapshot {
   lastEvaluatedNodeCount: number;
   nodes: Record<string, DebugNode>;
   sinks: Record<string, DebugSink>;
+  /** Bounded output-pin samples retained for clients across page loads in this deployment. */
+  history: Record<string, RuntimeValueSample[]>;
 }
 
 export type EvaluationCause =
@@ -138,6 +144,10 @@ interface SinkChannel {
 }
 
 const MAX_TRANSIENT_QUEUE = 100;
+const VALUE_HISTORY_CAPACITY = 60;
+const VALUE_HISTORY_TOTAL_SAMPLES = 500;
+const VALUE_HISTORY_PAYLOAD_CHARS = 4_096;
+const SERVICE_CALL_TELEMETRY_CHARS = 512;
 const MAX_CONCURRENT_HA_CALLS = 4;
 const MAX_HA_CALL_STARTS_PER_SECOND = 16;
 const RETRY_BASE_MS = 1_000;
@@ -174,14 +184,36 @@ function debugValue(v: RWValue): DebugValue {
   return v.msg ? { type: v.type, status: v.status, value, msg: v.msg } : { type: v.type, status: v.status, value };
 }
 
+/** Bound retained telemetry values so one large `any` output cannot be amplified 60 times. */
+function historyDebugValue(v: RWValue): DebugValue {
+  const value = debugValue(v);
+  let encoded: string;
+  try {
+    encoded = JSON.stringify(value.value) ?? "";
+  } catch {
+    encoded = String(value.value);
+  }
+  if (encoded.length <= VALUE_HISTORY_PAYLOAD_CHARS) return value;
+  return {
+    ...value,
+    value: typeof value.value === "string"
+      ? `${value.value.slice(0, VALUE_HISTORY_PAYLOAD_CHARS)}…`
+      : `[value omitted: ${encoded.length} characters]`,
+  };
+}
+
 /**
  * A sink's desired service call flattened for a debugState response. The call's `data` is arbitrary
  * JSON, so each field is passed through the same JSON-safe guard as node output values — a circular
  * or otherwise unserializable value deployed into sink data can't break the response frame.
  */
 function debugCall(call: ServiceCall): ServiceCall {
-  const data: Record<string, unknown> = {};
+  let data: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(call.data)) data[k] = jsonSafe(v);
+  const encoded = JSON.stringify(data);
+  if (encoded.length > SERVICE_CALL_TELEMETRY_CHARS) {
+    data = { telemetry: `[call data omitted: ${encoded.length} characters]` };
+  }
   return call.target
     ? { domain: call.domain, service: call.service, data, target: call.target }
     : { domain: call.domain, service: call.service, data };
@@ -292,12 +324,16 @@ export class Deployer {
   private mem: Memory = createMemory();
   private actuate = false;
   private generation = 0;
+  private graphFingerprint: string | null = null;
   private readonly channels = new Map<string, SinkChannel>();
   private readonly lastNonReconciling = new Map<string, string>();
   private readonly lastReconcilingAttempt = new Map<string, string>();
   private readonly callFailures = new Map<string, SinkFailure>();
   private readonly lastTriggeredAt = new Map<string, number>();
   private readonly lastTriggeredCall = new Map<string, ServiceCall>();
+  private readonly valueHistory = new Map<string, RuntimeValueSample[]>();
+  /** One pin key per retained sample, oldest first, enforcing a graph-wide memory/frame bound. */
+  private readonly valueHistoryOrder: string[] = [];
   private tick: ReturnType<typeof setInterval> | null = null;
   private readonly poller: Poller;
   private readonly unsubscribeEntities: () => void;
@@ -316,6 +352,7 @@ export class Deployer {
   /** Physical HA lanes serialize calls even when a redeploy renames the logical sink node. */
   private readonly activePhysicalKeys = new Set<string>();
   private readonly physicalSlotWaiters = new Map<string, Array<(release: () => void) => void>>();
+  private readonly stateListeners = new Set<() => void>();
 
   constructor(
     private readonly ha: HAClient & EntityFeed,
@@ -326,6 +363,22 @@ export class Deployer {
     this.unsubscribeEntities = ha.onEntities((update) => this.entitiesChanged(update));
     this.unsubscribeConnection = ha.onConnection((status) => this.connectionChanged(status));
     this.poller = new Poller(fetchFn, (nodeId) => this.run({ kind: "fetch", nodeId }));
+  }
+
+  /** Subscribe to server-runtime changes without granting mutation or actuation authority. */
+  subscribe(listener: () => void): () => void {
+    this.stateListeners.add(listener);
+    return () => this.stateListeners.delete(listener);
+  }
+
+  private notifyStateChange(): void {
+    for (const listener of this.stateListeners) {
+      try {
+        listener();
+      } catch {
+        // Runtime observers are read-only telemetry; they must never interrupt evaluation or calls.
+      }
+    }
   }
 
   /**
@@ -344,7 +397,10 @@ export class Deployer {
     this.callFailures.clear();
     this.lastTriggeredAt.clear();
     this.lastTriggeredCall.clear();
+    this.valueHistory.clear();
+    this.valueHistoryOrder.length = 0;
     this.graph = compiled;
+    this.graphFingerprint = runtimeGraphFingerprint(nodes, edges, macros);
     this.actuate = actuate;
     this.mem = createMemory();
     // Durable slots are restored before the first run so an accumulated fold/scan resumes from its
@@ -364,6 +420,7 @@ export class Deployer {
       if (channel.retryDelivery && !channel.retryTimer) this.scheduleRetry(channel, 0);
       this.pumpChannel(channel);
     }
+    this.notifyStateChange();
   }
 
   /**
@@ -375,6 +432,7 @@ export class Deployer {
     this.stopped = true;
     this.actuate = false;
     this.graph = null;
+    this.graphFingerprint = null;
     this.generation += 1;
     this.unsubscribeEntities();
     this.unsubscribeConnection();
@@ -399,6 +457,8 @@ export class Deployer {
     this.callFailures.clear();
     this.lastTriggeredAt.clear();
     this.lastTriggeredCall.clear();
+    this.valueHistory.clear();
+    this.valueHistoryOrder.length = 0;
     this.lastResults = null;
     this.lastRunAt = null;
     this.transactionCount = 0;
@@ -406,6 +466,8 @@ export class Deployer {
     this.lastEvaluatedNodeCount = 0;
     this.mem = createMemory();
     this.durable?.stop();
+    this.notifyStateChange();
+    this.stateListeners.clear();
   }
 
   /**
@@ -419,6 +481,8 @@ export class Deployer {
     const results = this.lastResults;
     const nodes: Record<string, DebugNode> = {};
     const sinks: Record<string, DebugSink> = {};
+    const history: Record<string, RuntimeValueSample[]> = {};
+    for (const [key, samples] of this.valueHistory) history[key] = [...samples];
     if (graph && results) {
       for (const n of graph.nodes) {
         const outputs: Record<string, DebugValue> = {};
@@ -460,6 +524,7 @@ export class Deployer {
       deployed: graph !== null,
       generation: this.generation,
       mode: this.actuate ? "live" : "dry-run",
+      graphFingerprint: this.graphFingerprint,
       haStatus: this.ha.connectionStatus(),
       evaluatedAt: this.lastRunAt,
       transactionCount: this.transactionCount,
@@ -467,6 +532,7 @@ export class Deployer {
       lastEvaluatedNodeCount: this.lastEvaluatedNodeCount,
       nodes,
       sinks,
+      history,
     };
   }
 
@@ -527,6 +593,46 @@ export class Deployer {
   private recordTriggered(nodeId: string, call: ServiceCall): void {
     this.lastTriggeredAt.set(nodeId, Date.now());
     this.lastTriggeredCall.set(nodeId, call);
+    this.notifyStateChange();
+  }
+
+  private appendValueHistory(key: string, value: RWValue, at: number): void {
+    const samples = this.valueHistory.get(key) ?? [];
+    samples.push({ value: historyDebugValue(value), t: at });
+    this.valueHistoryOrder.push(key);
+    if (samples.length > VALUE_HISTORY_CAPACITY) {
+      samples.shift();
+      const firstForPin = this.valueHistoryOrder.indexOf(key);
+      if (firstForPin >= 0) this.valueHistoryOrder.splice(firstForPin, 1);
+    }
+    this.valueHistory.set(key, samples);
+    while (this.valueHistoryOrder.length > VALUE_HISTORY_TOTAL_SAMPLES) {
+      const oldestKey = this.valueHistoryOrder.shift()!;
+      const oldestSamples = this.valueHistory.get(oldestKey);
+      oldestSamples?.shift();
+      if (oldestSamples?.length === 0) this.valueHistory.delete(oldestKey);
+    }
+  }
+
+  private recordValueHistory(nodes: readonly RuntimeNode[], results: EvalResults, at: number): void {
+    const evaluatedNodeIds = new Set(nodes.map((node) => node.id));
+    for (const node of nodes) {
+      for (const output of node.outputs) {
+        const key = pinKey(node.id, output.id);
+        const value = results.outputs[key];
+        if (value) this.appendValueHistory(key, value, at);
+      }
+    }
+    // Macro placements are removed from the compiled graph. Retain aliases for their declared
+    // outputs whenever the expanded inner source was evaluated, so the inspector can address the
+    // history with the same placement pin key it uses for local preview results.
+    for (const [instanceId, binding] of Object.entries(this.graph?.instances ?? {})) {
+      for (const [outputId, endpoint] of Object.entries(binding.outputs)) {
+        if (!endpoint || !evaluatedNodeIds.has(endpoint.node)) continue;
+        const value = results.outputs[pinKey(endpoint.node, endpoint.pin)];
+        if (value) this.appendValueHistory(pinKey(instanceId, outputId), value, at);
+      }
+    }
   }
 
   private connectionChanged(status: HAConnectionStatus): void {
@@ -546,6 +652,7 @@ export class Deployer {
         this.pumpChannel(channel);
       }
     }
+    this.notifyStateChange();
   }
 
   private entitiesChanged(update: EntityUpdate): void {
@@ -592,6 +699,7 @@ export class Deployer {
     this.lastEvaluatedNodeCount = transaction.evaluatedNodeIds.length;
     const evaluated = new Set(transaction.evaluatedNodeIds);
     const evaluatedNodes = this.graph.nodes.filter((node) => evaluated.has(node.id));
+    this.recordValueHistory(evaluatedNodes, results, transactionNow);
 
     for (const n of evaluatedNodes) {
       if (!isSink(n.type) || isTransientSink(n.type) || results.sinks[n.id]) continue;
@@ -613,6 +721,7 @@ export class Deployer {
       const transientValue = mode === "transient" ? results.inputs[pinKey(nodeId, "message")] ?? undefined : undefined;
       this.enqueueDelivery(nodeId, mode, key, failureKey, call, transientValue && transientValue.status === "ok" ? transientValue : undefined);
     }
+    this.notifyStateChange();
   }
 
   private channelFor(nodeId: string, mode: SinkMode): SinkChannel {
@@ -896,6 +1005,7 @@ export class Deployer {
         this.channels.delete(channel.nodeId);
       } else if (channel.retryDelivery === delivery) this.scheduleRetry(channel);
       else this.pumpChannel(channel);
+      this.notifyStateChange();
     }
   }
 }

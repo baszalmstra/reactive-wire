@@ -46,6 +46,16 @@ async function open(url: string): Promise<WebSocket> {
   return ws;
 }
 
+async function openWithFrame(url: string, type: string): Promise<{ ws: WebSocket; frame: Record<string, unknown> }> {
+  const ws = new WebSocket(url, { headers: { origin: "http://localhost:5173" } });
+  const framePromise = nextMessage(ws, type);
+  await new Promise<void>((resolve, reject) => {
+    ws.once("open", () => resolve());
+    ws.once("error", reject);
+  });
+  return { ws, frame: await framePromise };
+}
+
 /** A boolean entity driving a reconciling input_boolean sink, so both a source output and a sink appear. */
 function graph(): { nodes: NodeData[]; edges: ViewEdge[] } {
   const nodes: NodeData[] = [
@@ -103,6 +113,67 @@ describe("feed debugState introspection", () => {
     }
   });
 
+  it("pushes existing and changing server runtime history to newly opened editors", async () => {
+    const port = await freePort();
+    const ha = new MockHA();
+    ha.setState("binary_sensor.x", "on");
+    ha.setState("input_boolean.flag", "off");
+    const deployer = new Deployer(ha, 100_000);
+    const { nodes, edges } = graph();
+    deployer.deploy(nodes, edges, true);
+
+    const stop = startFeed(ha, { port, host: "127.0.0.1" }, {
+      inspect: () => ({ ...deployer.inspect(), autoDeploy: false }),
+      subscribeRuntime: (listener) => deployer.subscribe(listener),
+    });
+    const opened = await openWithFrame(`ws://127.0.0.1:${port}`, "runtimeState");
+    const ws = opened.ws;
+    try {
+      const initial = opened.frame;
+      expect(initial.mode).toBe("live");
+      const initialSinks = initial.sinks as Record<string, { lastTriggeredAt: number | null }>;
+      expect(typeof initialSinks.snk?.lastTriggeredAt).toBe("number");
+      const initialHistory = initial.history as Record<string, unknown[]>;
+      expect(initialHistory["src:state"]).toHaveLength(1);
+
+      const changed = nextMessage(ws, "runtimeState");
+      ha.setState("binary_sensor.x", "off");
+      const update = await changed;
+      const history = update.history as Record<string, Array<{ value: { value: unknown } }>>;
+      expect(history["src:state"]?.map((sample) => sample.value.value)).toEqual([true, false]);
+    } finally {
+      ws.close();
+      stop();
+      deployer.stop();
+    }
+  });
+
+  it("keeps the editor connected when best-effort runtime telemetry exceeds the frame budget", async () => {
+    const port = await freePort();
+    const ha = new MockHA();
+    const oversizedHistory = {
+      "large:out": [{ value: { type: "any", status: "ok", value: "x".repeat(13_000_000) }, t: 1 }],
+    };
+    const stop = startFeed(ha, { port, host: "127.0.0.1" }, {
+      inspect: () => ({
+        deployed: true,
+        generation: 1,
+        mode: "live",
+        graphFingerprint: "large-graph",
+        sinks: {},
+        history: oversizedHistory,
+      }) as never,
+    });
+    const opened = await openWithFrame(`ws://127.0.0.1:${port}`, "haStatus");
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      expect(opened.ws.readyState).toBe(WebSocket.OPEN);
+    } finally {
+      opened.ws.close();
+      stop();
+    }
+  });
+
   it("catches an unserializable snapshot instead of crashing the message handler", async () => {
     const port = await freePort();
     const ha = new MockHA();
@@ -111,7 +182,7 @@ describe("feed debugState introspection", () => {
     const circular: Record<string, unknown> = {};
     circular.self = circular;
     const stop = startFeed(ha, { port, host: "127.0.0.1" }, {
-      inspect: () => ({ deployed: true, generation: 1, mode: "dry-run", evaluatedAt: null, nodes: {}, sinks: {}, extra: circular }) as never,
+      inspect: () => ({ deployed: true, generation: 1, mode: "dry-run", graphFingerprint: "test-graph", evaluatedAt: null, nodes: {}, sinks: {}, history: {}, extra: circular }) as never,
     });
     const ws = await open(`ws://127.0.0.1:${port}`);
     try {
