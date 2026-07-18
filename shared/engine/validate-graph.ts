@@ -215,7 +215,8 @@ export function validateExpandedGraph(nodes: RuntimeNode[], edges: ViewEdge[]): 
 
   const edgeIds = new Set<string>();
   const incoming = new Set<string>();
-  const graphEdges: Array<{ source: string; target: string }> = [];
+  const adjacency = new Map<string, string[]>();
+  const indegree = new Map(nodes.map((node) => [node.id, 0]));
   for (const edge of edges) {
     if (edgeIds.has(edge.id)) return error({ code: "invalid-edge", edgeId: edge.id, message: `Duplicate edge id ${JSON.stringify(edge.id)}` });
     edgeIds.add(edge.id);
@@ -234,10 +235,29 @@ export function validateExpandedGraph(nodes: RuntimeNode[], edges: ViewEdge[]): 
     if (!typesCompatible(sourcePin.type, targetPin.type)) {
       return error({ code: "type-mismatch", edgeId: edge.id, message: `Edge ${JSON.stringify(edge.id)} connects ${sourcePin.type} to ${targetPin.type}` });
     }
-    if (source.id === target.id || wouldCreateCycle(graphEdges, source.id, target.id)) {
-      return error({ code: "cycle", edgeId: edge.id, message: `Edge ${JSON.stringify(edge.id)} creates a cycle` });
+    const outgoing = adjacency.get(source.id) ?? [];
+    outgoing.push(target.id);
+    adjacency.set(source.id, outgoing);
+    indegree.set(target.id, (indegree.get(target.id) ?? 0) + 1);
+  }
+
+  // Deployment validation is a batch operation: build the graph once and run one Kahn pass.
+  // Re-running the interactive reachability helper for every edge is quadratic near the accepted
+  // expansion budget and can stall the server event loop for otherwise valid deployments.
+  const ready: string[] = [];
+  for (const [nodeId, degree] of indegree) if (degree === 0) ready.push(nodeId);
+  let visited = 0;
+  for (let cursor = 0; cursor < ready.length; cursor += 1) {
+    const nodeId = ready[cursor]!;
+    visited += 1;
+    for (const targetId of adjacency.get(nodeId) ?? []) {
+      const degree = (indegree.get(targetId) ?? 0) - 1;
+      indegree.set(targetId, degree);
+      if (degree === 0) ready.push(targetId);
     }
-    graphEdges.push({ source: source.id, target: target.id });
+  }
+  if (visited !== nodes.length) {
+    return error({ code: "cycle", message: "Graph creates a cycle" });
   }
   return { ok: true };
 }

@@ -86,6 +86,18 @@ describe("shared graph semantics", () => {
     if (!result.ok) expect(result.error.code).toBe("cycle");
   });
 
+  it("validates a near-budget chain without quadratic cycle searches", () => {
+    const count = 10_000;
+    const nodes = Array.from({ length: count }, (_, index) => notNode(`n${index}`));
+    const edges = Array.from({ length: count - 1 }, (_, index) => edge(`e${index}`, `n${index}`, `n${index + 1}`));
+    const started = performance.now();
+
+    expect(validateExpandedGraph(nodes, edges)).toEqual({ ok: true });
+    // The prior per-edge reachability search took about 2.6s for this shape on the review host.
+    // Keep a deliberately generous bound: the linear pass is normally well below 200ms.
+    expect(performance.now() - started).toBeLessThan(2_000);
+  }, 10_000);
+
   it("rejects unknown and recursively dependent macros before expansion", () => {
     const placement = { ...numberNode("placement"), type: "macro", config: { macroId: "missing" } };
     expect(validateReachableMacros([placement], {})).toMatchObject({ ok: false });
