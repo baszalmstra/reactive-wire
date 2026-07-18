@@ -110,18 +110,34 @@ export function useCollabDocument(options: {
 
   const applyRemoteDocumentSnapshot = useCallback((snapshot: EditorDocumentSnapshot) => {
     applyingCollab.current = true;
-    const applied = workingStateFromSnapshot(snapshot, activeFlowId);
-    setFlows(applied.flows);
-    setActiveFlowId(applied.activeFlowId);
-    setNodes(applied.activeNodes);
-    setEdges(applied.activeEdges);
-    replaceMacros(applied.macros);
-    setAutoDeploy(applied.autoDeploy);
-    setDeployedFlowIds(applied.deployedFlowIds);
-    setSelected((id) => (id && applied.activeNodes.some((node) => node.id === id) ? id : null));
-    setSelectedIds((ids) => ids.filter((id) => applied.activeNodes.some((node) => node.id === id)));
-    setPast([]);
-    setFuture([]);
+    const previous = {
+      flows,
+      activeFlowId,
+      activeNodes: nodesRef.current,
+      activeEdges: edgesRef.current,
+      macros,
+      autoDeploy,
+      deployedFlowIds,
+    };
+    const applied = workingStateFromSnapshot(snapshot, activeFlowId, previous);
+    if (applied.flows !== flows) setFlows(applied.flows);
+    if (applied.activeFlowId !== activeFlowId) setActiveFlowId(applied.activeFlowId);
+    const activeGraphChanged = applied.activeNodes !== nodesRef.current || applied.activeEdges !== edgesRef.current;
+    if (applied.activeNodes !== nodesRef.current) setNodes(applied.activeNodes);
+    if (applied.activeEdges !== edgesRef.current) setEdges(applied.activeEdges);
+    if (applied.macros !== macros) replaceMacros(applied.macros);
+    if (applied.autoDeploy !== autoDeploy) setAutoDeploy(applied.autoDeploy);
+    if (applied.deployedFlowIds !== deployedFlowIds) setDeployedFlowIds(applied.deployedFlowIds);
+    if (activeGraphChanged) {
+      const ids = new Set(applied.activeNodes.map((node) => node.id));
+      setSelected((id) => (id && ids.has(id) ? id : null));
+      setSelectedIds((selectedIds) => {
+        const kept = selectedIds.filter((id) => ids.has(id));
+        return kept.length === selectedIds.length ? selectedIds : kept;
+      });
+      setPast([]);
+      setFuture([]);
+    }
     // Baseline the local-edit diff against the reconciled projection just pushed into React state,
     // not the raw document snapshot. workingStateFromSnapshot heals stored defs to the current
     // templates, so a raw baseline would make that healing look like a local edit and the next
@@ -130,7 +146,7 @@ export function useCollabDocument(options: {
     queueMicrotask(() => {
       applyingCollab.current = false;
     });
-  }, [activeFlowId, replaceMacros, setFlows, setActiveFlowId, setEdges, setNodes, setAutoDeploy, setDeployedFlowIds, setSelected, setSelectedIds, setPast, setFuture]);
+  }, [activeFlowId, autoDeploy, deployedFlowIds, edgesRef, flows, macros, nodesRef, replaceMacros, setFlows, setActiveFlowId, setEdges, setNodes, setAutoDeploy, setDeployedFlowIds, setSelected, setSelectedIds, setPast, setFuture]);
 
   const flushLocalDocumentToCollab = useCallback((allowBeforeReady = false) => {
     if ((!allowBeforeReady && !collabReady.current) || applyingCollab.current) return;

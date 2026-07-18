@@ -147,33 +147,88 @@ export function snapshotFromWorkingState(state: EditorWorkingState): EditorDocum
  * flow wins when it still exists so collaborators do not fight over tabs; the snapshot's
  * activeFlowId is only a fallback.
  */
+function sameContent(a: unknown, b: unknown): boolean {
+  return a === b || JSON.stringify(a) === JSON.stringify(b);
+}
+
+function reconcileItems<T extends { id: string }>(
+  incoming: T[],
+  previous: T[],
+  convert: (item: T) => T,
+): T[] {
+  const priorById = new Map(previous.map((item) => [item.id, item]));
+  let changed = incoming.length !== previous.length;
+  const next = incoming.map((item, index) => {
+    const converted = convert(item);
+    const prior = priorById.get(item.id);
+    const value = prior && sameContent(prior, converted) ? prior : converted;
+    if (value !== previous[index]) changed = true;
+    return value;
+  });
+  return changed ? next : previous;
+}
+
+/**
+ * Project a server snapshot while structurally sharing unchanged editor objects. This keeps remote
+ * edits to one flow/node from invalidating all React Flow nodes and lets the hook skip unrelated
+ * setters and undo resets.
+ */
 export function workingStateFromSnapshot(
   snapshot: EditorDocumentSnapshot,
   previousActiveFlowId: string,
+  previous?: AppliedEditorDocumentState,
 ): AppliedEditorDocumentState {
-  const flows = snapshot.flows.map((flow) => ({
-    id: flow.id,
-    name: flow.name,
-    nodes: reconcileFlowNodes(flow.nodes, flow.edges).map(collabNodeToEditor),
-    edges: flow.edges.map(collabEdgeToEditor),
-  }));
-  const nextActive = flows.find((flow) => flow.id === previousActiveFlowId)?.id
+  const priorFlows = new Map(previous?.flows.map((flow) => [flow.id, flow]) ?? []);
+  let flowsChanged = snapshot.flows.length !== (previous?.flows.length ?? -1);
+  const flows = snapshot.flows.map((flow, index) => {
+    const prior = priorFlows.get(flow.id);
+    const priorNodes = prior && flow.id === previous?.activeFlowId ? previous.activeNodes : prior?.nodes ?? [];
+    const priorEdges = prior && flow.id === previous?.activeFlowId ? previous.activeEdges : prior?.edges ?? [];
+    const reconciled = reconcileFlowNodes(flow.nodes, flow.edges);
+    const nodes = reconcileItems(
+      reconciled as unknown as EditorNode[],
+      priorNodes,
+      (node) => collabNodeToEditor(node as unknown as CollabNode),
+    );
+    const edges = reconcileItems(
+      flow.edges as unknown as Edge[],
+      priorEdges,
+      (edge) => collabEdgeToEditor(edge as unknown as CollabEdge),
+    );
+    const value = prior && prior.name === flow.name && nodes === priorNodes && edges === priorEdges
+      ? prior
+      : { id: flow.id, name: flow.name, nodes, edges };
+    if (value !== previous?.flows[index]) flowsChanged = true;
+    return value;
+  });
+  const sharedFlows = !flowsChanged && previous ? previous.flows : flows;
+  const nextActive = sharedFlows.find((flow) => flow.id === previousActiveFlowId)?.id
     ?? snapshot.activeFlowId
-    ?? flows[0]?.id;
-  const active = flows.find((flow) => flow.id === nextActive) ?? flows[0];
+    ?? sharedFlows[0]?.id;
+  const active = sharedFlows.find((flow) => flow.id === nextActive) ?? sharedFlows[0];
+  const unchangedActive = previous && active?.id === previous.activeFlowId && priorFlows.get(active.id) === active;
+  const deployed = snapshot.settings.deployedFlowIds ?? [snapshot.settings.deployFlowId].filter((id): id is string => !!id);
   return {
-    flows,
+    flows: sharedFlows,
     activeFlowId: active?.id ?? nextActive ?? "",
-    activeNodes: active?.nodes ?? [],
-    activeEdges: active?.edges ?? [],
-    macros: snapshot.macros,
+    activeNodes: unchangedActive ? previous.activeNodes : active?.nodes ?? [],
+    activeEdges: unchangedActive ? previous.activeEdges : active?.edges ?? [],
+    macros: previous && sameContent(previous.macros, snapshot.macros) ? previous.macros : snapshot.macros,
     autoDeploy: snapshot.settings.autoDeploy,
-    deployedFlowIds: snapshot.settings.deployedFlowIds ?? [snapshot.settings.deployFlowId].filter((id): id is string => !!id),
+    deployedFlowIds: previous && sameContent(previous.deployedFlowIds, deployed) ? previous.deployedFlowIds : deployed,
   };
 }
 
 export function editorSnapshotsEqual(a: EditorDocumentSnapshot | null, b: EditorDocumentSnapshot): boolean {
-  return !!a && JSON.stringify(a) === JSON.stringify(b);
+  if (!a || a.version !== b.version || a.activeFlowId !== b.activeFlowId
+    || a.settings.autoDeploy !== b.settings.autoDeploy
+    || !sameContent(a.settings.deployedFlowIds, b.settings.deployedFlowIds)
+    || !sameContent(a.macros, b.macros) || a.flows.length !== b.flows.length) return false;
+  return a.flows.every((flow, index) => {
+    const other = b.flows[index];
+    return !!other && flow.id === other.id && flow.name === other.name
+      && sameContent(flow.nodes, other.nodes) && sameContent(flow.edges, other.edges);
+  });
 }
 
 export function editorSnapshotHasUserContent(snapshot: EditorDocumentSnapshot): boolean {

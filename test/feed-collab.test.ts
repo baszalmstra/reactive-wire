@@ -128,6 +128,46 @@ describe("feed collaborative document sync", () => {
     }
   });
 
+  it("does not broadcast or auto-deploy an update whose durable write fails", async () => {
+    const port = await freePort();
+    const dir = mkdtempSync(join(tmpdir(), "rw-feed-collab-write-fail-"));
+    const store = new EditorDocumentStore({
+      dataDir: dir,
+      persistDelayMs: 1,
+      writeState: async () => { throw new Error("disk full"); },
+    });
+    let documentChanges = 0;
+    const stop = startFeed(new MockHA(), { port, host: "127.0.0.1" }, {
+      documentStore: store,
+      onDocumentChange: () => { documentChanges += 1; },
+    });
+    const { ws: sender, state } = await openWithDocState(`ws://127.0.0.1:${port}`);
+    const receiver = await open(`ws://127.0.0.1:${port}`);
+    let broadcast = false;
+    receiver.on("message", (raw) => {
+      const msg = JSON.parse(String(raw)) as { type?: string };
+      if (msg.type === "docUpdate") broadcast = true;
+    });
+    try {
+      const doc = new Y.Doc();
+      Y.applyUpdate(doc, Buffer.from(String(state.update), "base64"));
+      const before = snapshotFromEditorDoc(doc);
+      applyEditorSnapshotDiff(doc, before, { ...before, flows: [{ ...before.flows[0]!, nodes: [node("failed")], edges: [] }] }, "client");
+      const error = nextMessage(sender, "docError");
+      sender.send(JSON.stringify({ type: "docUpdate", update: encodeUpdateBase64(Y.encodeStateAsUpdate(doc, Y.encodeStateVector(store.doc))) }));
+
+      expect((await error).error).toContain("disk full");
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(broadcast).toBe(false);
+      expect(documentChanges).toBe(0);
+    } finally {
+      sender.close();
+      receiver.close();
+      stop();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("serves persisted collaborative state after feed and store restart", async () => {
     const dir = mkdtempSync(join(tmpdir(), "rw-feed-collab-restart-"));
     const ha = new MockHA();
@@ -141,7 +181,10 @@ describe("feed collaborative document sync", () => {
       const before = snapshotFromEditorDoc(doc);
       applyEditorSnapshotDiff(doc, before, { ...before, flows: [{ ...before.flows[0]!, nodes: [node("after-restart")], edges: [] }] }, "client");
       ws.send(JSON.stringify({ type: "docUpdate", update: encodeUpdateBase64(Y.encodeStateAsUpdate(doc, Y.encodeStateVector(store.doc))) }));
-      await new Promise((resolve) => setTimeout(resolve, 20));
+      for (let i = 0; i < 20 && !store.snapshot().flows[0]!.nodes.some((item) => item.id === "after-restart"); i += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      }
+      await store.flush();
     } finally {
       ws.close();
       stop();

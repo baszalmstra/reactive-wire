@@ -152,6 +152,25 @@ describe("editor document adapter", () => {
     expect(workingStateFromSnapshot(snapshot, "flow")).toMatchObject({ macros, autoDeploy: true, deployedFlowIds: ["flow"] });
   });
 
+  it("structurally shares unchanged flows, nodes, and edges across remote snapshots", () => {
+    const first = collabSnapshot([
+      { id: "a", name: "A", nodes: [rw("a1") as unknown as CollabNode], edges: [] },
+      { id: "b", name: "B", nodes: [rw("b1") as unknown as CollabNode, rw("b2") as unknown as CollabNode], edges: [] },
+    ], "a");
+    const previous = workingStateFromSnapshot(first, "a");
+    const changed = structuredClone(first);
+    const changedNode = changed.flows[1]!.nodes[1]!;
+    changedNode.position = { x: 20, y: 0 };
+    ((changedNode.data as { def: NodeData }).def).x = 20;
+
+    const applied = workingStateFromSnapshot(changed, "a", previous);
+
+    expect(applied.flows[0]).toBe(previous.flows[0]);
+    expect(applied.activeNodes).toBe(previous.activeNodes);
+    expect(applied.flows[1]!.nodes[0]).toBe(previous.flows[1]!.nodes[0]);
+    expect(applied.flows[1]!.nodes[1]).not.toBe(previous.flows[1]!.nodes[1]);
+  });
+
   it("keeps current JSON snapshot equality semantics", () => {
     const snapshot = snapshotFromWorkingState({ flows: [flow("flow")], activeFlowId: "flow", activeNodes: [], activeEdges: [], macros: {}, autoDeploy: false, deployedFlowIds: ["flow"] });
 

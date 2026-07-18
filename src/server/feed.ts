@@ -12,6 +12,7 @@ import {
   type DocUpdateMessage,
   type EditorDocumentSnapshot,
 } from "../../shared/collab.js";
+import type { AppliedDocumentUpdate } from "./doc-store.js";
 import { parseJsonRecord } from "../../shared/json.js";
 import {
   frameToken,
@@ -43,8 +44,7 @@ export interface EditorDocSyncStore {
   maxUpdateBytes?: number;
   maxStateBytes?: number;
   encodeState: () => Uint8Array;
-  applyUpdate: (update: Uint8Array) => Uint8Array | void;
-  snapshot?: () => EditorDocumentSnapshot;
+  applyUpdate: (update: Uint8Array) => Promise<AppliedDocumentUpdate>;
 }
 
 /** The read-only runtime snapshot answered to a debugState query, plus the server's auto-deploy setting. */
@@ -199,21 +199,27 @@ export function startFeed(ha: EntityFeed & HAClient, portOrOptions: number | Fee
         }
         try {
           const update = decodeUpdateBase64(msg.update, maxDocUpdateBytes);
-          const applied = handlers.documentStore.applyUpdate(update) ?? update;
-          const frame: DocUpdateMessage = { type: "docUpdate", update: encodeUpdateBase64(applied) };
-          const encodedFrame = JSON.stringify(frame);
-          for (const client of wss.clients) {
-            if (client === ws || client.readyState !== WebSocket.OPEN) continue;
-            if (client.bufferedAmount > maxPayload) {
-              client.close(1009, "client is too far behind");
-              continue;
+          // The store resolves only after its compact batch is durable. Do not broadcast or invoke
+          // auto-deploy before that point, and reuse its validated snapshot rather than projecting
+          // the complete document again in the transport layer.
+          void handlers.documentStore.applyUpdate(update).then((applied) => {
+            const frame: DocUpdateMessage = { type: "docUpdate", update: encodeUpdateBase64(applied.update) };
+            const encodedFrame = JSON.stringify(frame);
+            for (const client of wss.clients) {
+              if (client === ws || client.readyState !== WebSocket.OPEN) continue;
+              if (client.bufferedAmount > maxPayload) {
+                client.close(1009, "client is too far behind");
+                continue;
+              }
+              client.send(encodedFrame);
             }
-            client.send(encodedFrame);
-          }
-          if (handlers.onDocumentChange && handlers.documentStore.snapshot) {
-            const result = handlers.onDocumentChange(handlers.documentStore.snapshot());
-            if (result) broadcastDeployResult(wss, result);
-          }
+            if (handlers.onDocumentChange) {
+              const result = handlers.onDocumentChange(applied.snapshot);
+              if (result) broadcastDeployResult(wss, result);
+            }
+          }).catch((err) => {
+            sendDocError(ws, err instanceof Error ? err.message : String(err));
+          });
         } catch (err) {
           sendDocError(ws, err instanceof Error ? err.message : String(err));
         }

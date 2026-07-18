@@ -193,7 +193,7 @@ describe("collaborative editor document model", () => {
     }
   });
 
-  it("persists editor document state across store restarts", () => {
+  it("persists editor document state across store restarts", async () => {
     const dir = mkdtempSync(join(tmpdir(), "rw-collab-"));
     try {
       const store = new EditorDocumentStore({ dataDir: dir });
@@ -201,7 +201,8 @@ describe("collaborative editor document model", () => {
       const client = new Y.Doc();
       Y.applyUpdate(client, store.encodeState());
       applyEditorSnapshotDiff(client, before, withNodes(node("persisted", 42)), "client");
-      store.applyUpdate(Y.encodeStateAsUpdate(client, Y.encodeStateVector(store.doc)));
+      await store.applyUpdate(Y.encodeStateAsUpdate(client, Y.encodeStateVector(store.doc)));
+      await store.close();
 
       const reloaded = new EditorDocumentStore({ dataDir: dir });
       expect(reloaded.snapshot().flows[0]!.nodes.map((n) => n.id)).toContain("persisted");

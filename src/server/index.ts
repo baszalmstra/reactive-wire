@@ -92,11 +92,20 @@ if (startupDeployment.kind === "manual") {
   log("warn", "server", "persisted auto-deploy graph rejected — no graph deployed at startup", { error: startupDeployment.error });
 }
 
-const shutdown = () => {
+let shuttingDown = false;
+const shutdown = async () => {
+  if (shuttingDown) return;
+  shuttingDown = true;
   stopFeed();
   stopSim();
   deployer.stop();
-  process.exit(0);
+  try {
+    await documentStore.close();
+    process.exit(0);
+  } catch (err) {
+    log("error", "server", "failed to flush collaborative document during shutdown", { error: err instanceof Error ? err.message : String(err) });
+    process.exit(1);
+  }
 };
-process.on("SIGINT", shutdown);
-process.on("SIGTERM", shutdown);
+process.on("SIGINT", () => { void shutdown(); });
+process.on("SIGTERM", () => { void shutdown(); });

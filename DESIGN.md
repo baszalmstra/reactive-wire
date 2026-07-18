@@ -434,7 +434,10 @@ rationale in §9). `autoDeploy`/`deployFlowId` are **server-owned document setti
 server can auto-deploy the chosen flow independently of any client's active tab. Deploy remains
 an explicit act: a remote collaborator's edit only actuates Home Assistant when `autoDeploy` is
 enabled. That enabled setting is durable authorization, so a valid configured graph also resumes
-live during server startup (see the safety caveat in §9).
+live during server startup (see the safety caveat in §9). Accepted updates are validated against a
+retained shadow `Y.Doc`, then compacted into short asynchronous persistence batches; feed broadcast
+and auto-deploy occur only after the containing batch is durable. Frontend snapshot projection
+structurally shares unchanged flows, nodes, and edges.
 
 **Document migration** (`shared/collab-migrations.ts`): the document meta carries a schema
 version. A registry of pure snapshot-level migrations, keyed by the version each step upgrades from,
@@ -553,18 +556,15 @@ this transport is revisited, the migration is: add binary frames, then a state-v
 then move persistence to binary — do **not** persist the document as JSON.
 
 **Persistence approach.** The server holds the authoritative `Y.Doc` and persists a compacted
-binary snapshot (`Y.encodeStateAsUpdate`) to `RW_DATA_DIR` on each accepted update (atomic
-tmp+rename), reloading it on boot. Startup applies an explicit deployment policy: manual documents
+binary snapshot (`Y.encodeStateAsUpdate`) to `RW_DATA_DIR` after a short batch of accepted updates
+(atomic async tmp+rename), reloading it on boot. Each sender's update promise resolves only after
+that batch is durable; shutdown flushes pending work. Startup applies an explicit deployment policy: manual documents
 remain undeployed, while persisted `autoDeploy=true` is treated as durable authorization and resumes
 a valid configured graph live. An invalid enabled graph is logged and remains undeployed. This is
 the "custom store around the Yjs update APIs" option from the research rather than `y-leveldb`
 (deprecated) or a scale-out backend (`y-redis`/YHub, deferred until multi-instance is needed).
 
 **Known gaps carried forward** (recurring across review rounds; not yet fixed):
-- **Full-document work per update.** `EditorDocumentStore.applyUpdate` rebuilds a whole `Y.Doc`
-  from full state + the update, re-projects the entire snapshot to validate, then re-encodes and
-  `writeFileSync`s the whole document — O(full-doc) CPU and a full-file write per small edit.
-  Wanted: validate incrementally and batch/append-log persistence with periodic compaction.
 - **Remote-edit → auto-deploy actuation.** With `autoDeploy` on, a **remote** collaborator's edit
   can drive a live Home Assistant actuation through another client. Needs a security regression
   test asserting remote updates alone never call `deploy()` (only local edits do), and likely a
@@ -572,9 +572,6 @@ the "custom store around the Yjs update APIs" option from the research rather th
 - **Concurrent array clobbering.** The snapshot-diff sync recurses into plain objects but treats
   arrays (macro `nodes`/`edges`, pin lists) as last-writer-wins scalars, so concurrent edits to
   different elements of the same array lose one side. Wanted: id-keyed maps for nested collections.
-- **Frontend full-graph rebuilds.** Small local or remote edits stringify/rebuild the whole
-  document snapshot and replace all flows/nodes/edges, losing unchanged node identity and blowing
-  the frame budget on large graphs. Wanted: incremental application preserving identities.
 - **Update/schema validation before persist.** *Version drift is now handled:* `applyUpdate`
   projects the candidate document and rejects an unsupported `meta.version` before persisting, and
   the load path migrates an older version and refuses a newer one (see §8). What remains is

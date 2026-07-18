@@ -70,8 +70,8 @@ function useHarness(server: Server) {
   const [macros, setMacros] = useState<MacroMap>({});
   const [autoDeploy, setAutoDeploy] = useState(false);
   const [deployedFlowIds, setDeployedFlowIds] = useState<string[]>([activeFlowId]);
-  const [, setSelected] = useState<string | null>(null);
-  const [, setSelectedIds] = useState<string[]>([]);
+  const [selected, setSelected] = useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [, setPast] = useState<CanvasSnapshot[]>([]);
   const [, setFuture] = useState<CanvasSnapshot[]>([]);
   useCollabDocument({
@@ -79,7 +79,7 @@ function useHarness(server: Server) {
     macros, replaceMacros: setMacros, autoDeploy, setAutoDeploy, deployedFlowIds, setDeployedFlowIds, setNodes, setEdges,
     setSelected, setSelectedIds, setPast, setFuture, showToast: () => {},
   });
-  return { nodes, setFlows };
+  return { nodes, setFlows, selected, selectedIds, setSelected, setSelectedIds };
 }
 
 function outputIds(node: EditorNode): string[] {
@@ -100,6 +100,32 @@ describe("useCollabDocument lifecycle", () => {
     hook.unmount();
     expect(destroy).toHaveBeenCalledTimes(strictModeCleanupCount + 1);
     destroy.mockRestore();
+  });
+});
+
+describe("useCollabDocument remote reconciliation", () => {
+  it("preserves selection and node identity for an unrelated remote settings edit", async () => {
+    const doc = new Y.Doc();
+    const base = emptyEditorDocumentSnapshot();
+    const initial: EditorDocumentSnapshot = { ...base, flows: [{ ...base.flows[0]!, nodes: [driftedNode("n1")], edges: [] }] };
+    applyEditorSnapshotDiff(doc, base, initial, "server");
+    const state = Y.encodeStateAsUpdate(doc);
+    const vector = Y.encodeStateVector(doc);
+    applyEditorSnapshotDiff(doc, initial, { ...initial, settings: { ...initial.settings, autoDeploy: true } }, "server");
+    const update = encodeUpdateBase64(Y.encodeStateAsUpdate(doc, vector));
+    const server = makeServer(encodeUpdateBase64(state), () => true);
+    const { result, rerender } = renderHook(({ value }) => useHarness(value), { initialProps: { value: server } });
+    const nodeBefore = result.current.nodes[0];
+    await act(async () => {
+      result.current.setSelected("n1");
+      result.current.setSelectedIds(["n1"]);
+    });
+
+    rerender({ value: { ...server, docUpdate: { update, nonce: 1 } } as Server });
+
+    expect(result.current.nodes[0]).toBe(nodeBefore);
+    expect(result.current.selected).toBe("n1");
+    expect(result.current.selectedIds).toEqual(["n1"]);
   });
 });
 
