@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.0 - 2026-07-18
+
+- Harden graph deployment, evaluation, and effect delivery with stronger validation, atomic incremental execution, and safer retries.
+- Improve Home Assistant resilience with connection readiness, ordered entity updates, and bounded polling.
+- Strengthen collaborative multi-flow editing, durable synchronization, and editor performance.
+- Improve keyboard accessibility, dialogs, visual contrast, touch targets, motion handling, and release verification.
+
 ## 0.2.1 - 2026-07-06
 
 - Improve type-aware value history previews, including richer categorical, datetime, and duration summaries.
