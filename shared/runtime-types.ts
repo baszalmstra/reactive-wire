@@ -27,7 +27,10 @@ export interface RuntimePin {
 /** Known configuration contracts. Unknown/plugin node types retain a JSON record config. */
 export interface NodeConfigByType {
   entity: { entity_id: string };
-  fetch: { url: string; interval?: number; path?: string; valueType?: ValueType };
+  fetch: { url: string; interval?: number; path?: string; as: ValueType };
+  compare: { op: string };
+  "dt-shift": { dir: "plus" | "minus" };
+  duration: { unit: "ms" | "sec" | "min" | "hr" | "day" };
   "sink-call": { entity_id: string; domain: string; service: string; service_off?: string };
   "sink-light": { entity_id: string };
   "sink-climate": { entity_id: string };
@@ -36,21 +39,35 @@ export interface NodeConfigByType {
   "sink-notify": { service: string };
   "sink-tts": { entity_id: string; service?: string };
   toggle: { initial?: boolean; persistence?: "seed-at-boot" | "durable" | "reseed-from-world"; entity_id?: string };
+  hold: { initial?: unknown; persistence?: "seed-at-boot" | "durable" | "reseed-from-world"; entity_id?: string };
   fold: { initial?: number; op?: "sum" | "count" | "min" | "max"; persistence?: "seed-at-boot" | "durable" | "reseed-from-world" };
+  scan: { initial?: number; op?: "sum" | "count" | "min" | "max"; persistence?: "seed-at-boot" | "durable" | "reseed-from-world" };
+  edge: { persistence?: "seed-at-boot" | "durable" | "reseed-from-world"; entity_id?: string };
+  rising: { persistence?: "seed-at-boot" | "durable" | "reseed-from-world"; entity_id?: string };
+  falling: { persistence?: "seed-at-boot" | "durable" | "reseed-from-world"; entity_id?: string };
   macro: { macroId: string };
 }
 
 export type NodeConfigFor<TType extends string> =
   TType extends keyof NodeConfigByType ? NodeConfigByType[TType] : Record<string, unknown>;
 
-/** The deploy/evaluator model: stable identities, pins, config, literals, and state policy only. */
-export interface RuntimeNode<TType extends string = string> {
+interface RuntimeNodeBase<TType extends string> {
   id: string;
   type: TType;
   inputs: RuntimePin[];
   outputs: RuntimePin[];
   stateful?: boolean;
-  config?: NodeConfigFor<TType>;
   values?: Record<string, unknown>;
   typeGroup?: string[];
 }
+
+type RuntimeNodeConfig<TType extends string> = TType extends keyof NodeConfigByType
+  ? { config: NodeConfigFor<TType> }
+  : { config?: NodeConfigFor<TType> };
+
+/**
+ * The deploy/evaluator model: stable identities, pins, config, literals, and state policy only.
+ * Known node kinds require their typed config; the broad `string` default remains the explicit
+ * decode/registry compatibility boundary for persisted or plugin-authored nodes.
+ */
+export type RuntimeNode<TType extends string = string> = RuntimeNodeBase<TType> & RuntimeNodeConfig<TType>;

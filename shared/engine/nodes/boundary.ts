@@ -17,7 +17,7 @@ function unavailableOutputs({ n }: EvalCtx): NodeEvaluation {
  * there, so it reads as a neutral "unavailable" rather than an unknown node type that would read
  * as an error. That keeps the definition canvas legible while editing.
  */
-export const macroIn: NodeDef = {
+export const macroIn: NodeDef<typeof MACRO_IN> = {
   type: MACRO_IN,
   description: "A value this macro receives from outside.",
   template: {
@@ -33,7 +33,7 @@ export const macroIn: NodeDef = {
   eval: unavailableOutputs,
 };
 
-export const macroOut: NodeDef = {
+export const macroOut: NodeDef<typeof MACRO_OUT> = {
   type: MACRO_OUT,
   description: "A value this macro produces.",
   template: {

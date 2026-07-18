@@ -2,7 +2,7 @@ import { reconcileCover } from "../ha-reconcile.js";
 import { noOutputs, statelessSink, type NodeDef } from "../node-def.js";
 import { base } from "./template-base.js";
 
-export const sinkCover: NodeDef = {
+export const sinkCover: NodeDef<"sink-cover"> = {
   type: "sink-cover",
   description: "Drives a cover to the desired position or open state, acting only on a change.",
   template: {
@@ -25,7 +25,7 @@ export const sinkCover: NodeDef = {
    * boolean. Acts only when the desired position differs from the cover's current position, so a
    * cover already where it should be is left alone.
    */
-  evalSink: statelessSink(({ cfg, okInput, entities }) => reconcileCover(String(cfg.entity_id ?? ""), {
+  evalSink: statelessSink<"sink-cover">(({ cfg, okInput, entities }) => reconcileCover(String(cfg.entity_id ?? ""), {
     position: okInput("position"),
     open: okInput("open"),
   }, entities)),

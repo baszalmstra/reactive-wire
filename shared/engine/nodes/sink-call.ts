@@ -1,7 +1,7 @@
 import { noOutputs, statelessSink, type NodeDef } from "../node-def.js";
 import { base } from "./template-base.js";
 
-export const sinkCall: NodeDef = {
+export const sinkCall: NodeDef<"sink-call"> = {
   type: "sink-call",
   description: "Calls a Home Assistant service when the input turns on or off.",
   sinkGatePin: "on",
@@ -22,7 +22,7 @@ export const sinkCall: NodeDef = {
    * configured off-service (or skips if none), on=true calls the on-service. Any ok editable
    * data pins are passed through as call data under their pin id.
    */
-  evalSink: statelessSink(({ n, cfg, okInput }) => {
+  evalSink: statelessSink<"sink-call">(({ n, cfg, okInput }) => {
     const entity_id = String(cfg.entity_id ?? "");
     const on = okInput("on");
     if (!on) return null;

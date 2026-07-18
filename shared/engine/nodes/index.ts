@@ -1,4 +1,8 @@
 import type { NodeDef } from "../node-def.js";
+
+// Registry lookup is the deliberate type-erasure boundary: validation dispatches by the runtime
+// string, while each exported built-in definition below retains its literal config contract.
+type RegisteredNodeDef = NodeDef<any>;
 import { createRecord, setOwn } from "../../record.js";
 import { entity } from "./entity.js";
 import { fetch } from "./fetch.js";
@@ -26,7 +30,7 @@ import { sinkNotify, sinkTts } from "./sink-transient.js";
  * definition: its template, description, and eval. The passthrough node is intentionally absent
  * — it has no palette entry and is only produced by macro expansion (see PALETTE_DEFS vs ALL).
  */
-const PALETTE_DEFS: NodeDef[] = [
+const PALETTE_DEFS: RegisteredNodeDef[] = [
   entity,
   fetch,
   compare,
@@ -66,14 +70,14 @@ const PALETTE_DEFS: NodeDef[] = [
  * boundary nodes only appear inside a macro definition canvas and are dropped during expansion;
  * they live here so that canvas previews them as a known type rather than an unknown one.
  */
-const INTERNAL_DEFS: NodeDef[] = [passthrough, macroIn, macroOut];
+const INTERNAL_DEFS: RegisteredNodeDef[] = [passthrough, macroIn, macroOut];
 
 /** The palette-visible definitions, in palette order. */
-export const paletteDefs: readonly NodeDef[] = PALETTE_DEFS;
+export const paletteDefs: readonly RegisteredNodeDef[] = PALETTE_DEFS;
 
 /** Every definition the engine can dispatch over, keyed by node type. */
-export const REGISTRY: Record<string, NodeDef> = (() => {
-  const registry = createRecord<NodeDef>();
+export const REGISTRY: Record<string, RegisteredNodeDef> = (() => {
+  const registry = createRecord<RegisteredNodeDef>();
   for (const def of [...PALETTE_DEFS, ...INTERNAL_DEFS]) setOwn(registry, def.type, def);
   return registry;
 })();

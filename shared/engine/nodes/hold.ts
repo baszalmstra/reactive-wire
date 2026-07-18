@@ -2,7 +2,7 @@ import { UN, parseEntityValue } from "../../value.js";
 import type { NodeDef } from "../node-def.js";
 import { base } from "./template-base.js";
 
-export const hold: NodeDef = {
+export const hold: NodeDef<"hold"> = {
   type: "hold",
   description: "Latches the value present each time the trigger rises and holds it until the next.",
   template: {

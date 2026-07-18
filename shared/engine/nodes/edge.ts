@@ -25,7 +25,7 @@ function evalTransition(kind: "edge" | "rising" | "falling", { inVal, previousMe
   return { outputs: { out: V("bool", fired) }, nextMemory: m };
 }
 
-export const edge: NodeDef = {
+export const edge: NodeDef<"edge"> = {
   type: "edge",
   description: "Pulses true for one update whenever the input value changes.",
   transactionScoped: true,
@@ -41,7 +41,7 @@ export const edge: NodeDef = {
   eval: (ctx) => evalTransition("edge", ctx),
 };
 
-export const rising: NodeDef = {
+export const rising: NodeDef<"rising"> = {
   type: "rising",
   description: "Pulses true when the input goes from false to true.",
   transactionScoped: true,
@@ -57,7 +57,7 @@ export const rising: NodeDef = {
   eval: (ctx) => evalTransition("rising", ctx),
 };
 
-export const falling: NodeDef = {
+export const falling: NodeDef<"falling"> = {
   type: "falling",
   description: "Pulses true when the input goes from true to false.",
   transactionScoped: true,

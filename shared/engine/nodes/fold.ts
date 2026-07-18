@@ -22,7 +22,7 @@ function evalAccumulate({ cfg, inVal, previousMemory }: EvalCtx) {
   return { outputs: { out: V("num", round1(toNumber(m.state, 0))) }, nextMemory: m };
 }
 
-export const fold: NodeDef = {
+export const fold: NodeDef<"fold"> = {
   type: "fold",
   description: "Accumulates the value into a running total on each trigger edge.",
   template: {
@@ -40,7 +40,7 @@ export const fold: NodeDef = {
   eval: evalAccumulate,
 };
 
-export const scan: NodeDef = {
+export const scan: NodeDef<"scan"> = {
   type: "scan",
   description: "Emits a running accumulation of the value, updated on each trigger edge.",
   template: {

@@ -3,7 +3,7 @@ import { singleOutput, type NodeDef } from "../node-def.js";
 import { durationSeconds, instantDiffSeconds, round1, shiftInstant, toNumber } from "../engine-support.js";
 import { base } from "./template-base.js";
 
-export const now: NodeDef = {
+export const now: NodeDef<"now"> = {
   type: "now",
   description: "Outputs the current time as a datetime instant.",
   dependsOnClock: true,
@@ -17,10 +17,10 @@ export const now: NodeDef = {
   },
   // The current time as a datetime instant, taken from the clock the caller supplied.
   // Recomputing with a later `now` makes everything downstream of this node advance.
-  eval: singleOutput("time", ({ now: t }) => V("datetime", t)),
+  eval: singleOutput<"now">("time", ({ now: t }) => V("datetime", t)),
 };
 
-export const since: NodeDef = {
+export const since: NodeDef<"since"> = {
   type: "since",
   description: "Outputs the time elapsed since the given instant as a Duration.",
   dependsOnClock: true,
@@ -32,7 +32,7 @@ export const since: NodeDef = {
       outputs: [{ id: "elapsed", label: "elapsed", type: "duration" }],
     }),
   },
-  eval: singleOutput("elapsed", ({ inEff, now: t }) => {
+  eval: singleOutput<"since">("elapsed", ({ inEff, now: t }) => {
     // The Duration between the supplied instant and now (now minus that instant), carried as a
     // number of seconds. A non-ok instant propagates, so an entity that never reported a change
     // time reads as unavailable rather than reporting a bogus elapsed time.
@@ -44,7 +44,7 @@ export const since: NodeDef = {
   }),
 };
 
-export const datetimeSubtract: NodeDef = {
+export const datetimeSubtract: NodeDef<"dt-subtract"> = {
   type: "dt-subtract",
   description: "Subtracts one datetime from another, outputting the Duration between them.",
   template: {
@@ -58,7 +58,7 @@ export const datetimeSubtract: NodeDef = {
       outputs: [{ id: "elapsed", label: "duration", type: "duration" }],
     }),
   },
-  eval: singleOutput("elapsed", ({ inEff }) => {
+  eval: singleOutput<"dt-subtract">("elapsed", ({ inEff }) => {
     // The Duration between two instants (a minus b), carried as a number of seconds. Either
     // input being non-ok propagates.
     const a = inEff("a");
@@ -71,7 +71,7 @@ export const datetimeSubtract: NodeDef = {
   }),
 };
 
-export const datetimeShift: NodeDef = {
+export const datetimeShift: NodeDef<"dt-shift"> = {
   type: "dt-shift",
   description: "Adds or subtracts a Duration from a datetime, outputting the shifted datetime.",
   template: {
@@ -86,7 +86,7 @@ export const datetimeShift: NodeDef = {
       outputs: [{ id: "out", label: "datetime", type: "datetime" }],
     }),
   },
-  eval: singleOutput("out", ({ cfg, inEff }) => {
+  eval: singleOutput<"dt-shift">("out", ({ cfg, inEff }) => {
     // An instant moved forward (plus) or backward (minus) by a Duration, staying a datetime.
     const t = inEff("time");
     const by = inEff("by");
@@ -99,7 +99,7 @@ export const datetimeShift: NodeDef = {
   }),
 };
 
-export const duration: NodeDef = {
+export const duration: NodeDef<"duration"> = {
   type: "duration",
   description: "Builds a Duration from a count in the chosen unit (ms/sec/min/hr/day).",
   template: {
@@ -112,7 +112,7 @@ export const duration: NodeDef = {
       outputs: [{ id: "out", label: "duration", type: "duration" }],
     }),
   },
-  eval: singleOutput("out", ({ cfg, inEff }) => {
+  eval: singleOutput<"duration">("out", ({ cfg, inEff }) => {
     // A Duration written in a friendlier unit (ms / sec / min / hr / day), carried as a number of
     // seconds. The count may be typed inline or wired from another number.
     const count = inEff("count");

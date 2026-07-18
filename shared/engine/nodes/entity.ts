@@ -20,7 +20,7 @@ function stateValue(entityId: string, e: EntityState) {
   return parseEntityValue(e.state, type);
 }
 
-export const entity: NodeDef = {
+export const entity: NodeDef<"entity"> = {
   type: "entity",
   description: "Reads a Home Assistant entity; its state and each attribute become typed outputs.",
   template: {

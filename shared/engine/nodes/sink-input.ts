@@ -2,7 +2,7 @@ import { reconcileInputHelper } from "../ha-reconcile.js";
 import { noOutputs, statelessSink, type NodeDef } from "../node-def.js";
 import { base } from "./template-base.js";
 
-export const sinkInput: NodeDef = {
+export const sinkInput: NodeDef<"sink-input"> = {
   type: "sink-input",
   description: "Drives an input helper to the desired value, acting only on a change.",
   sinkGatePin: "value",
@@ -23,7 +23,7 @@ export const sinkInput: NodeDef = {
    * helper to a desired value, acting only when it differs from the helper's current state. The
    * service is chosen from the entity's domain so one node covers all the input_* helpers.
    */
-  evalSink: statelessSink(({ cfg, okInput, entities }) => reconcileInputHelper(String(cfg.entity_id ?? ""), {
+  evalSink: statelessSink<"sink-input">(({ cfg, okInput, entities }) => reconcileInputHelper(String(cfg.entity_id ?? ""), {
     value: okInput("value"),
   }, entities)),
 };

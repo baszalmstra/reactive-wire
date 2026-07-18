@@ -2,7 +2,7 @@ import { reconcileLight } from "../ha-reconcile.js";
 import { noOutputs, statelessSink, type NodeDef } from "../node-def.js";
 import { base } from "./template-base.js";
 
-export const sinkLight: NodeDef = {
+export const sinkLight: NodeDef<"sink-light"> = {
   type: "sink-light",
   description: "Drives a light to the desired on/color/temperature/brightness, acting only on a change. Its inputs follow the target light's supported capabilities.",
   sinkGatePin: "on",
@@ -25,7 +25,7 @@ export const sinkLight: NodeDef = {
   // current state and only write when at least one requested dimension differs. If the entity is
   // missing (or a requested attribute is absent), emit the desired call rather than assuming the
   // world already matches.
-  evalSink: statelessSink(({ cfg, okInput, entities }) => reconcileLight(String(cfg.entity_id ?? ""), {
+  evalSink: statelessSink<"sink-light">(({ cfg, okInput, entities }) => reconcileLight(String(cfg.entity_id ?? ""), {
     on: okInput("on"),
     color: okInput("color"),
     temperature: okInput("temperature"),

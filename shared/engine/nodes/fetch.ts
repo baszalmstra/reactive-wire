@@ -4,7 +4,7 @@ import { readPath } from "../engine-support.js";
 import { base } from "./template-base.js";
 import { createRecord, ownValue, setOwn } from "../../record.js";
 
-export const fetch: NodeDef = {
+export const fetch: NodeDef<"fetch"> = {
   type: "fetch",
   description: "Polls an HTTP endpoint and exposes the parsed JSON value as a behavior.",
   template: {

@@ -3,7 +3,7 @@ import { singleOutput, type NodeDef } from "../node-def.js";
 import { gate } from "../engine-support.js";
 import { base } from "./template-base.js";
 
-export const select: NodeDef = {
+export const select: NodeDef<"select"> = {
   type: "select",
   description: "Outputs the “then” value when the condition is true, otherwise the “else” value.",
   template: {
@@ -18,7 +18,7 @@ export const select: NodeDef = {
       outputs: [{ id: "out", label: "value", type: "any" }],
     }),
   },
-  eval: singleOutput("out", ({ resolveType, inVal }) => {
+  eval: singleOutput<"select">("out", ({ resolveType, inVal }) => {
     const t = resolveType("any", ["a", "b"]);
     const cond = inVal("cond");
     if (!cond) return UN(t);

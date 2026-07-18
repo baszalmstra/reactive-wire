@@ -27,10 +27,10 @@ export interface NodeViewState {
 }
 
 /** Persisted/editor node: runtime semantics composed with canvas-only view state. */
-export interface NodeData extends RuntimeNode, NodeViewState {
+export type NodeData<TType extends string = string> = RuntimeNode<TType> & NodeViewState & {
   inputs: PinDef[];
   outputs: PinDef[];
-}
+};
 
 const HEADER_H = 40;
 const PAD_T = 10;

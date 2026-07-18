@@ -2,7 +2,7 @@ import { V } from "../../value.js";
 import type { NodeDef } from "../node-def.js";
 import { base } from "./template-base.js";
 
-export const toggle: NodeDef = {
+export const toggle: NodeDef<"toggle"> = {
   type: "toggle",
   description: "Flips between true and false each time the trigger rises.",
   template: {

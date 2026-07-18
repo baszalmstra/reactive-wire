@@ -3,7 +3,7 @@ import { singleOutput, type NodeDef } from "../node-def.js";
 import { gate, round1 } from "../engine-support.js";
 import { base } from "./template-base.js";
 
-export const sum: NodeDef = {
+export const sum: NodeDef<"sum"> = {
   type: "sum",
   description: "Adds all connected number inputs.",
   template: {
@@ -18,7 +18,7 @@ export const sum: NodeDef = {
       outputs: [{ id: "out", label: "sum", type: "num" }],
     }),
   },
-  eval: singleOutput("out", ({ conn, inVal }) => {
+  eval: singleOutput<"sum">("out", ({ conn, inVal }) => {
     if (conn.length === 0) return UN("num");
     const vals = conn.map((p) => inVal(p.id));
     const g = gate(vals);

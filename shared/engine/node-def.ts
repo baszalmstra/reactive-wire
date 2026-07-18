@@ -16,12 +16,12 @@ export interface RequiredConfig {
 }
 
 /** A node's palette entry: its category, label, icon, and the canonical NodeData factory. */
-export interface NodeTemplate {
-  type: string;
+export interface NodeTemplate<TType extends string = string> {
+  type: TType;
   category: string;
   label: string;
   icon: IconName;
-  make: (id: string) => NodeData;
+  make: (id: string) => NodeData<TType>;
   /** If set, dropping this node opens a popup to fill this config first. */
   requires?: RequiredConfig;
 }
@@ -73,7 +73,7 @@ export interface SinkCtx<TType extends string = string> {
 }
 
 /** Adapt a conventional one-output calculation to the atomic node contract. */
-export function singleOutput(pinId: string, evaluate: (ctx: EvalCtx) => RWValue): (ctx: EvalCtx) => NodeEvaluation {
+export function singleOutput<TType extends string = string>(pinId: string, evaluate: (ctx: EvalCtx<TType>) => RWValue): (ctx: EvalCtx<TType>) => NodeEvaluation {
   return (ctx) => {
     const outputs = createRecord<RWValue>();
     setOwn(outputs, pinId, evaluate(ctx));
@@ -87,14 +87,14 @@ export function noOutputs(): NodeEvaluation {
 }
 
 /** Adapt a stateless sink call builder to the atomic sink contract. */
-export function statelessSink(evaluate: (ctx: SinkCtx) => ServiceCall | null): (ctx: SinkCtx) => SinkEvaluation {
+export function statelessSink<TType extends string = string>(evaluate: (ctx: SinkCtx<TType>) => ServiceCall | null): (ctx: SinkCtx<TType>) => SinkEvaluation {
   return (ctx) => ({ call: evaluate(ctx) });
 }
 
 /** A self-contained definition of one node type. */
 export interface NodeDef<TType extends string = string> {
   type: TType;
-  template: NodeTemplate;
+  template: NodeTemplate<TType>;
   description: string;
   /** This definition reads the transaction clock directly and must be a clock dirty root. */
   dependsOnClock?: boolean;

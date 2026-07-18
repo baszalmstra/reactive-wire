@@ -18,7 +18,7 @@ function evalKleene(isAnd: boolean, { conn, inVal }: EvalCtx) {
   return V("bool", !decisive);
 }
 
-export const and: NodeDef = {
+export const and: NodeDef<"and"> = {
   type: "and",
   description: "True when every connected input is true.",
   template: {
@@ -33,10 +33,10 @@ export const and: NodeDef = {
       outputs: [{ id: "out", label: "all true", type: "bool" }],
     }),
   },
-  eval: singleOutput("out", (ctx) => evalKleene(true, ctx)),
+  eval: singleOutput<"and">("out", (ctx) => evalKleene(true, ctx)),
 };
 
-export const or: NodeDef = {
+export const or: NodeDef<"or"> = {
   type: "or",
   description: "True when any connected input is true.",
   template: {
@@ -51,10 +51,10 @@ export const or: NodeDef = {
       outputs: [{ id: "out", label: "any true", type: "bool" }],
     }),
   },
-  eval: singleOutput("out", (ctx) => evalKleene(false, ctx)),
+  eval: singleOutput<"or">("out", (ctx) => evalKleene(false, ctx)),
 };
 
-export const not: NodeDef = {
+export const not: NodeDef<"not"> = {
   type: "not",
   description: "Inverts a boolean.",
   template: {
@@ -65,7 +65,7 @@ export const not: NodeDef = {
       outputs: [{ id: "out", label: "not", type: "bool" }],
     }),
   },
-  eval: singleOutput("out", ({ inVal }) => {
+  eval: singleOutput<"not">("out", ({ inVal }) => {
     const v = inVal("in");
     if (!v) return UN("bool");
     if (v.status === "error") return ER("bool", v.msg);

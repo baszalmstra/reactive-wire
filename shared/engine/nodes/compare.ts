@@ -3,7 +3,7 @@ import { singleOutput, type NodeDef } from "../node-def.js";
 import { applyCompare, gate } from "../engine-support.js";
 import { base } from "./template-base.js";
 
-export const compare: NodeDef = {
+export const compare: NodeDef<"compare"> = {
   type: "compare",
   description: "Compares two values with the chosen operator and outputs a boolean.",
   template: {
@@ -20,7 +20,7 @@ export const compare: NodeDef = {
       outputs: [{ id: "result", label: "result", type: "bool" }],
     }),
   },
-  eval: singleOutput("result", ({ cfg, inEff }) => {
+  eval: singleOutput<"compare">("result", ({ cfg, inEff }) => {
     const a = inEff("a");
     const b = inEff("b");
     const g = gate([a, b]);

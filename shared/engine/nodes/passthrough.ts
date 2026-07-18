@@ -8,7 +8,7 @@ import { base } from "./template-base.js";
  * input's editable default when nothing is wired. It carries a macro input's value into the
  * subgraph unchanged. It has no palette entry — only macro expansion creates it.
  */
-export const passthrough: NodeDef = {
+export const passthrough: NodeDef<"passthrough"> = {
   type: "passthrough",
   description: "",
   template: {

@@ -10,7 +10,7 @@ function evalConst({ n }: EvalCtx): NodeEvaluation {
   return { outputs };
 }
 
-export const constNumber: NodeDef = {
+export const constNumber: NodeDef<"const-number"> = {
   type: "const-number",
   description: "Outputs a fixed number you set.",
   template: {
@@ -25,7 +25,7 @@ export const constNumber: NodeDef = {
   eval: evalConst,
 };
 
-export const constBool: NodeDef = {
+export const constBool: NodeDef<"const-bool"> = {
   type: "const-bool",
   description: "Outputs a fixed boolean you set.",
   template: {
@@ -40,7 +40,7 @@ export const constBool: NodeDef = {
   eval: evalConst,
 };
 
-export const constString: NodeDef = {
+export const constString: NodeDef<"const-string"> = {
   type: "const-string",
   description: "Outputs a fixed string you set.",
   template: {
@@ -55,7 +55,7 @@ export const constString: NodeDef = {
   eval: evalConst,
 };
 
-export const constColor: NodeDef = {
+export const constColor: NodeDef<"const-color"> = {
   type: "const-color",
   description: "Outputs a fixed color you pick.",
   template: {
@@ -70,7 +70,7 @@ export const constColor: NodeDef = {
   eval: evalConst,
 };
 
-export const constDuration: NodeDef = {
+export const constDuration: NodeDef<"const-duration"> = {
   type: "const-duration",
   description: "Outputs a fixed Duration you set with a count and unit.",
   template: {

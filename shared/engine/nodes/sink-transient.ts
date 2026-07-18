@@ -45,7 +45,7 @@ function buildTransientCall({ n, cfg, okInput, previousMemory }: SinkCtx): SinkE
   return { call: { domain: "notify", service, data: { message: msg.v } }, nextMemory: m };
 }
 
-export const sinkNotify: NodeDef = {
+export const sinkNotify: NodeDef<"sink-notify"> = {
   type: "sink-notify",
   description: "Sends a notification each time the message changes.",
   sinkGatePin: "message",
@@ -64,7 +64,7 @@ export const sinkNotify: NodeDef = {
   evalSink: buildTransientCall,
 };
 
-export const sinkTts: NodeDef = {
+export const sinkTts: NodeDef<"sink-tts"> = {
   type: "sink-tts",
   description: "Speaks the message on a media player each time it changes.",
   sinkGatePin: "message",

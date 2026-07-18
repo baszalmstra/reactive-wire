@@ -2,7 +2,7 @@ import { reconcileClimate } from "../ha-reconcile.js";
 import { noOutputs, statelessSink, type NodeDef } from "../node-def.js";
 import { base } from "./template-base.js";
 
-export const sinkClimate: NodeDef = {
+export const sinkClimate: NodeDef<"sink-climate"> = {
   type: "sink-climate",
   description: "Drives a climate entity to the desired temperature and mode, acting only on a change.",
   template: {
@@ -25,7 +25,7 @@ export const sinkClimate: NodeDef = {
    * entity's current value are written, so re-asserting the same target is a no-op and a
    * self-write echo doesn't re-fire. A dimension with a non-ok desired value is left untouched.
    */
-  evalSink: statelessSink(({ cfg, okInput, entities }) => reconcileClimate(String(cfg.entity_id ?? ""), {
+  evalSink: statelessSink<"sink-climate">(({ cfg, okInput, entities }) => reconcileClimate(String(cfg.entity_id ?? ""), {
     temperature: okInput("temperature"),
     hvac_mode: okInput("hvac_mode"),
   }, entities)),
