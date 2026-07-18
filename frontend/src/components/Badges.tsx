@@ -22,7 +22,7 @@ export function HealthDot({ health }: { health: Health }) {
         health === "error" ? "w-[15px] h-[15px]" : "w-[9px] h-[9px]",
       )}
     >
-      {health === "error" && <span className="text-[9px] font-extrabold text-white leading-none">!</span>}
+      {health === "error" && <span className="text-[9px] font-extrabold text-rw-health-on leading-none">!</span>}
     </span>
   );
 }

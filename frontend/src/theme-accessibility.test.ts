@@ -55,4 +55,20 @@ describe("theme accessibility", () => {
       }
     }
   });
+
+  it("keeps actual solid badge and active-control foregrounds readable", () => {
+    for (const aesthetic of aesthetics) for (const mode of modes) {
+      const vars = buildThemeVars(aesthetic, mode);
+      expect(
+        contrast(vars["--rw-accent-text"]!, vars["--rw-accent"]!),
+        `${aesthetic}/${mode} active button text on accent`,
+      ).toBeGreaterThanOrEqual(4.5);
+      for (const health of ["ok", "warn", "error"] as const) {
+        expect(
+          contrast(vars["--rw-health-on"]!, vars[`--rw-h-${health}`]!),
+          `${aesthetic}/${mode} badge glyph on ${health} fill`,
+        ).toBeGreaterThanOrEqual(4.5);
+      }
+    }
+  });
 });

@@ -92,6 +92,7 @@ export function CommentNode({ id, data, selected }: NodeProps<CommentNodeType>) 
               type="button"
               className="rw-comment-del"
               title="Delete comment (keeps nodes)"
+              aria-label="Delete comment"
               onClick={() => onDelete(id)}
             >
               ✕

@@ -102,7 +102,7 @@ export function FlowTabs({
     <div
       role="tablist"
       aria-label="Flows"
-      className="flex-none flex items-stretch gap-1 px-2 h-[34px] bg-rw-panel border-b border-rw-line select-none overflow-x-auto"
+      className="rw-flow-tabs flex-none flex items-stretch gap-1 px-2 h-[34px] bg-rw-panel border-b border-rw-line select-none overflow-x-auto"
     >
       {flows.map((flow) => {
         const active = flow.id === activeId;
@@ -173,7 +173,7 @@ export function FlowTabs({
                 onClick={() => closeAndRestoreFocus(flow.id)}
                 aria-label={`Close ${flow.name}`}
                 title="Close flow"
-                className="ml-0.5 text-rw-faint hover:text-rw-error opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity text-[13px] leading-none"
+                className="rw-flow-close ml-0.5 text-rw-faint hover:text-rw-error opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity text-[13px] leading-none"
               >
                 ×
               </button>

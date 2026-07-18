@@ -127,7 +127,7 @@ export function PinValueEditor({
               className={cn(
                 "h-full px-2 border-r border-rw-line last:border-r-0 transition-colors",
                 compact ? "min-w-[28px]" : "flex-1",
-                active ? "bg-rw-accent text-white" : "text-rw-faint hover:text-rw-text hover:bg-rw-node-hdr",
+                active ? "bg-rw-accent text-rw-accent-text" : "text-rw-faint hover:text-rw-text hover:bg-rw-node-hdr",
               )}
             >
               {opt.label}

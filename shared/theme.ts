@@ -77,7 +77,7 @@ const NEUTRALS: Record<Aesthetic, AestheticDef> = {
       line: "oklch(0.31 0.009 264)", lineSoft: "oklch(0.27 0.008 264)",
       node: "oklch(0.248 0.008 264)", nodeHdr: "oklch(0.30 0.010 264)", nodeBorder: "oklch(0.36 0.012 264)",
       text: "oklch(0.94 0.004 264)", dim: "oklch(0.74 0.006 264)", faint: "oklch(0.72 0.008 264)",
-      accent: "oklch(0.66 0.15 264)", accentText: "oklch(0.99 0 0)",
+      accent: "oklch(0.66 0.15 264)", accentText: "oklch(0.12 0.01 264)",
       shadow: "0 6px 22px -6px rgba(0,0,0,.55)", selGlow: "oklch(0.70 0.14 264)",
     },
     light: {

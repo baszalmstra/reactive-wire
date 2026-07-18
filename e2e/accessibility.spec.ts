@@ -1,6 +1,12 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Locator } from "@playwright/test";
 import { resetWorkspace } from "./collab-utils.js";
 import { addNode, edges, moveNodeTo } from "./wiring-utils.js";
+
+async function expectMinimumTarget(locator: Locator, minimum: number) {
+  const box = await locator.boundingBox();
+  expect(box?.width).toBeGreaterThanOrEqual(minimum);
+  expect(box?.height).toBeGreaterThanOrEqual(minimum);
+}
 
 test.describe.serial("Keyboard graph accessibility", () => {
   test.beforeEach(async ({ page }) => {
@@ -123,7 +129,7 @@ test.describe.serial("Keyboard graph accessibility", () => {
     await expect(page.locator(".rw-checkbox")).toHaveCSS("outline-style", "solid");
   });
 
-  test("exposes focused tooltips, large color targets, and reduced-motion styling", async ({ page }) => {
+  test("exposes focused tooltips, large color targets, and reduced-motion styling", async ({ page, context }) => {
     const paletteButton = page.locator(".rw-palette-scroll button").first();
     await paletteButton.focus();
     const tooltip = page.getByRole("tooltip");
@@ -134,9 +140,23 @@ test.describe.serial("Keyboard graph accessibility", () => {
 
     await addNode(page, "Color");
     const blue = page.getByRole("button", { name: "Set color Blue" });
-    const target = await blue.boundingBox();
-    expect(target?.width).toBeGreaterThanOrEqual(32);
-    expect(target?.height).toBeGreaterThanOrEqual(32);
+    await expectMinimumTarget(blue, 32);
+
+    await expectMinimumTarget(page.getByRole("button", { name: /Flow 1 for deployment/ }), 24);
+    await page.getByRole("button", { name: "New flow" }).click();
+    const closeFlow = page.getByRole("button", { name: "Close Flow 2" });
+    await expectMinimumTarget(closeFlow, 24);
+    await page.getByRole("button", { name: "Comment" }).click();
+    const deleteComment = page.getByRole("button", { name: "Delete comment" });
+    await expectMinimumTarget(deleteComment, 24);
+
+    const cdp = await context.newCDPSession(page);
+    await cdp.send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 1 });
+    expect(await page.evaluate(() => matchMedia("(pointer: coarse)").matches)).toBe(true);
+    await expectMinimumTarget(page.getByRole("button", { name: /Flow 1 for deployment/ }), 32);
+    await expectMinimumTarget(closeFlow, 32);
+    await expectMinimumTarget(deleteComment, 32);
+    await cdp.send("Emulation.setTouchEmulationEnabled", { enabled: false });
 
     await page.emulateMedia({ reducedMotion: "reduce" });
     expect(await page.evaluate(() => matchMedia("(prefers-reduced-motion: reduce)").matches)).toBe(true);
