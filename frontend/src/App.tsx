@@ -35,7 +35,7 @@ import { ResultsProvider } from "./canvas/results-context.js";
 import { connectionReason, connectionValid, type RWNodeType } from "./canvas/validation.js";
 import { connectionAlreadyWired, replaceInputEdge } from "./canvas/wire-replace.js";
 import { CommentNode } from "./canvas/CommentNode.js";
-import { RWEdge, withRWEdgeData } from "./canvas/RWEdge.js";
+import { RWEdge, useRWEdgeData } from "./canvas/RWEdge.js";
 import { CommentCtx } from "./canvas/comments-context.js";
 import { type CommentNodeType } from "./canvas/comments.js";
 import { MobileBar } from "./components/MobileBar.js";
@@ -703,7 +703,7 @@ export function App() {
     [selectedDef],
   );
   const valueHistory = useValueHistory(results, observedPins);
-  const displayEdges = useMemo(() => withRWEdgeData(edges, rwNodes, results), [edges, rwNodes, results]);
+  const displayEdges = useRWEdgeData(edges, rwNodes, results);
 
   const resultsContextValue = useMemo(
     () => ({ results, actuating, entities, onConfig, onSetValue }),

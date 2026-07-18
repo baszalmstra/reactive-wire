@@ -26,7 +26,7 @@ import { Icon } from "../components/Icon.js";
 import { MacroBoundaryPanel, type BoundaryPin } from "./MacroBoundaryPanel.js";
 import type { ValueType } from "../../../shared/theme.js";
 import { macroDefFromFlow, macroDefToFlow } from "./macro-editing.js";
-import { RWEdge, withRWEdgeData } from "./RWEdge.js";
+import { RWEdge, useRWEdgeData } from "./RWEdge.js";
 import { ModalDialog } from "../components/ModalDialog.js";
 import { useMacroPreview } from "./macro-preview.js";
 
@@ -72,7 +72,7 @@ export function MacroEditor({
   })), [edges]);
   const nodeDefs = useMemo(() => nodes.map((n) => n.data.def), [nodes]);
   const results = useMacroPreview(nodeDefs, viewEdges, macros);
-  const displayEdges = useMemo(() => withRWEdgeData(edges, nodes, results), [edges, nodes, results]);
+  const displayEdges = useRWEdgeData(edges, nodes, results);
 
   const onConnect = useCallback(
     (c: Connection) => {

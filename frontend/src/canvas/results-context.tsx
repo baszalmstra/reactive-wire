@@ -73,7 +73,8 @@ export const useResults = (): ResultsCtx => {
 function sameValue(a: RWValue | null | undefined, b: RWValue | null | undefined): boolean {
   if (a === b) return true;
   if (!a || !b || a.status !== b.status || a.type !== b.type) return false;
-  if (a.status === "ok" && b.status === "ok") return Object.is(a.v, b.v);
+  if ((a.status === "ok" || a.status === "stale")
+    && (b.status === "ok" || b.status === "stale")) return Object.is(a.v, b.v);
   if (a.status === "error" && b.status === "error") return a.msg === b.msg;
   return true;
 }

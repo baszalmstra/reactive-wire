@@ -1,5 +1,5 @@
 import { BaseEdge, EdgeLabelRenderer, getBezierPath, useConnection, type Edge, type EdgeProps } from "@xyflow/react";
-import type { CSSProperties } from "react";
+import { type CSSProperties, useMemo, useRef } from "react";
 import { TYPE_VAR, type ValueType } from "../../../shared/theme.js";
 import { UN, formatValue, type RWValue, type Status } from "../../../shared/value.js";
 import type { EvalResults } from "../../../shared/results.js";
@@ -19,12 +19,37 @@ function sourcePinType(nodes: RWNodeType[], edge: Edge): ValueType {
   return pin?.type ?? "any";
 }
 
-export function withRWEdgeData(edges: Edge[], nodes: RWNodeType[], results: EvalResults): RWEdgeType[] {
-  return edges.map((edge) => {
+interface DecoratedEdgeCache {
+  baseData: Edge["data"];
+  valueType: ValueType;
+  value: RWValue | null;
+  edge: RWEdgeType;
+}
+
+const decoratedByBase = new WeakMap<Edge, DecoratedEdgeCache>();
+
+function sameEdgeValue(a: RWValue | null, b: RWValue | null): boolean {
+  if (a === b) return true;
+  if (!a || !b || a.status !== b.status || a.type !== b.type) return false;
+  if (a.status === "ok" || a.status === "stale") return Object.is(a.v, b.v);
+  return a.msg === b.msg;
+}
+
+/** Decorate edges while preserving identities for edges whose rendered value did not change. */
+export function withRWEdgeData(
+  edges: Edge[],
+  nodes: RWNodeType[],
+  results: EvalResults,
+  previous?: RWEdgeType[],
+): RWEdgeType[] {
+  const decorated = edges.map((edge) => {
     const fallbackType = sourcePinType(nodes, edge);
     const value = edge.sourceHandle ? results.outputs[pinKey(edge.source, edge.sourceHandle)] ?? null : null;
     const valueType = value?.type ?? fallbackType;
-    return {
+    const cached = decoratedByBase.get(edge);
+    if (cached && cached.baseData === edge.data && cached.valueType === valueType
+      && sameEdgeValue(cached.value, value)) return cached.edge;
+    const next: RWEdgeType = {
       ...edge,
       type: "rw",
       animated: false,
@@ -34,7 +59,22 @@ export function withRWEdgeData(edges: Edge[], nodes: RWNodeType[], results: Eval
         value,
       },
     };
+    decoratedByBase.set(edge, { baseData: edge.data, valueType, value, edge: next });
+    return next;
   });
+  if (previous?.length === decorated.length
+    && decorated.every((edge, index) => edge === previous[index])) return previous;
+  return decorated;
+}
+
+/** Retain both the decorated array and each clean edge across unrelated evaluation updates. */
+export function useRWEdgeData(edges: Edge[], nodes: RWNodeType[], results: EvalResults): RWEdgeType[] {
+  const previous = useRef<RWEdgeType[] | undefined>(undefined);
+  return useMemo(() => {
+    const next = withRWEdgeData(edges, nodes, results, previous.current);
+    previous.current = next;
+    return next;
+  }, [edges, nodes, results]);
 }
 
 function edgeStatus(value: RWValue): Status {

@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import type { NodeData } from "../../../shared/node-types.js";
 import { emptyResults, type EvalResults } from "../../../shared/results.js";
 import { pinKey } from "../../../shared/identity.js";
-import { V } from "../../../shared/value.js";
+import { ST, V, type RWValue } from "../../../shared/value.js";
 import { ResultsProvider, type ResultsCtx, useNodeResults } from "./results-context.js";
 
 const node = (id: string): NodeData => ({
@@ -14,13 +14,17 @@ const node = (id: string): NodeData => ({
 const a = node("a");
 const b = node("b");
 
-function withValues(aValue: number, bValue: number): EvalResults {
+function withValueObjects(aValue: RWValue<"num">, bValue: RWValue<"num">): EvalResults {
   const results = emptyResults();
-  results.outputs[pinKey("a", "out")] = V("num", aValue);
-  results.outputs[pinKey("b", "out")] = V("num", bValue);
+  results.outputs[pinKey("a", "out")] = aValue;
+  results.outputs[pinKey("b", "out")] = bValue;
   results.health.a = "ok";
   results.health.b = "ok";
   return results;
+}
+
+function withValues(aValue: number, bValue: number): EvalResults {
+  return withValueObjects(V("num", aValue), V("num", bValue));
 }
 
 const renders = { a: 0, b: 0 };
@@ -49,5 +53,18 @@ describe("node-scoped result subscriptions", () => {
 
     act(() => view.rerender(<Harness value={context(withValues(1, 3))} />));
     expect(renders).toEqual({ a: 1, b: 2 });
+  });
+
+  it("rerenders for changed stale payloads but not equivalent stale values", () => {
+    renders.a = 0;
+    renders.b = 0;
+    const view = render(<Harness value={context(withValueObjects(ST("num", 1), ST("num", 2)))} />);
+    expect(renders).toEqual({ a: 1, b: 1 });
+
+    act(() => view.rerender(<Harness value={context(withValueObjects(ST("num", 1), ST("num", 2)))} />));
+    expect(renders).toEqual({ a: 1, b: 1 });
+
+    act(() => view.rerender(<Harness value={context(withValueObjects(ST("num", 3), ST("num", 2)))} />));
+    expect(renders).toEqual({ a: 2, b: 1 });
   });
 });
