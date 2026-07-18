@@ -6,6 +6,7 @@ import { base } from "./template-base.js";
 export const now: NodeDef = {
   type: "now",
   description: "Outputs the current time as a datetime instant.",
+  dependsOnClock: true,
   template: {
     type: "now", category: "Time", label: "Now", icon: "const",
     make: (id) => base(id, {
@@ -22,6 +23,7 @@ export const now: NodeDef = {
 export const since: NodeDef = {
   type: "since",
   description: "Outputs the time elapsed since the given instant as a Duration.",
+  dependsOnClock: true,
   template: {
     type: "since", category: "Time", label: "Since", icon: "const",
     make: (id) => base(id, {

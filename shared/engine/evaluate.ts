@@ -13,6 +13,7 @@ import { REGISTRY } from "./nodes/index.js";
 import type { NodeDef } from "./node-def.js";
 import { copyRecord, createRecord, ownValue, setOwn } from "../record.js";
 import { isDescendantPath, pinKey } from "../identity.js";
+import { compileGraph, dirtyClosure, type CompiledGraph } from "./compile.js";
 import {
   inputHelperType,
   memoryValue,
@@ -130,18 +131,55 @@ export function evaluate(
   if (nodes.some((n) => isMacroInstance(n.type))) {
     return evaluateWithMacros(nodes, edges, entities, memory, now, sources, macros);
   }
-  const byId = createRecord<RuntimeNode>();
-  for (const n of nodes) setOwn(byId, n.id, n);
-  const incoming = createRecord<{ node: string; pin: string }>();
-  edges.forEach((e) => setOwn(incoming, pinKey(e.to.node, e.to.pin), e.from));
+  return evaluateCompiled(compileGraph(nodes, edges), entities, memory, now, sources);
+}
+
+/** Results plus operation-count evidence for one retained evaluation transaction. */
+export interface EvaluationState {
+  results: EvalResults;
+  evaluatedNodeIds: readonly string[];
+}
+
+/** Evaluate an already-expanded and indexed graph in full. */
+export function evaluateCompiled(
+  compiled: CompiledGraph,
+  entities: EntityMap,
+  memory: Memory,
+  now: number = Date.now(),
+  sources: SourceMap = {},
+): EvalResults {
+  return evaluateIncremental(compiled, null, null, entities, memory, now, sources).results;
+}
+
+/** Recompute a downstream dirty closure while retaining clean results and memory. */
+export function evaluateIncremental(
+  compiled: CompiledGraph,
+  previous: EvalResults | null,
+  roots: Iterable<string> | null,
+  entities: EntityMap,
+  memory: Memory,
+  now: number = Date.now(),
+  sources: SourceMap = {},
+): EvaluationState {
+  const dirty = previous && roots !== null
+    ? dirtyClosure(compiled, roots)
+    : new Set(compiled.nodes.map((node) => node.id));
+  if (previous && dirty.size === 0) return { results: previous, evaluatedNodeIds: [] };
+
+  const incoming = compiled.incoming;
   const nodeCache = createRecord<ReturnType<NodeDef["eval"]>>();
   const inCache = createRecord<RWValue | null>();
   const visiting = createRecord<boolean>();
   const pendingMemory = createRecord<NodeMemory>();
+  const evaluatedNodeIds: string[] = [];
 
   function outVal(nodeId: string, pinId: string): RWValue {
-    const n = ownValue(byId, nodeId);
+    const n = compiled.nodeById.get(nodeId);
     if (!n) return UN("any");
+    if (previous && !dirty.has(nodeId)) {
+      return ownValue(previous.outputs, pinKey(nodeId, pinId))
+        ?? UN(n.outputs.find((pin) => pin.id === pinId)?.type ?? "any");
+    }
     const evaluation = computeNode(n);
     return ownValue(evaluation.outputs, pinId) ?? UN(n.outputs.find((p) => p.id === pinId)?.type ?? "any");
   }
@@ -149,28 +187,27 @@ export function evaluate(
   function inVal(nodeId: string, pinId: string): RWValue | null {
     const key = pinKey(nodeId, pinId);
     if (key in inCache) return inCache[key]!;
-    const src = incoming[key];
-    const v = src ? outVal(src.node, src.pin) : null;
-    inCache[key] = v;
-    return v;
+    const src = incoming.get(key);
+    const value = src ? outVal(src.node, src.pin) : null;
+    inCache[key] = value;
+    return value;
   }
 
   function resolveType(n: RuntimeNode, declared: ValueType, fallbackPins: string[]): ValueType {
     if (declared !== "any") return declared;
-    for (const pid of fallbackPins) {
-      const iv = inVal(n.id, pid);
-      if (iv && iv.type !== "any") return iv.type;
+    for (const pinId of fallbackPins) {
+      const value = inVal(n.id, pinId);
+      if (value && value.type !== "any") return value.type;
     }
     return "any";
   }
 
   function resolveGroupType(n: RuntimeNode, fallback: ValueType): ValueType {
-    for (const pid of n.typeGroup ?? []) {
-      const src = incoming[pinKey(n.id, pid)];
-      if (src) {
-        const v = outVal(src.node, src.pin);
-        if (v.type !== "any") return v.type;
-      }
+    for (const pinId of n.typeGroup ?? []) {
+      const src = incoming.get(pinKey(n.id, pinId));
+      if (!src) continue;
+      const value = outVal(src.node, src.pin);
+      if (value.type !== "any") return value.type;
     }
     return fallback;
   }
@@ -182,14 +219,12 @@ export function evaluate(
   }
 
   function inEff(n: RuntimeNode, pinId: string): RWValue | null {
-    const pin = n.inputs.find((p) => p.id === pinId);
+    const pin = n.inputs.find((candidate) => candidate.id === pinId);
     if (!pin) return null;
-    if (incoming[pinKey(n.id, pinId)]) return inVal(n.id, pinId);
-    if (pin.editable) {
-      const raw = n.values?.[pinId];
-      return raw === undefined ? null : parseEntityValue(raw, effType(n, pin));
-    }
-    return null;
+    if (incoming.has(pinKey(n.id, pinId))) return inVal(n.id, pinId);
+    if (!pin.editable) return null;
+    const raw = n.values?.[pinId];
+    return raw === undefined ? null : parseEntityValue(raw, effType(n, pin));
   }
 
   function cloneMemoryValue(value: unknown): unknown {
@@ -207,18 +242,18 @@ export function evaluate(
   }
 
   function booleanSeed(n: RuntimeNode, cfg: Record<string, unknown>): NodeMemory {
-    const previous = memoryValue(memory, n.id);
-    if (previous?.seeded) return cloneMemory(previous);
+    const previousMemory = memoryValue(memory, n.id);
+    if (previousMemory?.seeded) return cloneMemory(previousMemory);
     let initial = !!cfg.initial;
     let seeded = true;
     if (statePolicy(cfg) === "reseed-from-world") {
-      const e = entities[String(cfg.entity_id ?? "")];
-      const parsed = e ? parseEntityValue(e.state, "bool") : null;
+      const entity = entities[String(cfg.entity_id ?? "")];
+      const parsed = entity ? parseEntityValue(entity.state, "bool") : null;
       if (parsed?.status === "ok") initial = parsed.v === true;
       else seeded = false;
     }
-    const state = seeded || previous === undefined ? initial : previous.state;
-    return { state, prev: previous?.prev ?? false, seeded };
+    const state = seeded || previousMemory === undefined ? initial : previousMemory.state;
+    return { state, prev: previousMemory?.prev ?? false, seeded };
   }
 
   function computeNode(n: RuntimeNode): ReturnType<NodeDef["eval"]> {
@@ -233,6 +268,7 @@ export function evaluate(
         for (const pin of n.outputs) setOwn(outputs, pin.id, UN(pin.type));
         const unknown = { outputs };
         setOwn(nodeCache, n.id, unknown);
+        evaluatedNodeIds.push(n.id);
         return unknown;
       }
       const cfg = n.config ?? {};
@@ -240,9 +276,9 @@ export function evaluate(
       const evaluation = def.eval({
         n,
         cfg,
-        conn: n.inputs.filter((p) => incoming[pinKey(n.id, p.id)]),
-        inVal: (pid) => inVal(n.id, pid),
-        inEff: (pid) => inEff(n, pid),
+        conn: n.inputs.filter((pin) => incoming.has(pinKey(n.id, pin.id))),
+        inVal: (pinId) => inVal(n.id, pinId),
+        inEff: (pinId) => inEff(n, pinId),
         resolveType: (declared, fallbackPins) => resolveType(n, declared, fallbackPins),
         resolveGroupType: (fallback) => resolveGroupType(n, fallback),
         seedBool: () => (seed ??= booleanSeed(n, cfg)),
@@ -258,41 +294,45 @@ export function evaluate(
       }
       if (evaluation.nextMemory) setOwn(pendingMemory, n.id, { ...evaluation.nextMemory });
       setOwn(nodeCache, n.id, evaluation);
+      evaluatedNodeIds.push(n.id);
       return evaluation;
     } finally {
       visiting[n.id] = false;
     }
   }
 
+  // Incremental transactions collect only dirty entries. They merge into the retained maps only
+  // after all node/sink work succeeds, avoiding both whole-map copies and partial failed commits.
   const outputs = createRecord<RWValue>();
   const inputs = createRecord<RWValue | null>();
   const connected = createRecord<boolean>();
-  nodes.forEach((n) => {
-    // Even output-less sinks participate in the node transaction exactly once.
+  for (const n of compiled.nodes) {
+    if (!dirty.has(n.id)) continue;
     computeNode(n);
-    n.outputs.forEach((p) => { outputs[pinKey(n.id, p.id)] = outVal(n.id, p.id); });
-    n.inputs.forEach((p) => {
-      const key = pinKey(n.id, p.id);
-      inputs[key] = inEff(n, p.id);
-      connected[key] = !!incoming[key];
-    });
-  });
+    for (const pin of n.outputs) outputs[pinKey(n.id, pin.id)] = outVal(n.id, pin.id);
+    for (const pin of n.inputs) {
+      const key = pinKey(n.id, pin.id);
+      inputs[key] = inEff(n, pin.id);
+      connected[key] = incoming.has(key);
+    }
+  }
 
   const health = createRecord<"ok" | "warn" | "error">();
-  nodes.forEach((n) => {
-    let h: "ok" | "warn" | "error" = "ok";
-    n.outputs.forEach((p) => {
-      const v = outputs[pinKey(n.id, p.id)];
-      if (p.ghost || (v && v.status === "error")) h = "error";
-      else if (h !== "error" && v && (v.status === "unavailable" || v.status === "stale")) h = "warn";
-    });
-    n.inputs.forEach((p) => {
-      const v = inputs[pinKey(n.id, p.id)];
-      if (v && v.status === "error") h = "error";
-      else if (h === "ok" && v && (v.status === "unavailable" || v.status === "stale")) h = "warn";
-    });
-    health[n.id] = h;
-  });
+  for (const n of compiled.nodes) {
+    if (!dirty.has(n.id)) continue;
+    let nodeHealth: "ok" | "warn" | "error" = "ok";
+    for (const pin of n.outputs) {
+      const value = outputs[pinKey(n.id, pin.id)];
+      if (pin.ghost || value?.status === "error") nodeHealth = "error";
+      else if (nodeHealth !== "error" && (value?.status === "unavailable" || value?.status === "stale")) nodeHealth = "warn";
+    }
+    for (const pin of n.inputs) {
+      const value = inputs[pinKey(n.id, pin.id)];
+      if (value?.status === "error") nodeHealth = "error";
+      else if (nodeHealth === "ok" && (value?.status === "unavailable" || value?.status === "stale")) nodeHealth = "warn";
+    }
+    health[n.id] = nodeHealth;
+  }
 
   const results: EvalResults = {
     outputs,
@@ -302,9 +342,10 @@ export function evaluate(
     connected,
     sinks: createRecord<ServiceCall | null>(),
   };
-  nodes.forEach((n) => {
+  for (const n of compiled.nodes) {
+    if (!dirty.has(n.id)) continue;
     const def = REGISTRY[n.type];
-    if (!def?.evalSink) return;
+    if (!def?.evalSink) continue;
     let call: ServiceCall | null = null;
     if (!sinkCommandStatus(n, results)) {
       const sink = def.evalSink({
@@ -319,12 +360,19 @@ export function evaluate(
     }
     results.sinks[n.id] = call;
     results.actions[n.id] = describeSink(n, results);
-  });
+  }
 
-  // Commit only after every output, input, health result, and sink proposal succeeded.
   for (const nodeId of Object.keys(pendingMemory)) setMemoryValue(memory, nodeId, pendingMemory[nodeId]!);
-
-  return results;
+  if (previous) {
+    for (const [key, value] of Object.entries(outputs)) setOwn(previous.outputs, key, value);
+    for (const [key, value] of Object.entries(inputs)) setOwn(previous.inputs, key, value);
+    for (const [key, value] of Object.entries(health)) setOwn(previous.health, key, value);
+    for (const [key, value] of Object.entries(results.actions)) setOwn(previous.actions, key, value);
+    for (const [key, value] of Object.entries(connected)) setOwn(previous.connected, key, value);
+    for (const [key, value] of Object.entries(results.sinks)) setOwn(previous.sinks, key, value);
+    return { results: previous, evaluatedNodeIds };
+  }
+  return { results, evaluatedNodeIds };
 }
 
 /**

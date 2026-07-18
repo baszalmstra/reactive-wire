@@ -96,6 +96,8 @@ export interface NodeDef<TType extends string = string> {
   type: TType;
   template: NodeTemplate;
   description: string;
+  /** This definition reads the transaction clock directly and must be a clock dirty root. */
+  dependsOnClock?: boolean;
   /** Compute all declared outputs and proposed memory exactly once per transaction. */
   eval: (ctx: EvalCtx<TType>) => NodeEvaluation;
   /** For sinks: compute the desired call and proposed memory exactly once per transaction. */

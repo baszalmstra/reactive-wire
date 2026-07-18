@@ -101,12 +101,13 @@ distinct visual that recolors on resolution; serialization stores **per-node pin
 
 ### 3.1 How decisions evolved during implementation
 
-- **D10 (reactive engine) — superseded.** We did **not** ship a signals core. During
-  implementation we consolidated onto a **single pure-recompute engine** (`evaluate`), made
-  **Kleene-correct** for 3-valued logic, used by **both** the editor (preview) and the server
-  (actuation). Signals' only edge here (lazy/glitch-free) is irrelevant at home-automation
-  graph sizes, and one shared pure engine removed a graph-translation layer and the
-  two-engine drift. `@vue/reactivity` has been dropped from the runtime entirely. See §8.
+- **D10 (reactive engine) — superseded.** We did **not** ship a signals core. The shared
+  transactional evaluator is **Kleene-correct** for 3-valued logic and remains the reference
+  semantics used by the editor. A deployed graph is expanded, detached, frozen, and compiled once;
+  the server retains results and evaluates only the ordered downstream dirty closure for entity,
+  fetch, clock, and retry causes. Differential tests keep that incremental path equivalent to full
+  `evaluate`. This preserves one semantic engine without rebuilding graph indexes on every event.
+  `@vue/reactivity` has been dropped from the runtime entirely. See §8.
 - **D22 (editable pin values) — added.** A pin may carry an editable literal value
   (`PinDef.editable`, stored in `NodeData.values[pinId]`). One mechanism, three uses: an
   **input default** when unconnected, a **constant's** output literal, and **compare's**
@@ -367,10 +368,11 @@ and wire model, an always-on **`src/server/`**, a React **`frontend/`** editor, 
 
 **Shared engine — `shared/`** (single source of truth for semantics, imported by **both** the
 editor and the server; the server never reaches into `frontend/`): a neutral, DOM-free directory
-both tsconfigs include. `shared/engine/evaluate.ts` is a transactional recompute over
-`(nodes, edges, entityMap, memory, now, sources)` → resolved `RWValue` per pin, plus per-node
-health, sink display actions, and a `connected` map. Each node runs once and proposes all outputs
-plus replacement memory; proposals commit together only after the complete recompute succeeds.
+both tsconfigs include. `shared/engine/evaluate.ts` defines the transactional reference evaluator
+and retained incremental evaluator over resolved `RWValue` pins, health, sink actions, and memory.
+`shared/engine/compile.ts` expands and freezes a deployment once and builds incoming, downstream,
+entity/fetch/clock, sink-order, and durable-node indexes. Each dirty node runs once and proposes all
+outputs plus replacement memory; proposals commit together only after the transaction succeeds.
 Kleene 3-valued logic (D18); editable pin
 defaults via `inEff` (D22); generic-type resolution via `typeGroup`; strict-DAG cycle guard
 (D17). `sinkCalls()` turns sink inputs into concrete HA service calls (non-`Ok` → skipped — the
@@ -405,8 +407,10 @@ the sinks `sink-light`/`sink-call`/`sink-climate`/`sink-cover`/`sink-input`/`sin
   ordered compact deltas afterward, accepts `deploy`
   requests, and carries the collaborative-document frames. Every upgrade passes the
   connection-policy check first.
-- `runtime.ts` — `Deployer`: inlines macros, then re-runs the deployed graph with `evaluate` on
-  every entity change and on a 1 s clock tick. Each sink owns a serialized delivery channel:
+- `runtime.ts` — `Deployer`: compiles macro-expanded graphs once, retains results, and schedules
+  ordered dirty-closure transactions from entity deltas, fetch completions, observed clock roots,
+  and sink retries. Graphs without clock-dependent nodes have no clock timer. Debug state exposes
+  transaction cause and evaluated-node counts. Each sink owns a serialized delivery channel:
   reconciling/command work coalesces to the latest desired call, while transient work uses a
   bounded FIFO with visible overflow state. Thus Home Assistant never receives overlapping calls
   from one sink. Delivery tracks observed, enqueued, attempted, and acknowledged states separately;

@@ -1,6 +1,6 @@
-import { evaluate, isSink, isTransientSink, sinkCalls, type Memory, type ViewEdge } from "../../shared/engine/evaluate.js";
+import { evaluateIncremental, isSink, isTransientSink, sinkCalls, type Memory, type ViewEdge } from "../../shared/engine/evaluate.js";
+import { compileGraph, type CompiledGraph } from "../../shared/engine/compile.js";
 import { createMemory, memoryValue, setMemoryValue } from "../../shared/engine/engine-support.js";
-import { expandMacros } from "../../shared/engine/expand.js";
 import type { RuntimeMacroMap } from "../../shared/macros.js";
 import type { Health } from "../../shared/node-types.js";
 import type { RuntimeNode } from "../../shared/runtime-types.js";
@@ -8,7 +8,7 @@ import type { EntityMap } from "../../shared/entities.js";
 import type { EvalResults, ServiceCall } from "../../shared/results.js";
 import type { RWValue } from "../../shared/value.js";
 import { pinKey } from "../../shared/identity.js";
-import { type EntityFeed, type HAClient, type HAConnectionStatus } from "../ha/client.js";
+import { type EntityFeed, type EntityUpdate, type HAClient, type HAConnectionStatus } from "../ha/client.js";
 import { log } from "./log.js";
 import { Poller, type FetchFn } from "./poller.js";
 
@@ -72,9 +72,22 @@ export interface DeployerSnapshot {
   haStatus: HAConnectionStatus;
   /** Epoch ms of the last recompute, or null if the graph has never run. */
   evaluatedAt: number | null;
+  /** Number of non-empty evaluation transactions in this deployment generation. */
+  transactionCount: number;
+  /** Cause of the last non-empty transaction. */
+  lastCause: EvaluationCause["kind"] | null;
+  /** Nodes actually evaluated in the last transaction (operation-count evidence). */
+  lastEvaluatedNodeCount: number;
   nodes: Record<string, DebugNode>;
   sinks: Record<string, DebugSink>;
 }
+
+export type EvaluationCause =
+  | { kind: "deploy" | "ha-full" | "ha-ready" }
+  | { kind: "entities"; entityIds: readonly string[] }
+  | { kind: "fetch"; nodeId: string }
+  | { kind: "clock" }
+  | { kind: "sink-retry"; nodeId: string };
 
 interface SinkFailure {
   /** The desired call + observed-world context that failed. */
@@ -214,7 +227,7 @@ export interface DurableMemory {
  * core recompute itself stays synchronous and simply reads those last values.
  */
 export class Deployer {
-  private graph: { nodes: RuntimeNode[]; edges: ViewEdge[] } | null = null;
+  private graph: CompiledGraph | null = null;
   private mem: Memory = createMemory();
   private actuate = false;
   private generation = 0;
@@ -224,27 +237,26 @@ export class Deployer {
   private readonly callFailures = new Map<string, SinkFailure>();
   private readonly lastTriggeredAt = new Map<string, number>();
   private readonly lastTriggeredCall = new Map<string, ServiceCall>();
-  private tick: ReturnType<typeof setInterval> | null;
+  private tick: ReturnType<typeof setInterval> | null = null;
   private readonly poller: Poller;
   private readonly unsubscribeEntities: () => void;
   private readonly unsubscribeConnection: () => void;
   private stopped = false;
   private lastResults: EvalResults | null = null;
   private lastRunAt: number | null = null;
+  private transactionCount = 0;
+  private lastCause: EvaluationCause["kind"] | null = null;
+  private lastEvaluatedNodeCount = 0;
 
   constructor(
     private readonly ha: HAClient & EntityFeed,
-    tickMs = 1000,
+    private readonly tickMs = 1000,
     fetchFn: FetchFn = noFetch,
     private readonly durable?: DurableMemory,
   ) {
-    this.unsubscribeEntities = ha.onEntities(() => this.run());
+    this.unsubscribeEntities = ha.onEntities((update) => this.entitiesChanged(update));
     this.unsubscribeConnection = ha.onConnection((status) => this.connectionChanged(status));
-    this.poller = new Poller(fetchFn, () => this.run());
-    // A clock tick re-evaluates on a fixed interval so derivations that depend on time (now,
-    // elapsed durations) advance even when no entity changes — without it, "open for 10 min"
-    // would only re-check when some other entity happened to report a change.
-    this.tick = setInterval(() => this.run(), tickMs);
+    this.poller = new Poller(fetchFn, (nodeId) => this.run({ kind: "fetch", nodeId }));
   }
 
   /**
@@ -255,7 +267,7 @@ export class Deployer {
    */
   deploy(nodes: RuntimeNode[], edges: ViewEdge[], actuate: boolean, macros: RuntimeMacroMap = {}): void {
     if (this.stopped) throw new Error("Deployer has been stopped");
-    const flat = expandMacros(nodes, edges, macros, undefined, true);
+    const compiled = compileGraph(nodes, edges, macros);
     this.generation += 1;
     this.resetChannels();
     this.lastNonReconciling.clear();
@@ -263,14 +275,22 @@ export class Deployer {
     this.callFailures.clear();
     this.lastTriggeredAt.clear();
     this.lastTriggeredCall.clear();
-    this.graph = { nodes: flat.nodes, edges: flat.edges };
+    this.graph = compiled;
     this.actuate = actuate;
     this.mem = createMemory();
     // Durable slots are restored before the first run so an accumulated fold/scan resumes from its
     // persisted history rather than reseeding; stale slots for departed nodes are dropped here.
-    this.durable?.restore(flat.nodes, this.mem);
-    this.poller.start(flat.nodes);
-    this.run();
+    this.durable?.restore(compiled.durableNodes, this.mem);
+    this.poller.start(compiled.nodes);
+    if (this.tick !== null) clearInterval(this.tick);
+    this.tick = compiled.clockRoots.size > 0
+      ? setInterval(() => this.run({ kind: "clock" }), this.tickMs)
+      : null;
+    this.transactionCount = 0;
+    this.lastCause = null;
+    this.lastEvaluatedNodeCount = 0;
+    this.lastResults = null;
+    this.run({ kind: "deploy" });
   }
 
   /**
@@ -298,6 +318,9 @@ export class Deployer {
     this.lastTriggeredCall.clear();
     this.lastResults = null;
     this.lastRunAt = null;
+    this.transactionCount = 0;
+    this.lastCause = null;
+    this.lastEvaluatedNodeCount = 0;
     this.mem = createMemory();
     this.durable?.stop();
   }
@@ -356,6 +379,9 @@ export class Deployer {
       mode: this.actuate ? "live" : "dry-run",
       haStatus: this.ha.connectionStatus(),
       evaluatedAt: this.lastRunAt,
+      transactionCount: this.transactionCount,
+      lastCause: this.lastCause,
+      lastEvaluatedNodeCount: this.lastEvaluatedNodeCount,
       nodes,
       sinks,
     };
@@ -379,7 +405,7 @@ export class Deployer {
     // reconnect can never start overlapping work for the same sink.
     this.lastReconcilingAttempt.clear();
     if (status.phase === "ready") {
-      this.run();
+      this.run({ kind: "ha-ready" });
       for (const channel of this.channels.values()) {
         if (channel.retryDelivery && !channel.retryTimer) this.scheduleRetry(channel, 0);
         this.pumpChannel(channel);
@@ -387,15 +413,52 @@ export class Deployer {
     }
   }
 
-  private run(): void {
+  private entitiesChanged(update: EntityUpdate): void {
+    if (update.kind === "full") {
+      this.run({ kind: "ha-full" });
+      return;
+    }
+    this.run({ kind: "entities", entityIds: [...Object.keys(update.changed), ...update.removed] });
+  }
+
+  private dirtyRoots(cause: EvaluationCause): Iterable<string> | null {
+    if (!this.graph || cause.kind === "deploy" || cause.kind === "ha-full" || cause.kind === "ha-ready") return null;
+    if (cause.kind === "clock") return this.graph.clockRoots;
+    if (cause.kind === "fetch" || cause.kind === "sink-retry") return [cause.nodeId];
+    if (cause.kind !== "entities") return [];
+    const roots = new Set<string>();
+    for (const entityId of cause.entityIds) {
+      for (const nodeId of this.graph.entityRoots.get(entityId) ?? []) roots.add(nodeId);
+    }
+    return roots;
+  }
+
+  private run(cause: EvaluationCause): void {
     if (this.stopped || !this.graph || this.ha.connectionStatus().phase !== "ready") return;
+    const roots = this.dirtyRoots(cause);
     const entities: EntityMap = this.ha.entitiesSnapshot().entities as EntityMap;
-    const results = evaluate(this.graph.nodes, this.graph.edges, entities, this.mem, Date.now(), this.poller.sources());
-    this.durable?.capture(this.graph.nodes, this.mem);
+    const transactionNow = Date.now();
+    const transaction = evaluateIncremental(
+      this.graph,
+      this.lastResults,
+      roots,
+      entities,
+      this.mem,
+      transactionNow,
+      this.poller.sources(),
+    );
+    if (transaction.evaluatedNodeIds.length === 0) return;
+    this.durable?.capture(this.graph.durableNodes, this.mem);
+    const results = transaction.results;
     this.lastResults = results;
-    this.lastRunAt = Date.now();
-    const byId = new Map(this.graph.nodes.map((n) => [n.id, n]));
-    for (const n of this.graph.nodes) {
+    this.lastRunAt = transactionNow;
+    this.transactionCount += 1;
+    this.lastCause = cause.kind;
+    this.lastEvaluatedNodeCount = transaction.evaluatedNodeIds.length;
+    const evaluated = new Set(transaction.evaluatedNodeIds);
+    const evaluatedNodes = this.graph.nodes.filter((node) => evaluated.has(node.id));
+
+    for (const n of evaluatedNodes) {
       if (!isSink(n.type) || isTransientSink(n.type) || results.sinks[n.id]) continue;
       if (isReconcilingSinkType(n.type)) this.lastReconcilingAttempt.delete(n.id);
       this.callFailures.delete(n.id);
@@ -405,8 +468,8 @@ export class Deployer {
         this.cancelRetry(channel);
       }
     }
-    for (const { nodeId, call } of sinkCalls(this.graph.nodes, results)) {
-      const nodeType = byId.get(nodeId)?.type ?? "";
+    for (const { nodeId, call } of sinkCalls(evaluatedNodes, results)) {
+      const nodeType = this.graph.nodeById.get(nodeId)?.type ?? "";
       const mode: SinkMode = isTransientSink(nodeType) ? "transient" : nodeType === "sink-call" ? "command" : "reconciling";
       const key = keyOf(call);
       const failureKey = mode === "reconciling" ? reconcilingAttemptKey(call, entities) : key;
@@ -537,7 +600,7 @@ export class Deployer {
       if (this.stopped || this.channels.get(channel.nodeId) !== channel || delivery.generation !== this.generation) return;
       if (this.ha.connectionStatus().phase !== "ready") return;
       // Re-evaluation may cancel a stale command/correction or replace it with newer desired work.
-      if (channel.mode !== "transient") this.run();
+      if (channel.mode !== "transient") this.run({ kind: "sink-retry", nodeId: channel.nodeId });
       if (channel.retryDelivery !== delivery) return;
       channel.retryDelivery = null;
       delivery.connectionEpoch = this.ha.connectionStatus().epoch;

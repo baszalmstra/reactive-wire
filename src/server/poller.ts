@@ -64,7 +64,7 @@ export class Poller {
 
   constructor(
     private readonly fetchFn: FetchFn,
-    private readonly onUpdate: () => void,
+    private readonly onUpdate: (nodeId: string) => void,
   ) {}
 
   /** The latest fetched result per source node, for handing to evaluate(). */
@@ -154,7 +154,7 @@ export class Poller {
 
     if (!this.isCurrent(state)) return;
     this.results[state.nodeId] = next;
-    this.onUpdate();
+    this.onUpdate(state.nodeId);
     if (next.status === "ok") {
       state.failures = 0;
       this.schedule(state, state.intervalMs);

@@ -75,7 +75,7 @@ describe("Poller", () => {
     const p = new Poller(() => okText("7"), onUpdate);
     p.start([fetchNode("f", { url: "http://x" })]);
     await flush();
-    expect(onUpdate).toHaveBeenCalled();
+    expect(onUpdate).toHaveBeenCalledWith("f");
     p.stop();
     expect(p.sources()["f"]).toBeUndefined();
   });
