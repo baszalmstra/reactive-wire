@@ -8,6 +8,7 @@ import { lightSinkPins, type LightCaps } from "../../../shared/engine/light-caps
 import type { NodeData } from "../../../shared/node-types.js";
 import type { RWNodeType } from "./validation.js";
 import type { SinkAction } from "../../../shared/results.js";
+import { pinKey } from "../../../shared/identity.js";
 
 const ID = "light";
 
@@ -42,10 +43,10 @@ function LightNode({
   actuating?: boolean;
 }) {
   const results = emptyResults();
-  results.inputs[`${ID}:on`] = on ?? null;
-  results.inputs[`${ID}:color`] = color ?? null;
-  results.inputs[`${ID}:temperature`] = temperature ?? null;
-  results.inputs[`${ID}:brightness`] = brightness ?? null;
+  results.inputs[pinKey(ID, "on")] = on ?? null;
+  results.inputs[pinKey(ID, "color")] = color ?? null;
+  results.inputs[pinKey(ID, "temperature")] = temperature ?? null;
+  results.inputs[pinKey(ID, "brightness")] = brightness ?? null;
   if (action) results.actions[ID] = action;
 
   const props = { id: ID, data: { def: lightDef(caps, title) }, selected: false } as unknown as NodeProps<RWNodeType>;

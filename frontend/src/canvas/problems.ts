@@ -73,7 +73,7 @@ export function deriveProblems(
       const unwired = ["cond", "a", "b"].filter((pid) => !results.connected[pinKey(n.id, pid)]);
       if (unwired.length) {
         // The output type is fixed by either branch, so it is only still 'any' when neither a nor b is wired.
-        const typeUnresolved = !results.connected[`${n.id}:a`] && !results.connected[`${n.id}:b`];
+        const typeUnresolved = !results.connected[pinKey(n.id, "a")] && !results.connected[pinKey(n.id, "b")];
         const tail = typeUnresolved ? "; output type is still 'any'." : ".";
         out.push({
           id: `sel-${n.id}`,

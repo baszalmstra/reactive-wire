@@ -4,6 +4,7 @@ import { emptyResults, type EvalResults } from "../../../shared/results.js";
 import { V, UN, type RWValue } from "../../../shared/value.js";
 import { lightSinkPins, type LightCaps } from "../../../shared/engine/light-caps.js";
 import type { NodeData } from "../../../shared/node-types.js";
+import { pinKey } from "../../../shared/identity.js";
 
 const ID = "light";
 
@@ -20,10 +21,10 @@ function lightNode(caps: LightCaps | null, title = "light.living_room"): NodeDat
 // Feed the inspector the pin values the engine would have derived for the selected light.
 function resultsWith(vals: { on: RWValue; color?: RWValue; temperature?: RWValue; brightness?: RWValue }): EvalResults {
   const r = emptyResults();
-  r.inputs[`${ID}:on`] = vals.on;
-  if (vals.color) r.inputs[`${ID}:color`] = vals.color;
-  if (vals.temperature) r.inputs[`${ID}:temperature`] = vals.temperature;
-  if (vals.brightness) r.inputs[`${ID}:brightness`] = vals.brightness;
+  r.inputs[pinKey(ID, "on")] = vals.on;
+  if (vals.color) r.inputs[pinKey(ID, "color")] = vals.color;
+  if (vals.temperature) r.inputs[pinKey(ID, "temperature")] = vals.temperature;
+  if (vals.brightness) r.inputs[pinKey(ID, "brightness")] = vals.brightness;
   return r;
 }
 

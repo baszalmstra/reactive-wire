@@ -120,10 +120,10 @@ export function RWNode({ id, data, selected }: NodeProps<RWNodeType>) {
       >
         {def.type === "sink-light" ? (
           <LightGlyph
-            on={results.inputs[`${id}:on`]}
-            color={results.inputs[`${id}:color`]}
-            temperature={results.inputs[`${id}:temperature`]}
-            brightness={results.inputs[`${id}:brightness`]}
+            on={results.inputs[pinKey(id, "on")]}
+            color={results.inputs[pinKey(id, "color")]}
+            temperature={results.inputs[pinKey(id, "temperature")]}
+            brightness={results.inputs[pinKey(id, "brightness")]}
           />
         ) : (
           <span className="text-rw-dim flex shrink-0">
@@ -193,7 +193,7 @@ export function RWNode({ id, data, selected }: NodeProps<RWNodeType>) {
         {def.type === "compare" && (
           <div className="mx-3 mt-2 flex items-center gap-1.5">
             <span className="text-[10px] text-rw-faint">op</span>
-            <OpSelect value={String(def.config?.op ?? "<")} type={results.inputs[`${id}:a`]?.type ?? "any"} onChange={(v) => onConfig(id, { op: v })} />
+            <OpSelect value={String(def.config?.op ?? "<")} type={results.inputs[pinKey(id, "a")]?.type ?? "any"} onChange={(v) => onConfig(id, { op: v })} />
           </div>
         )}
         {def.type === "duration" && (

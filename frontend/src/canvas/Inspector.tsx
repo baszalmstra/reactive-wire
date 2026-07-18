@@ -188,10 +188,10 @@ export function Inspector({
             <div className="rw-insp-sect">Light</div>
             <div className="rw-insp-card">
               <LightPreview
-                on={results.inputs[`${node.id}:on`]}
-                color={results.inputs[`${node.id}:color`]}
-                temperature={results.inputs[`${node.id}:temperature`]}
-                brightness={results.inputs[`${node.id}:brightness`]}
+                on={results.inputs[pinKey(node.id, "on")]}
+                color={results.inputs[pinKey(node.id, "color")]}
+                temperature={results.inputs[pinKey(node.id, "temperature")]}
+                brightness={results.inputs[pinKey(node.id, "brightness")]}
               />
             </div>
           </>

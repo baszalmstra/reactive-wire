@@ -3,6 +3,7 @@ import { deriveProblems, problemCounts } from "../frontend/src/canvas/problems.j
 import type { EvalResults } from "../shared/results.js";
 import type { NodeData } from "../shared/node-types.js";
 import { ER, ST, UN, V } from "../shared/value.js";
+import { pinKey } from "../shared/identity.js";
 
 function node(overrides: Partial<NodeData> = {}): NodeData {
   return {
@@ -119,6 +120,32 @@ describe("deriveProblems warning and error representation", () => {
       severity: "warn",
       scope: "structural",
       message: "Unresolved — cond, a, b not wired; output type is still 'any'.",
+    }));
+  });
+
+  it("resolves select wiring with delimiter-containing node ids", () => {
+    const n = node({
+      id: "select:west",
+      type: "select",
+      title: "Select",
+      inputs: [
+        { id: "cond", label: "cond", type: "bool" },
+        { id: "a", label: "a", type: "num" },
+        { id: "b", label: "b", type: "num" },
+      ],
+      outputs: [{ id: "out:typed", label: "out", type: "num" }],
+    });
+    const connected = {
+      [pinKey(n.id, "a")]: true,
+      [pinKey(n.id, "b")]: true,
+    };
+    const outputs = { [pinKey(n.id, "out:typed")]: V("num", 1) };
+
+    const problems = deriveProblems([n], results({ connected, outputs }), true);
+
+    expect(problems).toContainEqual(expect.objectContaining({
+      id: "sel-select:west",
+      message: "Unresolved — cond not wired.",
     }));
   });
 
