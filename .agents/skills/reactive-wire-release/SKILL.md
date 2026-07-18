@@ -15,7 +15,7 @@ Before acting, re-read these files because the automation is authoritative and m
 - `.github/workflows/release-addon.yml` — main-branch image build and tag workflow.
 - `scripts/prepare-release.ts` — exact metadata and changelog mutations.
 - `scripts/extract-release-notes.ts` — annotated tag note extraction.
-- `pixi.toml` and `docs/agents/verify-change.md` — required local gates.
+- `pixi.toml` and `.github/workflows/ci.yml` — required local gates.
 
 Current behavior, verified from those sources:
 

@@ -3,8 +3,8 @@
 The visual editor for Reactive Wire. There's an openable in-browser app (a pan/zoom/drag
 canvas running the canonical graph with live values) plus a Storybook component library.
 
-**Styling is Tailwind v4.** The design's OKLCH tokens (from the Claude Design handoff) are
-registered in `@theme` in `src/index.css`, referencing the runtime `--rw-*` variables that
+**Styling is Tailwind v4.** The design's OKLCH tokens are registered in `@theme` in
+`src/index.css`, referencing the runtime `--rw-*` variables that
 `../shared/theme.ts` sets per aesthetic × mode — so utility classes like `bg-rw-node` /
 `text-rw-text` follow the active theme. Three aesthetics (IDE / Blueprint / Warm) × light/dark.
 

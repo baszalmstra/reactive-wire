@@ -285,8 +285,8 @@ in HA is text-based templates.
 
 ## 6. Visual Editor Requirements (drafting)
 
-User will produce the visual design separately (Claude design). This section is the
-self-contained spec to design against. Library: **React Flow** (D5); styled with
+The visual design is maintained separately. This section is the self-contained spec to design
+against. Library: **React Flow** (D5); styled with
 **Tailwind v4 + repository-owned accessible UI primitives** (D21).
 
 ### 6.1 Canvas & wires
