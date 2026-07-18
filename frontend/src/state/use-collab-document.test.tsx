@@ -72,14 +72,14 @@ function useHarness(server: Server) {
   const [deployedFlowIds, setDeployedFlowIds] = useState<string[]>([activeFlowId]);
   const [selected, setSelected] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
-  const [, setPast] = useState<CanvasSnapshot[]>([]);
-  const [, setFuture] = useState<CanvasSnapshot[]>([]);
+  const [past, setPast] = useState<CanvasSnapshot[]>([]);
+  const [future, setFuture] = useState<CanvasSnapshot[]>([]);
   useCollabDocument({
     server, flows, setFlows, activeFlowId, setActiveFlowId, nodes, edges, nodesRef, edgesRef,
     macros, replaceMacros: setMacros, autoDeploy, setAutoDeploy, deployedFlowIds, setDeployedFlowIds, setNodes, setEdges,
     setSelected, setSelectedIds, setPast, setFuture, showToast: () => {},
   });
-  return { nodes, setFlows, selected, selectedIds, setSelected, setSelectedIds };
+  return { nodes, setFlows, selected, selectedIds, setSelected, setSelectedIds, past, future, setPast, setFuture };
 }
 
 function outputIds(node: EditorNode): string[] {
@@ -115,10 +115,13 @@ describe("useCollabDocument remote reconciliation", () => {
     const update = encodeUpdateBase64(Y.encodeStateAsUpdate(doc, vector));
     const server = makeServer(encodeUpdateBase64(state), () => true);
     const { result, rerender } = renderHook(({ value }) => useHarness(value), { initialProps: { value: server } });
-    const nodeBefore = result.current.nodes[0];
+    const nodeBefore = result.current.nodes[0]!;
+    nodeBefore.selected = true;
     await act(async () => {
       result.current.setSelected("n1");
       result.current.setSelectedIds(["n1"]);
+      result.current.setPast([{ nodes: [], edges: [] }]);
+      result.current.setFuture([{ nodes: [], edges: [] }]);
     });
 
     rerender({ value: { ...server, docUpdate: { update, nonce: 1 } } as Server });
@@ -126,6 +129,9 @@ describe("useCollabDocument remote reconciliation", () => {
     expect(result.current.nodes[0]).toBe(nodeBefore);
     expect(result.current.selected).toBe("n1");
     expect(result.current.selectedIds).toEqual(["n1"]);
+    expect(result.current.nodes[0]!.selected).toBe(true);
+    expect(result.current.past).toHaveLength(1);
+    expect(result.current.future).toHaveLength(1);
   });
 });
 

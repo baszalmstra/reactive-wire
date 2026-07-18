@@ -484,24 +484,6 @@ export function applyEditorSnapshotDiff(doc: Y.Doc, previousRaw: unknown, nextRa
   return next;
 }
 
-function orderedValues<T extends { id: string }>(map: Y.Map<unknown>, order: Y.Array<string>, sanitize: (v: unknown) => T | null): T[] {
-  const seen = new Set<string>();
-  const out: T[] = [];
-  for (const id of order.toArray()) {
-    const item = sanitize(map.get(id));
-    if (item && !seen.has(item.id)) {
-      seen.add(item.id);
-      out.push(item);
-    }
-  }
-  for (const [id, value] of Array.from(map.entries()).sort(([a], [b]) => a.localeCompare(b))) {
-    if (seen.has(id)) continue;
-    const item = sanitize(value);
-    if (item) out.push(item);
-  }
-  return out;
-}
-
 /** The version stamped into a document's meta map, or undefined for an uninitialized doc. */
 export function readEditorDocumentVersion(doc: Y.Doc): unknown {
   return doc.getMap("meta").get("version");
@@ -523,51 +505,159 @@ export function snapshotFromEditorDoc(doc: Y.Doc): EditorDocumentSnapshot {
   return readEditorDocSnapshot(doc);
 }
 
-function readEditorDocSnapshot(doc: Y.Doc): EditorDocumentSnapshot {
-  const { meta, flows, flowOrder, macros } = rootMaps(doc);
+export interface EditorDocumentProjectionStats {
+  flowsRead: number;
+  nodesRead: number;
+  edgesRead: number;
+}
+
+function orderedMapIds<T>(map: Y.Map<T>, order: Y.Array<string>): string[] {
   const seen = new Set<string>();
-  const outFlows: CollabFlow[] = [];
-  const readFlow = (id: string): void => {
-    if (!isSafeIdentifier(id)) return;
-    const yFlow = flows.get(id);
-    if (!(yFlow instanceof Y.Map) || seen.has(id)) return;
-    seen.add(id);
-    const { nodes, nodeOrder, edges, edgeOrder } = flowMaps(yFlow);
-    const outNodes = orderedValues(nodes, nodeOrder, sanitizeNode).slice(0, MAX_NODES_PER_FLOW);
-    const nodeIds = new Set(outNodes.map((n) => n.id));
-    outFlows.push({
-      id,
-      name: safeString(yFlow.get("name"), "Flow", 80),
-      nodes: outNodes,
-      edges: orderedValues(edges, edgeOrder, sanitizeEdge).filter((e) => nodeIds.has(e.source) && nodeIds.has(e.target)).slice(0, MAX_EDGES_PER_FLOW),
-    });
+  const ids: string[] = [];
+  const add = (id: string) => {
+    if (!seen.has(id) && isSafeIdentifier(id) && map.has(id)) {
+      seen.add(id);
+      ids.push(id);
+    }
   };
-  for (const id of flowOrder.toArray()) readFlow(id);
-  for (const id of Array.from(flows.keys()).sort()) readFlow(id);
+  for (const id of order.toArray()) add(id);
+  for (const id of Array.from(map.keys()).sort()) add(id);
+  return ids;
+}
+
+function transactionChanged(transaction: Y.Transaction, type: unknown): boolean {
+  return (transaction.changedParentTypes as unknown as Map<unknown, unknown>).has(type);
+}
+
+function changedMapEntryIds(transaction: Y.Transaction, parent: Y.Map<unknown>, ids: string[]): Set<string> {
+  const changed = new Set<string>();
+  const direct = (transaction.changed as unknown as Map<unknown, Set<string | null>>).get(parent);
+  for (const key of direct ?? []) if (typeof key === "string") changed.add(key);
+  // A nested Y.Map edit records the child and each ancestor as changed, but its event path is no
+  // longer safely inspectable after observers return. Checking child identities is allocation-free
+  // and avoids decoding/sanitizing every unchanged payload.
+  for (const id of ids) {
+    if (transactionChanged(transaction, parent.get(id))) changed.add(id);
+  }
+  return changed;
+}
+
+function readFlowIncremental(
+  id: string,
+  yFlow: Y.Map<unknown>,
+  previous: CollabFlow | undefined,
+  transaction: Y.Transaction | undefined,
+  stats?: EditorDocumentProjectionStats,
+): CollabFlow {
+  stats && (stats.flowsRead += 1);
+  const { nodes, nodeOrder, edges, edgeOrder } = flowMaps(yFlow);
+  const nodeIds = orderedMapIds(nodes, nodeOrder).slice(0, MAX_NODES_PER_FLOW);
+  const edgeIds = orderedMapIds(edges, edgeOrder).slice(0, MAX_EDGES_PER_FLOW);
+  const previousNodes = new Map(previous?.nodes.map((node) => [node.id, node]) ?? []);
+  const previousEdges = new Map(previous?.edges.map((edge) => [edge.id, edge]) ?? []);
+  const changedNodes = transaction ? changedMapEntryIds(transaction, nodes, nodeIds) : null;
+  const changedEdges = transaction ? changedMapEntryIds(transaction, edges, edgeIds) : null;
+  const outNodes: CollabNode[] = [];
+  for (const nodeId of nodeIds) {
+    const prior = previousNodes.get(nodeId);
+    if (prior && changedNodes !== null && !changedNodes.has(nodeId)) {
+      outNodes.push(prior);
+      continue;
+    }
+    stats && (stats.nodesRead += 1);
+    const item = sanitizeNode(nodes.get(nodeId));
+    if (item) outNodes.push(item);
+  }
+  const validNodeIds = new Set(outNodes.map((node) => node.id));
+  const outEdges: CollabEdge[] = [];
+  for (const edgeId of edgeIds) {
+    const prior = previousEdges.get(edgeId);
+    let item: CollabEdge | null;
+    if (prior && changedEdges !== null && !changedEdges.has(edgeId)) {
+      item = prior;
+    } else {
+      stats && (stats.edgesRead += 1);
+      item = sanitizeEdge(edges.get(edgeId));
+    }
+    if (item && validNodeIds.has(item.source) && validNodeIds.has(item.target)) outEdges.push(item);
+  }
+  const sharedNodes = previous && outNodes.length === previous.nodes.length
+    && outNodes.every((node, index) => node === previous.nodes[index]) ? previous.nodes : outNodes;
+  const sharedEdges = previous && outEdges.length === previous.edges.length
+    && outEdges.every((edge, index) => edge === previous.edges[index]) ? previous.edges : outEdges;
+  const name = safeString(yFlow.get("name"), "Flow", 80);
+  return previous && name === previous.name && sharedNodes === previous.nodes && sharedEdges === previous.edges
+    ? previous
+    : { id, name, nodes: sharedNodes, edges: sharedEdges };
+}
+
+function readMacros(macros: Y.Map<unknown>): MacroMap {
   const macroObj: MacroMap = {};
   for (const [id, value] of Array.from(macros.entries()).slice(0, MAX_MACROS)) {
     if (!isSafeIdentifier(id)) continue;
-    const sanitized = sanitizeMacroMap({ [id]: value });
-    Object.assign(macroObj, sanitized);
+    Object.assign(macroObj, sanitizeMacroMap({ [id]: value }));
   }
-  const fallback = outFlows[0]?.id ?? DEFAULT_FLOW_ID;
+  return macroObj;
+}
+
+function snapshotFromParts(meta: Y.Map<unknown>, flows: CollabFlow[], macros: MacroMap): EditorDocumentSnapshot {
+  const fallback = flows[0]?.id ?? DEFAULT_FLOW_ID;
   const activeFlowId = safeString(meta.get("activeFlowId"), fallback);
-  const snapshotFlows = outFlows.length ? outFlows : emptyEditorDocumentSnapshot().flows;
-  const validActiveFlowId = snapshotFlows.some((f) => f.id === activeFlowId) ? activeFlowId : fallback;
-  const deployedFlowIds = readDeploymentFlowIds({ deployedFlowIds: meta.get("deployedFlowIds"), deployFlowId: meta.get("deployFlowId") }, snapshotFlows, validActiveFlowId);
+  const snapshotFlows = flows.length ? flows : emptyEditorDocumentSnapshot().flows;
+  const validActiveFlowId = snapshotFlows.some((flow) => flow.id === activeFlowId) ? activeFlowId : fallback;
+  const deployedFlowIds = readDeploymentFlowIds(
+    { deployedFlowIds: meta.get("deployedFlowIds"), deployFlowId: meta.get("deployFlowId") },
+    snapshotFlows,
+    validActiveFlowId,
+  );
   return {
-    // Always stamped current, even on the lenient migration read of an older doc. Migration
-    // functions must key off the fromVersion passed to migrateSnapshot, never this field.
     version: VERSION,
     activeFlowId: validActiveFlowId,
     flows: snapshotFlows,
-    macros: macroObj,
+    macros,
     settings: {
       autoDeploy: meta.get("autoDeploy") === true,
       deployFlowId: deployedFlowIds[0] ?? validActiveFlowId,
       deployedFlowIds,
     },
   };
+}
+
+/**
+ * Project one applied Yjs transaction while retaining untouched flow/item objects. The root/order
+ * maps are walked by id, but only changed node/edge payloads are decoded and sanitized.
+ */
+export function snapshotFromEditorDocIncremental(
+  doc: Y.Doc,
+  previous: EditorDocumentSnapshot,
+  transaction: Y.Transaction,
+  stats?: EditorDocumentProjectionStats,
+): EditorDocumentSnapshot {
+  ensureEditorDocInitialized(doc);
+  const { meta, flows, flowOrder, macros } = rootMaps(doc);
+  const previousFlows = new Map(previous.flows.map((flow) => [flow.id, flow]));
+  const flowIds = orderedMapIds(flows, flowOrder).slice(0, MAX_FLOWS);
+  const changedFlows = changedMapEntryIds(transaction, flows as unknown as Y.Map<unknown>, flowIds);
+  const outFlows: CollabFlow[] = [];
+  for (const id of flowIds) {
+    const yFlow = flows.get(id);
+    if (!(yFlow instanceof Y.Map)) continue;
+    const prior = previousFlows.get(id);
+    const changed = !prior || changedFlows.has(id);
+    outFlows.push(changed ? readFlowIncremental(id, yFlow, prior, transaction, stats) : prior);
+  }
+  const macroChanged = transactionChanged(transaction, macros);
+  return snapshotFromParts(meta, outFlows, macroChanged ? readMacros(macros) : previous.macros);
+}
+
+function readEditorDocSnapshot(doc: Y.Doc): EditorDocumentSnapshot {
+  const { meta, flows, flowOrder, macros } = rootMaps(doc);
+  const outFlows: CollabFlow[] = [];
+  for (const id of orderedMapIds(flows, flowOrder).slice(0, MAX_FLOWS)) {
+    const yFlow = flows.get(id);
+    if (yFlow instanceof Y.Map) outFlows.push(readFlowIncremental(id, yFlow, undefined, undefined));
+  }
+  return snapshotFromParts(meta, outFlows, readMacros(macros));
 }
 
 export function encodeUpdateBase64(update: Uint8Array): string {

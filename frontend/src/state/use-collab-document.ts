@@ -7,6 +7,7 @@ import {
   applyEditorSnapshotDiff,
   decodeUpdateBase64,
   snapshotFromEditorDoc,
+  snapshotFromEditorDocIncremental,
   type EditorDocumentSnapshot,
 } from "../../../shared/collab.js";
 import {
@@ -119,7 +120,7 @@ export function useCollabDocument(options: {
       autoDeploy,
       deployedFlowIds,
     };
-    const applied = workingStateFromSnapshot(snapshot, activeFlowId, previous);
+    const applied = workingStateFromSnapshot(snapshot, activeFlowId, previous, lastCollabSnapshot.current ?? undefined);
     if (applied.flows !== flows) setFlows(applied.flows);
     if (applied.activeFlowId !== activeFlowId) setActiveFlowId(applied.activeFlowId);
     const activeGraphChanged = applied.activeNodes !== nodesRef.current || applied.activeEdges !== edgesRef.current;
@@ -204,8 +205,20 @@ export function useCollabDocument(options: {
       // otherwise a remote packet can replace unsent local React state and cause data loss.
       flushLocalDocumentToCollab();
       const doc = getCollabDoc();
-      Y.applyUpdate(doc, decodeUpdateBase64(server.docUpdate.update), collabServerOrigin);
-      applyRemoteDocumentSnapshot(snapshotFromEditorDoc(doc));
+      let appliedTransaction: Y.Transaction | null = null;
+      const capture = (transaction: Y.Transaction) => {
+        if (transaction.origin === collabServerOrigin) appliedTransaction = transaction;
+      };
+      doc.on("afterTransaction", capture);
+      try {
+        Y.applyUpdate(doc, decodeUpdateBase64(server.docUpdate.update), collabServerOrigin);
+      } finally {
+        doc.off("afterTransaction", capture);
+      }
+      const previous = lastCollabSnapshot.current;
+      applyRemoteDocumentSnapshot(previous && appliedTransaction
+        ? snapshotFromEditorDocIncremental(doc, previous, appliedTransaction)
+        : snapshotFromEditorDoc(doc));
     } catch (err) {
       showToast(`Document sync failed: ${err instanceof Error ? err.message : String(err)}`, "error");
     }

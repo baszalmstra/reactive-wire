@@ -77,9 +77,11 @@ function defFromCollabNode(node: CollabNode): NodeData | null {
  * nothing in the flow reconciles, the original `nodes` array is returned so the caller can skip
  * rebuilding it (the reconciliation pass itself still allocates its working arrays).
  */
-function reconcileFlowNodes(nodes: CollabNode[], edges: CollabEdge[]): CollabNode[] {
+function reconcileFlowNodes(nodes: CollabNode[], edges: CollabEdge[], previousNodes?: CollabNode[]): CollabNode[] {
+  const previousById = new Map(previousNodes?.map((node) => [node.id, node]) ?? []);
+  const candidates = previousNodes ? nodes.filter((node) => previousById.get(node.id) !== node) : nodes;
   const defs: NodeData[] = [];
-  for (const node of nodes) {
+  for (const node of candidates) {
     const def = defFromCollabNode(node);
     if (def) defs.push(def);
   }
@@ -100,6 +102,7 @@ function reconcileFlowNodes(nodes: CollabNode[], edges: CollabEdge[]): CollabNod
   });
   if (!changed) return nodes;
   return nodes.map((node) => {
+    if (previousNodes && previousById.get(node.id) === node) return node;
     const def = defFromCollabNode(node);
     const next = def && byId.get(def.id);
     if (!next || next === def) return node;
@@ -151,17 +154,46 @@ function sameContent(a: unknown, b: unknown): boolean {
   return a === b || JSON.stringify(a) === JSON.stringify(b);
 }
 
+function samePersistedItem(a: { id: string }, b: { id: string }): boolean {
+  const { selected: _aSelected, dragging: _aDragging, resizing: _aResizing, ...aPersisted } = a as typeof a & {
+    selected?: boolean;
+    dragging?: boolean;
+    resizing?: boolean;
+  };
+  const { selected: _bSelected, dragging: _bDragging, resizing: _bResizing, ...bPersisted } = b as typeof b & {
+    selected?: boolean;
+    dragging?: boolean;
+    resizing?: boolean;
+  };
+  return sameContent(aPersisted, bPersisted);
+}
+
+export interface EditorWorkingProjectionStats {
+  flowsProjected: number;
+  itemPayloadsCompared: number;
+}
+
 function reconcileItems<T extends { id: string }>(
   incoming: T[],
   previous: T[],
   convert: (item: T) => T,
+  previousIncoming?: T[],
+  stats?: EditorWorkingProjectionStats,
 ): T[] {
   const priorById = new Map(previous.map((item) => [item.id, item]));
+  const priorIncomingById = new Map(previousIncoming?.map((item) => [item.id, item]) ?? []);
   let changed = incoming.length !== previous.length;
   const next = incoming.map((item, index) => {
-    const converted = convert(item);
     const prior = priorById.get(item.id);
-    const value = prior && sameContent(prior, converted) ? prior : converted;
+    if (prior && priorIncomingById.get(item.id) === item) {
+      if (prior !== previous[index]) changed = true;
+      return prior;
+    }
+    stats && (stats.itemPayloadsCompared += 1);
+    const converted = convert(item);
+    // Selection/dragging/resizing are local React Flow state and are deliberately absent from the
+    // collaborative document. They must not make an otherwise unchanged remote item look changed.
+    const value = prior && samePersistedItem(prior, converted) ? prior : converted;
     if (value !== previous[index]) changed = true;
     return value;
   });
@@ -177,23 +209,40 @@ export function workingStateFromSnapshot(
   snapshot: EditorDocumentSnapshot,
   previousActiveFlowId: string,
   previous?: AppliedEditorDocumentState,
+  previousSnapshot?: EditorDocumentSnapshot,
+  stats?: EditorWorkingProjectionStats,
 ): AppliedEditorDocumentState {
   const priorFlows = new Map(previous?.flows.map((flow) => [flow.id, flow]) ?? []);
+  const priorSnapshotFlows = new Map(previousSnapshot?.flows.map((flow) => [flow.id, flow]) ?? []);
   let flowsChanged = snapshot.flows.length !== (previous?.flows.length ?? -1);
   const flows = snapshot.flows.map((flow, index) => {
     const prior = priorFlows.get(flow.id);
+    const priorSnapshot = priorSnapshotFlows.get(flow.id);
+    if (prior && priorSnapshot === flow) {
+      if (prior !== previous?.flows[index]) flowsChanged = true;
+      return prior;
+    }
+    stats && (stats.flowsProjected += 1);
     const priorNodes = prior && flow.id === previous?.activeFlowId ? previous.activeNodes : prior?.nodes ?? [];
     const priorEdges = prior && flow.id === previous?.activeFlowId ? previous.activeEdges : prior?.edges ?? [];
-    const reconciled = reconcileFlowNodes(flow.nodes, flow.edges);
+    const reconciled = reconcileFlowNodes(
+      flow.nodes,
+      flow.edges,
+      priorSnapshot?.edges === flow.edges ? priorSnapshot.nodes : undefined,
+    );
     const nodes = reconcileItems(
       reconciled as unknown as EditorNode[],
       priorNodes,
       (node) => collabNodeToEditor(node as unknown as CollabNode),
+      priorSnapshot?.nodes as unknown as EditorNode[] | undefined,
+      stats,
     );
     const edges = reconcileItems(
       flow.edges as unknown as Edge[],
       priorEdges,
       (edge) => collabEdgeToEditor(edge as unknown as CollabEdge),
+      priorSnapshot?.edges as unknown as Edge[] | undefined,
+      stats,
     );
     const value = prior && prior.name === flow.name && nodes === priorNodes && edges === priorEdges
       ? prior

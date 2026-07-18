@@ -1,12 +1,21 @@
 import { describe, expect, it } from "vitest";
+import * as Y from "yjs";
 import type { Edge } from "@xyflow/react";
 import type { MacroMap } from "../../../shared/macros.js";
 import type { NodeData } from "../../../shared/node-types.js";
-import type { CollabNode, EditorDocumentSnapshot } from "../../../shared/collab.js";
+import {
+  applyEditorSnapshot,
+  applyEditorSnapshotDiff,
+  snapshotFromEditorDocIncremental,
+  type CollabNode,
+  type EditorDocumentSnapshot,
+  type EditorDocumentProjectionStats,
+} from "../../../shared/collab.js";
 import type { EditorNode, Flow } from "../canvas/flows.js";
 import {
   editorSnapshotHasUserContent,
   editorSnapshotsEqual,
+  type EditorWorkingProjectionStats,
   snapshotFromWorkingState,
   workingStateFromSnapshot,
 } from "./editor-document.js";
@@ -169,6 +178,57 @@ describe("editor document adapter", () => {
     expect(applied.activeNodes).toBe(previous.activeNodes);
     expect(applied.flows[1]!.nodes[0]).toBe(previous.flows[1]!.nodes[0]);
     expect(applied.flows[1]!.nodes[1]).not.toBe(previous.flows[1]!.nodes[1]);
+  });
+
+  it("preserves local selection and graph identity across a settings-only remote update", () => {
+    const snapshot = collabSnapshot([
+      { id: "flow", name: "Flow", nodes: [rw("selected") as unknown as CollabNode], edges: [] },
+    ], "flow");
+    const previous = workingStateFromSnapshot(snapshot, "flow");
+    previous.activeNodes[0]!.selected = true;
+    const settingsOnly = structuredClone(snapshot);
+    settingsOnly.settings.autoDeploy = true;
+
+    const applied = workingStateFromSnapshot(settingsOnly, "flow", previous);
+
+    expect(applied.flows).toBe(previous.flows);
+    expect(applied.activeNodes).toBe(previous.activeNodes);
+    expect(applied.activeNodes[0]).toBe(previous.activeNodes[0]);
+    expect(applied.activeNodes[0]!.selected).toBe(true);
+  });
+
+  it("projects only changed Yjs item payloads for a one-node remote transaction", () => {
+    const flows = Array.from({ length: 4 }, (_, flowIndex) => ({
+      id: `flow-${flowIndex}`,
+      name: `Flow ${flowIndex}`,
+      nodes: Array.from({ length: 40 }, (_, nodeIndex) => rw(`n-${flowIndex}-${nodeIndex}`) as unknown as CollabNode),
+      edges: [],
+    }));
+    const before = collabSnapshot(flows, "flow-0");
+    const doc = new Y.Doc();
+    applyEditorSnapshot(doc, before, "init");
+    const after = structuredClone(before);
+    after.flows[2]!.nodes[17]!.position = { x: 99, y: 0 };
+    let transaction: Y.Transaction | null = null;
+    doc.on("afterTransaction", (value) => {
+      if (value.origin === "remote") transaction = value;
+    });
+    applyEditorSnapshotDiff(doc, before, after, "remote");
+    expect(transaction).not.toBeNull();
+    const stats: EditorDocumentProjectionStats = { flowsRead: 0, nodesRead: 0, edgesRead: 0 };
+
+    const projected = snapshotFromEditorDocIncremental(doc, before, transaction!, stats);
+
+    expect(stats).toEqual({ flowsRead: 1, nodesRead: 1, edgesRead: 0 });
+    expect(projected.flows[0]).toBe(before.flows[0]);
+    expect(projected.flows[2]!.nodes[0]).toBe(before.flows[2]!.nodes[0]);
+    expect(projected.flows[2]!.nodes[17]).not.toBe(before.flows[2]!.nodes[17]);
+    expect(projected.flows[2]!.nodes[17]!.position).toEqual({ x: 99, y: 0 });
+
+    const previousWorking = workingStateFromSnapshot(before, "flow-0");
+    const workingStats: EditorWorkingProjectionStats = { flowsProjected: 0, itemPayloadsCompared: 0 };
+    workingStateFromSnapshot(projected, "flow-0", previousWorking, before, workingStats);
+    expect(workingStats).toEqual({ flowsProjected: 1, itemPayloadsCompared: 1 });
   });
 
   it("keeps current JSON snapshot equality semantics", () => {

@@ -49,6 +49,41 @@ describe("batched collaborative document persistence", () => {
     }
   });
 
+  it("rolls back a failed candidate so a later successful edit cannot resurrect it", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "rw-doc-rollback-"));
+    let writes = 0;
+    try {
+      const store = new EditorDocumentStore({
+        dataDir: dir,
+        persistDelayMs: 60_000,
+        writeState: async (path, bytes) => {
+          writes += 1;
+          if (writes === 1) throw new Error("disk full");
+          await writeFile(path, bytes);
+        },
+      });
+      const peer = new Y.Doc();
+      Y.applyUpdate(peer, store.encodeState());
+
+      const failed = store.applyUpdate(addNodeUpdate(store, "failed"));
+      await expect(store.flush()).rejects.toThrow("disk full");
+      await expect(failed).rejects.toThrow("disk full");
+      expect(store.snapshot().flows[0]!.nodes).toEqual([]);
+
+      const succeeded = store.applyUpdate(addNodeUpdate(store, "second"));
+      await store.flush();
+      const applied = await succeeded;
+      Y.applyUpdate(peer, applied.update);
+      expect(snapshotFromEditorDoc(peer).flows[0]!.nodes.map((item) => item.id)).toEqual(["second"]);
+      expect(store.snapshot().flows[0]!.nodes.map((item) => item.id)).toEqual(["second"]);
+
+      const restored = new EditorDocumentStore({ dataDir: dir });
+      expect(restored.snapshot().flows[0]!.nodes.map((item) => item.id)).toEqual(["second"]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("flushes a pending update during close and rejects persistence failures", async () => {
     const dir = mkdtempSync(join(tmpdir(), "rw-doc-close-"));
     try {

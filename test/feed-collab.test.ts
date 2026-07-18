@@ -1,4 +1,5 @@
 import { mkdtempSync, rmSync } from "node:fs";
+import { writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -128,38 +129,54 @@ describe("feed collaborative document sync", () => {
     }
   });
 
-  it("does not broadcast or auto-deploy an update whose durable write fails", async () => {
+  it("does not later broadcast or auto-deploy an update whose durable write failed", async () => {
     const port = await freePort();
     const dir = mkdtempSync(join(tmpdir(), "rw-feed-collab-write-fail-"));
+    let writes = 0;
     const store = new EditorDocumentStore({
       dataDir: dir,
       persistDelayMs: 1,
-      writeState: async () => { throw new Error("disk full"); },
+      writeState: async (path, bytes) => {
+        writes += 1;
+        if (writes === 1) throw new Error("disk full");
+        await writeFile(path, bytes);
+      },
     });
-    let documentChanges = 0;
+    const documentChanges: string[][] = [];
     const stop = startFeed(new MockHA(), { port, host: "127.0.0.1" }, {
       documentStore: store,
-      onDocumentChange: () => { documentChanges += 1; },
+      onDocumentChange: (snapshot) => { documentChanges.push(snapshot.flows[0]!.nodes.map((item) => item.id)); },
     });
     const { ws: sender, state } = await openWithDocState(`ws://127.0.0.1:${port}`);
-    const receiver = await open(`ws://127.0.0.1:${port}`);
-    let broadcast = false;
-    receiver.on("message", (raw) => {
-      const msg = JSON.parse(String(raw)) as { type?: string };
-      if (msg.type === "docUpdate") broadcast = true;
-    });
+    const { ws: receiver, state: receiverState } = await openWithDocState(`ws://127.0.0.1:${port}`);
     try {
-      const doc = new Y.Doc();
-      Y.applyUpdate(doc, Buffer.from(String(state.update), "base64"));
-      const before = snapshotFromEditorDoc(doc);
-      applyEditorSnapshotDiff(doc, before, { ...before, flows: [{ ...before.flows[0]!, nodes: [node("failed")], edges: [] }] }, "client");
+      const failedDoc = new Y.Doc();
+      Y.applyUpdate(failedDoc, Buffer.from(String(state.update), "base64"));
+      const before = snapshotFromEditorDoc(failedDoc);
+      applyEditorSnapshotDiff(failedDoc, before, { ...before, flows: [{ ...before.flows[0]!, nodes: [node("failed")], edges: [] }] }, "client");
       const error = nextMessage(sender, "docError");
-      sender.send(JSON.stringify({ type: "docUpdate", update: encodeUpdateBase64(Y.encodeStateAsUpdate(doc, Y.encodeStateVector(store.doc))) }));
+      sender.send(JSON.stringify({ type: "docUpdate", update: encodeUpdateBase64(Y.encodeStateAsUpdate(failedDoc, Y.encodeStateVector(store.doc))) }));
 
       expect((await error).error).toContain("disk full");
       await new Promise((resolve) => setTimeout(resolve, 20));
-      expect(broadcast).toBe(false);
-      expect(documentChanges).toBe(0);
+      expect(store.snapshot().flows[0]!.nodes).toEqual([]);
+      expect(documentChanges).toEqual([]);
+
+      const secondDoc = new Y.Doc();
+      Y.applyUpdate(secondDoc, store.encodeState());
+      const secondBefore = snapshotFromEditorDoc(secondDoc);
+      applyEditorSnapshotDiff(secondDoc, secondBefore, { ...secondBefore, flows: [{ ...secondBefore.flows[0]!, nodes: [node("second")], edges: [] }] }, "client");
+      const receiverUpdate = nextMessage(receiver, "docUpdate");
+      sender.send(JSON.stringify({ type: "docUpdate", update: encodeUpdateBase64(Y.encodeStateAsUpdate(secondDoc, Y.encodeStateVector(store.doc))) }));
+      const frame = await receiverUpdate;
+      await store.flush();
+
+      const peer = new Y.Doc();
+      Y.applyUpdate(peer, Buffer.from(String(receiverState.update), "base64"));
+      Y.applyUpdate(peer, Buffer.from(String(frame.update), "base64"));
+      expect(snapshotFromEditorDoc(peer).flows[0]!.nodes.map((item) => item.id)).toEqual(["second"]);
+      expect(documentChanges).toEqual([["second"]]);
+      expect(new EditorDocumentStore({ dataDir: dir }).snapshot().flows[0]!.nodes.map((item) => item.id)).toEqual(["second"]);
     } finally {
       sender.close();
       receiver.close();

@@ -172,7 +172,12 @@ export class EditorDocumentStore {
         for (const item of batch) item.resolve({ update: item.update, snapshot: item.snapshot });
       })
       .catch((err) => {
-        for (const item of batch) item.reject(err);
+        // None of the candidate mutations are authoritative until their compact state is durable.
+        // Updates accepted while this write was in flight were based on the same failed candidate,
+        // so reject those dependants too and force clients to resend from the durable docState.
+        const dependent = this.pending.splice(0);
+        this.restoreDurableState();
+        for (const item of [...batch, ...dependent]) item.reject(err);
         throw err;
       })
       .finally(() => {
@@ -189,6 +194,16 @@ export class EditorDocumentStore {
     await this.flush();
     this.shadow.destroy();
     this.doc.destroy();
+  }
+
+  private restoreDurableState(): void {
+    this.doc.destroy();
+    this.shadow.destroy();
+    const restored = new Y.Doc();
+    Y.applyUpdate(restored, this.durableState, this);
+    this.doc = restored;
+    this.shadow = this.cloneDocument(restored);
+    this.estimatedStateBytes = this.durableState.byteLength;
   }
 
   /** Synchronous writes are limited to startup seeding/migration, before the event loop starts. */
