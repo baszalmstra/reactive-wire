@@ -3,6 +3,7 @@ import type { MacroDef, MacroMap } from "../../shared/macros.js";
 import type { NodeData, PinDef } from "../../shared/node-types.js";
 import type { ValueType } from "../../shared/theme.js";
 import { isSafeIdentifier } from "../../shared/record.js";
+import { expandMacros } from "../../shared/engine/expand.js";
 
 export interface DeployRequest {
   nodes: NodeData[];
@@ -177,7 +178,12 @@ export function sanitizeDeployRequest(raw: unknown): DeployValidation {
         macros[macro.id] = macro;
       }
     }
-    return { ok: true, graph: { nodes, edges, ...(macros ? { macros } : {}) } };
+    const graph: DeployRequest = { nodes, edges, ...(macros ? { macros } : {}) };
+    // Validate the fully inlined resource footprint before the graph reaches the always-on runtime.
+    // expandMacros enforces cumulative limits while materializing, so multiplicative macro fan-out
+    // is stopped after a bounded amount of work rather than allocating the theoretical full graph.
+    expandMacros(nodes, edges, macros ?? {});
+    return { ok: true, graph };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : String(err) };
   }

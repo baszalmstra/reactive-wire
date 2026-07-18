@@ -17,6 +17,33 @@ export function joinPath(prefix: string, innerId: string): string {
   return prefix ? `${prefix}${PATH_SEP}${innerId}` : innerId;
 }
 
+export interface MacroExpansionLimits {
+  maxNodes: number;
+  maxEdges: number;
+  maxDepth: number;
+  maxInstances: number;
+}
+
+/** Runtime-wide expansion caps. They apply to the fully inlined graph, not each macro separately. */
+export const DEFAULT_MACRO_EXPANSION_LIMITS: Readonly<MacroExpansionLimits> = {
+  maxNodes: 10_000,
+  maxEdges: 40_000,
+  maxDepth: 16,
+  maxInstances: 5_000,
+};
+
+export class MacroExpansionError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "MacroExpansionError";
+  }
+}
+
+interface ExpansionBudget {
+  limits: MacroExpansionLimits;
+  instances: number;
+}
+
 export interface ExpandResult {
   nodes: NodeData[];
   edges: ViewEdge[];
@@ -63,12 +90,39 @@ interface BoundaryContext {
  * Nesting is handled by recursion with a growing path prefix, and a guard set breaks any macro
  * that (incorrectly) references itself so expansion always terminates.
  */
-export function expandMacros(nodes: NodeData[], edges: ViewEdge[], macros: MacroMap): ExpandResult {
+export function expandMacros(
+  nodes: NodeData[],
+  edges: ViewEdge[],
+  macros: MacroMap,
+  limits: Readonly<MacroExpansionLimits> = DEFAULT_MACRO_EXPANSION_LIMITS,
+): ExpandResult {
   const outNodes: NodeData[] = [];
   const outEdges: ViewEdge[] = [];
   const instances = createRecord<InstanceBinding>();
-  expandInto(nodes, edges, macros, "", new Set(), outNodes, outEdges, instances, null);
+  const budget: ExpansionBudget = { limits: { ...limits }, instances: 0 };
+  expandInto(nodes, edges, macros, "", new Set(), outNodes, outEdges, instances, null, budget, 0);
   return { nodes: outNodes, edges: outEdges, instances };
+}
+
+function emitNode(outNodes: NodeData[], node: NodeData, budget: ExpansionBudget): void {
+  if (outNodes.length >= budget.limits.maxNodes) {
+    throw new MacroExpansionError(`Expanded graph exceeds ${budget.limits.maxNodes} nodes`);
+  }
+  outNodes.push(node);
+}
+
+function emitEdge(outEdges: ViewEdge[], edge: ViewEdge, budget: ExpansionBudget): void {
+  if (outEdges.length >= budget.limits.maxEdges) {
+    throw new MacroExpansionError(`Expanded graph exceeds ${budget.limits.maxEdges} edges`);
+  }
+  outEdges.push(edge);
+}
+
+function reserveInstance(budget: ExpansionBudget): void {
+  budget.instances += 1;
+  if (budget.instances > budget.limits.maxInstances) {
+    throw new MacroExpansionError(`Expanded graph exceeds ${budget.limits.maxInstances} macro instances`);
+  }
 }
 
 function expandInto(
@@ -81,7 +135,12 @@ function expandInto(
   outEdges: ViewEdge[],
   instances: Record<string, InstanceBinding>,
   boundary: BoundaryContext | null,
+  budget: ExpansionBudget,
+  depth: number,
 ): void {
+  if (depth > budget.limits.maxDepth) {
+    throw new MacroExpansionError(`Macro nesting exceeds depth ${budget.limits.maxDepth}`);
+  }
   // Every node id seen at this level, namespaced by the current path. Edges between siblings
   // are rewritten to these ids; edges touching a macro placement are spliced through it.
   const local = (id: string) => joinPath(prefix, id);
@@ -93,13 +152,14 @@ function expandInto(
   // Emit every non-macro node with a namespaced id, leaving its pins intact.
   for (const n of nodes) {
     if (isMacroInstance(n.type)) continue;
-    outNodes.push({ ...n, id: local(n.id) });
+    emitNode(outNodes, { ...n, id: local(n.id) }, budget);
   }
 
   // For each placement, recursively expand its definition under an extended path. Record how the
   // definition's boundary pins map to expanded pins so sibling edges can be rerouted through it.
   const bindings = new Map<string, InstanceBinding>();
   for (const inst of macroNodes) {
+    reserveInstance(budget);
     const def = ownValue(macros, String(inst.config?.macroId ?? ""));
     const instPath = local(inst.id);
     if (!def || active.has(def.id)) {
@@ -108,7 +168,7 @@ function expandInto(
       bindings.set(inst.id, { prefix: instPath, outputs: createRecord(), inputs: createRecord() });
       continue;
     }
-    const binding = expandInstance(def, inst, instPath, macros, active, outNodes, outEdges, instances);
+    const binding = expandInstance(def, inst, instPath, macros, active, outNodes, outEdges, instances, budget, depth + 1);
     bindings.set(inst.id, binding);
     instances[instPath] = binding;
   }
@@ -132,7 +192,7 @@ function expandInto(
     const from = resolveSource(e.from, macroIds, bindings, boundary, local);
     const to = resolveTarget(e.to, macroIds, bindings, local);
     if (from && to) {
-      outEdges.push({ id: local(e.id), from, to });
+      emitEdge(outEdges, { id: local(e.id), from, to }, budget);
     }
   }
 }
@@ -193,6 +253,8 @@ function expandInstance(
   outNodes: NodeData[],
   outEdges: ViewEdge[],
   instances: Record<string, InstanceBinding>,
+  budget: ExpansionBudget,
+  depth: number,
 ): InstanceBinding {
   const nextActive = new Set(active);
   nextActive.add(def.id);
@@ -216,7 +278,7 @@ function expandInstance(
       binding.inputs[pin.id] = `${passId}:${passPin}`;
       passOut[`${b.id}:${pin.id}`] = { node: passId, pin: passPin };
       const literal = inst.values?.[pin.id];
-      outNodes.push(passthroughNode(passId, passPin, pin.type, literal));
+      emitNode(outNodes, passthroughNode(passId, passPin, pin.type, literal), budget);
     }
   }
 
@@ -231,7 +293,7 @@ function expandInstance(
     outIds: new Set(boundaryOut.map((n) => n.id)),
     binding,
   };
-  expandInto(inner, def.edges, macros, instPath, nextActive, outNodes, outEdges, instances, ctx);
+  expandInto(inner, def.edges, macros, instPath, nextActive, outNodes, outEdges, instances, ctx, budget, depth);
 
   // Ensure every declared macro output has an entry, even when nothing is wired to its boundary
   // input (the edge-rewrite pass only writes outputs that have an incoming edge).

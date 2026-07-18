@@ -59,6 +59,47 @@ function macroInstance(id: string, macroId: string): NodeData {
 }
 
 describe("macro expansion", () => {
+  it("aborts when repeated placements exceed the cumulative expansion budget", () => {
+    const innerNodes: NodeData[] = [
+      { id: "a", type: "const-number", title: "", subtitle: "", icon: "const", x: 0, y: 0, inputs: [], outputs: [{ id: "out", label: "", type: "num" }], values: { out: 1 } },
+      { id: "b", type: "const-number", title: "", subtitle: "", icon: "const", x: 0, y: 0, inputs: [], outputs: [{ id: "out", label: "", type: "num" }], values: { out: 2 } },
+    ];
+    const def: MacroDef = { id: "wide", name: "Wide", inputs: [], outputs: [], nodes: innerNodes, edges: [], stateful: false };
+    const placements = ["p1", "p2", "p3"].map((id) => ({
+      id, type: "macro", title: "Wide", subtitle: "", icon: "macro", x: 0, y: 0,
+      inputs: [], outputs: [], config: { macroId: "wide" },
+    } satisfies NodeData));
+
+    expect(() => expandMacros(placements, [], { wide: def }, {
+      maxNodes: 5,
+      maxEdges: 20,
+      maxDepth: 4,
+      maxInstances: 10,
+    })).toThrow(/exceeds 5 nodes/);
+  });
+
+  it("aborts when nested macros exceed the depth budget", () => {
+    const leaf: MacroDef = {
+      id: "leaf", name: "Leaf", inputs: [], outputs: [], stateful: false,
+      nodes: [{ id: "n", type: "const-number", title: "", subtitle: "", icon: "const", x: 0, y: 0, inputs: [], outputs: [{ id: "out", label: "", type: "num" }], values: { out: 1 } }],
+      edges: [],
+    };
+    const nested = (id: string, child: string): MacroDef => ({
+      id, name: id, inputs: [], outputs: [], stateful: false,
+      nodes: [{ id: "child", type: "macro", title: "", subtitle: "", icon: "macro", x: 0, y: 0, inputs: [], outputs: [], config: { macroId: child } }],
+      edges: [],
+    });
+    const macros: MacroMap = { leaf, m1: nested("m1", "leaf"), m2: nested("m2", "m1") };
+    const root: NodeData = { id: "root", type: "macro", title: "", subtitle: "", icon: "macro", x: 0, y: 0, inputs: [], outputs: [], config: { macroId: "m2" } };
+
+    expect(() => expandMacros([root], [], macros, {
+      maxNodes: 20,
+      maxEdges: 20,
+      maxDepth: 2,
+      maxInstances: 20,
+    })).toThrow(/nesting exceeds depth 2/);
+  });
+
   it("inlines a macro into a flat graph the engine can read", () => {
     const macros: MacroMap = { m_toggle: toggleMacro() };
     const trig = entityNode("t", "binary_sensor.t", "bool");

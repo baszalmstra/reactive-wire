@@ -61,6 +61,44 @@ describe("deploy graph validation", () => {
     if (!reservedMacroKey.ok) expect(reservedMacroKey.error).toContain("reserved identifier");
   });
 
+  it("rejects cumulative macro expansion beyond the runtime budget", () => {
+    const innerNodes = Array.from({ length: 11 }, (_, i) => ({
+      id: `inner-${i}`,
+      type: "const-number",
+      title: "Number",
+      subtitle: "",
+      icon: "const",
+      x: 0,
+      y: 0,
+      inputs: [],
+      outputs: [{ id: "out", label: "out", type: "num" }],
+      values: { out: i },
+    }));
+    const placements = Array.from({ length: 1_000 }, (_, i) => ({
+      id: `placement-${i}`,
+      type: "macro",
+      title: "Wide",
+      subtitle: "",
+      icon: "macro",
+      x: 0,
+      y: 0,
+      inputs: [],
+      outputs: [],
+      config: { macroId: "wide" },
+    }));
+
+    const result = sanitizeDeployRequest({
+      nodes: placements,
+      edges: [],
+      macros: {
+        wide: { id: "wide", name: "Wide", inputs: [], outputs: [], nodes: innerNodes, edges: [], stateful: false },
+      },
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toContain("Expanded graph exceeds 10000 nodes");
+  });
+
   it("drops prototype-polluting keys from config and values", () => {
     const payload = JSON.parse(`{
       "nodes": [{
