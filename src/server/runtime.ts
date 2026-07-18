@@ -106,6 +106,9 @@ interface Delivery {
   failureKey: string;
   call: ServiceCall;
   attempts: number;
+  /** Waiting for an executor slot is cancelable; started means callService has accepted the call. */
+  cancelled: boolean;
+  started: boolean;
   /** For transient sinks, the value whose successful delivery advances the acknowledged baseline. */
   transientValue?: RWValue;
 }
@@ -113,6 +116,8 @@ interface Delivery {
 interface SinkChannel {
   nodeId: string;
   mode: SinkMode;
+  /** Type/config identity used to decide whether transient FIFO work survives a redeploy. */
+  sinkIdentity: string;
   /** Removed sinks retain their physical lane only until an accepted call settles. */
   retired: boolean;
   active: Delivery | null;
@@ -190,6 +195,15 @@ function keyOf(value: unknown): string {
     // Fall through to String for circular or otherwise unserializable values.
   }
   return String(value);
+}
+
+function sinkIdentity(node: RuntimeNode | undefined): string {
+  return node ? keyOf({ type: node.type, config: node.config ?? {} }) : "";
+}
+
+function physicalServiceKey(call: ServiceCall): string {
+  const target = call.target?.entity_id;
+  return target ? `entity:${target}` : `service:${call.domain}.${call.service}`;
 }
 
 function serviceErrorMessage(err: unknown): string {
@@ -296,9 +310,12 @@ export class Deployer {
   private lastEvaluatedNodeCount = 0;
   private activeServiceCalls = 0;
   private readonly serviceSlotWaiters: Array<(release: () => void) => void> = [];
-  private serviceWindowStartedAt = Date.now();
-  private serviceStartsInWindow = 0;
+  /** Start timestamps retained for a true rolling one-second rate limit. */
+  private readonly serviceStartTimes: number[] = [];
   private serviceRateTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Physical HA lanes serialize calls even when a redeploy renames the logical sink node. */
+  private readonly activePhysicalKeys = new Set<string>();
+  private readonly physicalSlotWaiters = new Map<string, Array<(release: () => void) => void>>();
 
   constructor(
     private readonly ha: HAClient & EntityFeed,
@@ -371,6 +388,11 @@ export class Deployer {
       this.serviceRateTimer = null;
     }
     while (this.serviceSlotWaiters.length > 0) this.serviceSlotWaiters.shift()!(() => {});
+    this.serviceStartTimes.length = 0;
+    for (const waiters of this.physicalSlotWaiters.values()) {
+      while (waiters.length > 0) waiters.shift()!(() => {});
+    }
+    this.physicalSlotWaiters.clear();
     this.resetChannels();
     this.lastNonReconciling.clear();
     this.lastReconcilingAttempt.clear();
@@ -461,14 +483,20 @@ export class Deployer {
    * handed to HA and discard work that had not started.
    */
   private prepareChannelsForDeploy(graph: CompiledGraph): void {
-    const nextModes = new Map<string, SinkMode>();
+    const next = new Map<string, { mode: SinkMode; identity: string }>();
     for (const nodeId of graph.sinkIds) {
-      const type = graph.nodeById.get(nodeId)?.type ?? "";
-      nextModes.set(nodeId, isTransientSink(type) ? "transient" : type === "sink-call" ? "command" : "reconciling");
+      const node = graph.nodeById.get(nodeId);
+      const type = node?.type ?? "";
+      next.set(nodeId, {
+        mode: isTransientSink(type) ? "transient" : type === "sink-call" ? "command" : "reconciling",
+        identity: sinkIdentity(node),
+      });
     }
     for (const [nodeId, channel] of this.channels) {
-      const nextMode = nextModes.get(nodeId);
-      const unchangedTransient = channel.mode === "transient" && nextMode === "transient";
+      const nextSink = next.get(nodeId);
+      const unchangedTransient = channel.mode === "transient"
+        && nextSink?.mode === "transient"
+        && channel.sinkIdentity === nextSink.identity;
       if (channel.retryTimer) clearTimeout(channel.retryTimer);
       channel.retryTimer = null;
       channel.nextRetryAt = null;
@@ -476,18 +504,22 @@ export class Deployer {
         channel.queue = [];
         channel.pendingLatest = null;
         channel.retryDelivery = null;
+        // Work not yet handed to HA is still cancelable. A physically started call must settle.
+        if (channel.active && !channel.active.started) channel.active.cancelled = true;
       }
-      if (!nextMode) {
+      if (!nextSink) {
         channel.retired = true;
         if (!channel.active) this.channels.delete(nodeId);
         continue;
       }
       channel.retired = false;
-      channel.mode = nextMode;
-      // Accepted transient entries are generation-independent physical work once enqueued.
+      channel.mode = nextSink.mode;
+      channel.sinkIdentity = nextSink.identity;
+      // Accepted transient entries survive only when type/config/destination are unchanged.
       if (unchangedTransient) {
         for (const delivery of channel.queue) delivery.generation = this.generation;
         if (channel.retryDelivery) channel.retryDelivery.generation = this.generation;
+        if (channel.active) channel.active.generation = this.generation;
       }
     }
   }
@@ -502,6 +534,11 @@ export class Deployer {
     // An accepted service call cannot be recalled. Keep it active until its promise settles so a
     // reconnect can never start overlapping work for the same sink.
     this.lastReconcilingAttempt.clear();
+    if (status.phase !== "ready") {
+      for (const channel of this.channels.values()) {
+        if (channel.active && !channel.active.started) channel.active.cancelled = true;
+      }
+    }
     if (status.phase === "ready") {
       this.run({ kind: "ha-ready" });
       for (const channel of this.channels.values()) {
@@ -563,6 +600,7 @@ export class Deployer {
       const channel = this.channels.get(n.id);
       if (channel) {
         channel.pendingLatest = null;
+        if (channel.active && !channel.active.started) channel.active.cancelled = true;
         this.cancelRetry(channel);
       }
     }
@@ -581,7 +619,8 @@ export class Deployer {
     let channel = this.channels.get(nodeId);
     if (!channel) {
       channel = {
-        nodeId, mode, retired: false, active: null, pendingLatest: null, queue: [], nextSequence: 1,
+        nodeId, mode, sinkIdentity: sinkIdentity(this.graph?.nodeById.get(nodeId)),
+        retired: false, active: null, pendingLatest: null, queue: [], nextSequence: 1,
         overflowed: false, observedKey: null, enqueuedKey: null, attemptedKey: null,
         acknowledgedKey: null, failures: 0, retryDelivery: null, retryTimer: null, nextRetryAt: null,
       };
@@ -619,6 +658,8 @@ export class Deployer {
       failureKey,
       call,
       attempts: 0,
+      cancelled: false,
+      started: false,
       ...(transientValue ? { transientValue } : {}),
     };
     channel.enqueuedKey = key;
@@ -634,7 +675,8 @@ export class Deployer {
         channel.queue.push(delivery);
       }
     } else if (channel.active) {
-      channel.pendingLatest = channel.active.key === key ? null : delivery;
+      channel.pendingLatest = channel.active.key === key && !channel.active.cancelled ? null : delivery;
+      if (!channel.active.started && (channel.active.key !== key || channel.active.cancelled)) channel.active.cancelled = true;
     } else {
       channel.pendingLatest = delivery;
     }
@@ -649,16 +691,21 @@ export class Deployer {
     if (channel.mode !== "transient") channel.pendingLatest = null;
     delivery.connectionEpoch = this.ha.connectionStatus().epoch;
     channel.active = delivery;
-    delivery.attempts += 1;
-    channel.attemptedKey = delivery.key;
-    if (delivery.mode === "reconciling") this.lastReconcilingAttempt.set(channel.nodeId, delivery.failureKey);
     this.callFailures.delete(channel.nodeId);
-    this.recordTriggered(channel.nodeId, delivery.call);
     if (!this.actuate) {
+      this.markDeliveryStarted(channel, delivery);
       this.completeDryRun(channel, delivery);
       return;
     }
     void this.executeDelivery(channel, delivery);
+  }
+
+  private markDeliveryStarted(channel: SinkChannel, delivery: Delivery): void {
+    delivery.started = true;
+    delivery.attempts += 1;
+    channel.attemptedKey = delivery.key;
+    if (delivery.mode === "reconciling") this.lastReconcilingAttempt.set(channel.nodeId, delivery.failureKey);
+    this.recordTriggered(channel.nodeId, delivery.call);
   }
 
   private completeDryRun(channel: SinkChannel, delivery: Delivery): void {
@@ -687,21 +734,23 @@ export class Deployer {
     channel.retryDelivery = null;
   }
 
-  private refreshServiceWindow(now = Date.now()): void {
-    if (now - this.serviceWindowStartedAt < 1_000) return;
-    this.serviceWindowStartedAt = now;
-    this.serviceStartsInWindow = 0;
+  private pruneServiceStarts(now = Date.now()): void {
+    // Keep starts exactly 1,000 ms old until the next millisecond so no inclusive rolling-second
+    // interval can contain more than the configured limit.
+    while (this.serviceStartTimes.length > 0 && this.serviceStartTimes[0]! < now - 1_000) {
+      this.serviceStartTimes.shift();
+    }
   }
 
-  private canStartServiceCall(): boolean {
-    this.refreshServiceWindow();
+  private canStartServiceCall(now = Date.now()): boolean {
+    this.pruneServiceStarts(now);
     return this.activeServiceCalls < MAX_CONCURRENT_HA_CALLS
-      && this.serviceStartsInWindow < MAX_HA_CALL_STARTS_PER_SECOND;
+      && this.serviceStartTimes.length < MAX_HA_CALL_STARTS_PER_SECOND;
   }
 
-  private reserveServiceSlot(): () => void {
+  private reserveServiceSlot(now = Date.now()): () => void {
     this.activeServiceCalls += 1;
-    this.serviceStartsInWindow += 1;
+    this.serviceStartTimes.push(now);
     return () => this.releaseServiceSlot();
   }
 
@@ -718,16 +767,43 @@ export class Deployer {
   }
 
   private drainServiceWaiters(): void {
-    this.refreshServiceWindow();
     while (this.serviceSlotWaiters.length > 0 && this.canStartServiceCall()) {
       this.serviceSlotWaiters.shift()!(this.reserveServiceSlot());
     }
     if (this.serviceSlotWaiters.length === 0 || this.serviceRateTimer) return;
-    const wait = Math.max(1, this.serviceWindowStartedAt + 1_000 - Date.now());
+    this.pruneServiceStarts();
+    const earliest = this.serviceStartTimes[0];
+    // If concurrency rather than rate is the blocker, releaseServiceSlot will drain the queue.
+    if (earliest === undefined || this.activeServiceCalls >= MAX_CONCURRENT_HA_CALLS) return;
+    const wait = Math.max(1, earliest + 1_001 - Date.now());
     this.serviceRateTimer = setTimeout(() => {
       this.serviceRateTimer = null;
       this.drainServiceWaiters();
     }, wait);
+  }
+
+  private acquirePhysicalSlot(key: string): (() => void) | Promise<() => void> {
+    if (!this.activePhysicalKeys.has(key)) {
+      this.activePhysicalKeys.add(key);
+      return () => this.releasePhysicalSlot(key);
+    }
+    return new Promise<() => void>((resolve) => {
+      const waiters = this.physicalSlotWaiters.get(key) ?? [];
+      waiters.push(resolve);
+      this.physicalSlotWaiters.set(key, waiters);
+    });
+  }
+
+  private releasePhysicalSlot(key: string): void {
+    const waiters = this.physicalSlotWaiters.get(key);
+    const next = waiters?.shift();
+    if (next) {
+      if (waiters!.length === 0) this.physicalSlotWaiters.delete(key);
+      next(() => this.releasePhysicalSlot(key));
+      return;
+    }
+    this.physicalSlotWaiters.delete(key);
+    this.activePhysicalKeys.delete(key);
   }
 
   private scheduleRetry(channel: SinkChannel, delay?: number): void {
@@ -745,6 +821,8 @@ export class Deployer {
       if (channel.retryDelivery !== delivery) return;
       channel.retryDelivery = null;
       delivery.connectionEpoch = this.ha.connectionStatus().epoch;
+      delivery.started = false;
+      delivery.cancelled = false;
       if (delivery.mode === "transient") channel.queue.unshift(delivery);
       else channel.pendingLatest = delivery;
       this.pumpChannel(channel);
@@ -753,34 +831,48 @@ export class Deployer {
 
   private async executeDelivery(channel: SinkChannel, delivery: Delivery): Promise<void> {
     const targetId = delivery.call.target?.entity_id ?? "";
-    // Generation changes replace logical graph state, not the physical HA call already accepted by
-    // this lane. The lane remains authoritative until that promise settles.
-    const isCurrent = () => this.channels.get(channel.nodeId) === channel && channel.active === delivery;
+    const physicalKey = physicalServiceKey(delivery.call);
+    const isLaneCurrent = () => this.channels.get(channel.nodeId) === channel && channel.active === delivery;
     const readyForEpoch = () => {
       const status = this.ha.connectionStatus();
       return status.phase === "ready" && status.epoch === delivery.connectionEpoch;
     };
+    const desiredStillValid = () => {
+      if (delivery.cancelled || channel.retired || delivery.generation !== this.generation || !isLaneCurrent()) return false;
+      if (delivery.mode === "transient") return delivery.transientValue?.status === "ok";
+      const desired = this.lastResults?.sinks[channel.nodeId];
+      return !!desired && keyOf(desired) === delivery.key;
+    };
     let acknowledged = false;
     let releaseSlot: (() => void) | null = null;
+    let releasePhysical: (() => void) | null = null;
     try {
-      if (!isCurrent() || !readyForEpoch()) return;
+      if (!desiredStillValid() || !readyForEpoch()) return;
+      const physical = this.acquirePhysicalSlot(physicalKey);
+      releasePhysical = physical instanceof Promise ? await physical : physical;
+      if (!desiredStillValid() || !readyForEpoch()) return;
       const acquired = this.acquireServiceSlot();
       releaseSlot = acquired instanceof Promise ? await acquired : acquired;
-      if (!isCurrent() || !readyForEpoch()) return;
+      // Both waits are cancelable. Recheck the graph's current desired/non-ok gate and HA epoch at
+      // the final boundary immediately before handing the call to Home Assistant.
+      if (!desiredStillValid() || !readyForEpoch()) return;
+      this.markDeliveryStarted(channel, delivery);
       const response = this.ha.callService(delivery.call);
       if (response && typeof response.then === "function") await response;
-      if (isCurrent() && readyForEpoch()) {
+      if (isLaneCurrent() && readyForEpoch() && !channel.retired && delivery.generation === this.generation) {
+        // Once HA accepted the call, its successful response acknowledges that delivery even when a
+        // newer desired value is already queued; the newer value runs next on the serialized lane.
         acknowledged = true;
         this.acknowledgeDelivery(channel, delivery);
-      } else if (isCurrent()) {
+      } else if (isLaneCurrent() && !channel.retired && delivery.generation === this.generation) {
         channel.failures += 1;
         channel.retryDelivery = delivery;
-        this.callFailures.set(channel.nodeId, { key: delivery.failureKey, message: "connection epoch changed before acknowledgement" });
+        this.callFailures.set(channel.nodeId, { key: delivery.failureKey, message: "connection epoch or desired state changed before acknowledgement" });
       }
       log("info", "deployer", "sink call", { mode: "live", service: delivery.call.service, entity: targetId, data: delivery.call.data });
     } catch (err) {
       const msg = serviceErrorMessage(err);
-      if (isCurrent()) {
+      if (isLaneCurrent() && !channel.retired && delivery.generation === this.generation) {
         channel.failures += 1;
         channel.retryDelivery = delivery;
         this.callFailures.set(channel.nodeId, { key: delivery.failureKey, message: msg });
@@ -788,8 +880,11 @@ export class Deployer {
       log("error", "deployer", "sink call failed", { mode: "live", service: delivery.call.service, entity: targetId, error: msg });
     } finally {
       releaseSlot?.();
-      if (!isCurrent()) return;
-      if (!acknowledged && !channel.retryDelivery) {
+      releasePhysical?.();
+      if (!isLaneCurrent()) return;
+      // Cancellation while waiting is not a failed delivery and must never become a retry.
+      if (delivery.started && !acknowledged && !channel.retryDelivery
+        && !channel.retired && delivery.generation === this.generation) {
         channel.failures += 1;
         channel.retryDelivery = delivery;
         this.callFailures.set(channel.nodeId, { key: delivery.failureKey, message: "delivery paused before acknowledgement" });

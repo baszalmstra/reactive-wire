@@ -40,17 +40,27 @@ function lightGraph(): { nodes: NodeData[]; edges: ViewEdge[] } {
 }
 
 /** A generic call-service sink driven by a boolean entity. */
-function callGraph(): { nodes: NodeData[]; edges: ViewEdge[] } {
+function callGraph(options: { sourceId?: string; sinkId?: string; target?: string } = {}): { nodes: NodeData[]; edges: ViewEdge[] } {
+  const sourceId = options.sourceId ?? "src";
+  const sinkId = options.sinkId ?? "snk";
   const nodes: NodeData[] = [
-    { id: "src", type: "entity", title: "", subtitle: "", icon: "bulb", x: 0, y: 0, config: { entity_id: "binary_sensor.x" }, inputs: [], outputs: [{ id: "state", label: "", type: "bool" }] },
+    { id: sourceId, type: "entity", title: "", subtitle: "", icon: "bulb", x: 0, y: 0, config: { entity_id: "binary_sensor.x" }, inputs: [], outputs: [{ id: "state", label: "", type: "bool" }] },
     {
-      id: "snk", type: "sink-call", title: "", subtitle: "", icon: "const", x: 0, y: 0,
-      config: { entity_id: "switch.x", domain: "switch", service: "turn_on", service_off: "turn_off" },
+      id: sinkId, type: "sink-call", title: "", subtitle: "", icon: "const", x: 0, y: 0,
+      config: { entity_id: options.target ?? "switch.x", domain: "switch", service: "turn_on", service_off: "turn_off" },
       inputs: [{ id: "on", label: "", type: "bool" }], outputs: [],
     },
   ];
-  const edges: ViewEdge[] = [{ id: "e", from: { node: "src", pin: "state" }, to: { node: "snk", pin: "on" } }];
+  const edges: ViewEdge[] = [{ id: `e-${sinkId}`, from: { node: sourceId, pin: "state" }, to: { node: sinkId, pin: "on" } }];
   return { nodes, edges };
+}
+
+function ttsGraph(service = "speak", entityId = "media_player.one"): { nodes: NodeData[]; edges: ViewEdge[] } {
+  const nodes: NodeData[] = [
+    { id: "src", type: "entity", title: "", subtitle: "", icon: "bulb", x: 0, y: 0, config: { entity_id: "sensor.msg" }, inputs: [], outputs: [{ id: "state", label: "", type: "str" }] },
+    { id: "snk", type: "sink-tts", title: "", subtitle: "", icon: "mem", x: 0, y: 0, stateful: true, config: { service, entity_id: entityId }, inputs: [{ id: "message", label: "", type: "str" }], outputs: [] },
+  ];
+  return { nodes, edges: [{ id: "e", from: { node: "src", pin: "state" }, to: { node: "snk", pin: "message" } }] };
 }
 
 function multiCallGraph(count: number): { nodes: NodeData[]; edges: ViewEdge[] } {
@@ -261,6 +271,136 @@ describe("Deployer — serialized sink channels", () => {
     deployer.stop();
   });
 
+  it("cancels executor-waiting work when its source becomes unavailable", async () => {
+    const ha = new MockHA();
+    const resolvers: Array<() => void> = [];
+    ha.callService = (call) => {
+      ha.calls.push(call);
+      return new Promise<void>((resolve) => resolvers.push(resolve));
+    };
+    ha.setState("binary_sensor.x", "on");
+    const deployer = new Deployer(ha, 100_000);
+    const graph = multiCallGraph(5);
+    deployer.deploy(graph.nodes, graph.edges, true);
+    expect(ha.calls).toHaveLength(4);
+    expect(deployer.inspect().sinks["snk-4"]).toMatchObject({ inFlight: true, attemptedKey: null });
+
+    ha.remove("binary_sensor.x");
+    expect(deployer.inspect().sinks["snk-4"]?.desired).toBeNull();
+    resolvers.shift()?.();
+    await flushPromises();
+    await flushPromises();
+    expect(ha.calls).toHaveLength(4);
+    expect(deployer.inspect().sinks["snk-4"]).toMatchObject({ inFlight: false, attemptedKey: null });
+    deployer.stop();
+  });
+
+  it("invalidates executor-waiting work when desired state changes", async () => {
+    const ha = new MockHA();
+    const resolvers: Array<() => void> = [];
+    ha.callService = (call) => {
+      ha.calls.push(call);
+      return new Promise<void>((resolve) => resolvers.push(resolve));
+    };
+    ha.setState("binary_sensor.x", "on");
+    const deployer = new Deployer(ha, 100_000);
+    const graph = multiCallGraph(5);
+    deployer.deploy(graph.nodes, graph.edges, true);
+    expect(ha.calls).toHaveLength(4);
+
+    ha.setState("binary_sensor.x", "off");
+    resolvers.shift()?.();
+    await flushPromises();
+    await flushPromises();
+    expect(ha.calls.some((call) => call.target?.entity_id === "switch.4" && call.service === "turn_on")).toBe(false);
+    deployer.stop();
+  });
+
+  it("cancels executor-waiting work when the sink is removed", async () => {
+    const ha = new MockHA();
+    const resolvers: Array<() => void> = [];
+    ha.callService = (call) => {
+      ha.calls.push(call);
+      return new Promise<void>((resolve) => resolvers.push(resolve));
+    };
+    ha.setState("binary_sensor.x", "on");
+    const deployer = new Deployer(ha, 100_000);
+    const graph = multiCallGraph(5);
+    deployer.deploy(graph.nodes, graph.edges, true);
+    expect(ha.calls).toHaveLength(4);
+
+    deployer.deploy([], [], true);
+    resolvers.shift()?.();
+    await flushPromises();
+    await flushPromises();
+    expect(ha.calls).toHaveLength(4);
+    deployer.stop();
+  });
+
+  it("serializes the same physical target after a logical sink rename", async () => {
+    const ha = new MockHA();
+    const resolvers: Array<() => void> = [];
+    let active = 0;
+    let maxActive = 0;
+    ha.callService = (call) => {
+      ha.calls.push(call);
+      active += 1;
+      maxActive = Math.max(maxActive, active);
+      return new Promise<void>((resolve) => resolvers.push(() => { active -= 1; resolve(); }));
+    };
+    ha.setState("binary_sensor.x", "on");
+    const deployer = new Deployer(ha, 100_000);
+    const oldGraph = callGraph({ sourceId: "old-src", sinkId: "old", target: "switch.same" });
+    deployer.deploy(oldGraph.nodes, oldGraph.edges, true);
+    const replacement = callGraph({ sourceId: "new-src", sinkId: "replacement", target: "switch.same" });
+    deployer.deploy(replacement.nodes, replacement.edges, true);
+    expect(ha.calls).toHaveLength(1);
+
+    resolvers.shift()?.();
+    await flushPromises();
+    expect(ha.calls).toHaveLength(2);
+    expect(maxActive).toBe(1);
+    resolvers.shift()?.();
+    await flushPromises();
+    deployer.stop();
+  });
+
+  it.each([
+    { label: "notify service", make: (service: string) => {
+      const graph = notifyGraph();
+      graph.nodes[1] = { ...graph.nodes[1]!, config: { service } };
+      return graph;
+    }, oldService: "old", newService: "new" },
+    { label: "TTS target", make: (_service: string, target?: string) => ttsGraph("speak", target), oldService: "media_player.old", newService: "media_player.new" },
+  ])("drops queued transient work when the $label changes", async ({ make, oldService, newService, label }) => {
+    const ha = new MockHA();
+    const resolvers: Array<() => void> = [];
+    ha.callService = (call) => {
+      ha.calls.push(call);
+      return new Promise<void>((resolve) => resolvers.push(resolve));
+    };
+    ha.setState("sensor.msg", "A");
+    const deployer = new Deployer(ha, 100_000);
+    const oldGraph = label === "TTS target" ? make("speak", oldService) : make(oldService);
+    deployer.deploy(oldGraph.nodes, oldGraph.edges, true);
+    ha.setState("sensor.msg", "B");
+    ha.setState("sensor.msg", "C");
+    const replacement = label === "TTS target" ? make("speak", newService) : make(newService);
+    deployer.deploy(replacement.nodes, replacement.edges, true);
+
+    resolvers.shift()?.();
+    await flushPromises();
+    expect(ha.calls.map((call) => call.data.message)).toEqual(["B"]);
+    ha.setState("sensor.msg", "D");
+    await flushPromises();
+    expect(ha.calls.map((call) => call.data.message)).toEqual(["B", "D"]);
+    if (label === "TTS target") expect(ha.lastCall()?.target?.entity_id).toBe(newService);
+    else expect(ha.lastCall()?.service).toBe(newService);
+    resolvers.shift()?.();
+    await flushPromises();
+    deployer.stop();
+  });
+
   it("never overlaps command calls and runs the latest pending desired call next", async () => {
     const ha = new MockHA();
     const resolvers: Array<() => void> = [];
@@ -416,9 +556,37 @@ describe("Deployer — aggregate delivery bounds", () => {
       for (let i = 0; i < 10; i += 1) await flushPromises();
       expect(ha.calls).toHaveLength(16);
 
-      vi.advanceTimersByTime(1_000);
+      vi.advanceTimersByTime(1_001);
       for (let i = 0; i < 10; i += 1) await flushPromises();
       expect(ha.calls).toHaveLength(24);
+    } finally {
+      deployer?.stop();
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not double-burst across a rolling one-second boundary", async () => {
+    vi.useFakeTimers();
+    const ha = new MockHA();
+    ha.callService = (call) => { ha.calls.push(call); };
+    let deployer: Deployer | undefined;
+    try {
+      vi.setSystemTime(999);
+      ha.setState("binary_sensor.x", "on");
+      deployer = new Deployer(ha, 100_000);
+      const graph = multiCallGraph(16);
+      deployer.deploy(graph.nodes, graph.edges, true);
+      await flushPromises();
+      expect(ha.calls).toHaveLength(16);
+
+      vi.advanceTimersByTime(1);
+      deployer.deploy(graph.nodes, graph.edges, true);
+      await flushPromises();
+      expect(ha.calls).toHaveLength(16);
+
+      vi.advanceTimersByTime(1_000);
+      for (let i = 0; i < 10; i += 1) await flushPromises();
+      expect(ha.calls).toHaveLength(32);
     } finally {
       deployer?.stop();
       vi.useRealTimers();
