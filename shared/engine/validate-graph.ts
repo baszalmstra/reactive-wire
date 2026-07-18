@@ -1,4 +1,4 @@
-import type { RuntimeMacroMap } from "../macros.js";
+import { MACRO_IN, MACRO_OUT, type RuntimeMacroDef, type RuntimeMacroMap } from "../macros.js";
 import type { RuntimeNode, RuntimePin, ValueType } from "../runtime-types.js";
 import { ownValue } from "../record.js";
 import { pinKey } from "../identity.js";
@@ -172,7 +172,96 @@ function validateNodeShape(node: RuntimeNode): GraphSemanticValidation {
   return { ok: true };
 }
 
-/** Validate every reachable macro reference before expansion drops unresolved placements. */
+function validatePinContract(
+  actual: RuntimePin[],
+  expected: RuntimePin[],
+  owner: string,
+  side: "input" | "output",
+): GraphSemanticValidation {
+  const actualPins = pinMap(actual, owner, side);
+  if (isValidation(actualPins)) return actualPins;
+  const expectedPins = pinMap(expected, owner, side);
+  if (isValidation(expectedPins)) return expectedPins;
+  if (actualPins.size !== expectedPins.size) {
+    return error({ code: "invalid-node-shape", nodeId: owner, message: `${owner} ${side} interface does not match its macro definition` });
+  }
+  for (const [pinId, wanted] of expectedPins) {
+    const got = actualPins.get(pinId);
+    if (!got || got.type !== wanted.type) {
+      return error({ code: "invalid-pin", nodeId: owner, message: `${owner} ${side} pin ${JSON.stringify(pinId)} does not match its macro definition` });
+    }
+  }
+  return { ok: true };
+}
+
+function validateMacroPlacement(node: RuntimeNode, def: RuntimeMacroDef): GraphSemanticValidation {
+  const inputs = validatePinContract(node.inputs, def.inputs, `Macro placement ${JSON.stringify(node.id)}`, "input");
+  if (!inputs.ok) return inputs;
+  return validatePinContract(node.outputs, def.outputs, `Macro placement ${JSON.stringify(node.id)}`, "output");
+}
+
+/**
+ * Validate a definition before expansion consumes its boundary nodes and edges. Expansion is
+ * intentionally lossy, so duplicate macro-out sources or unknown boundary pins must be rejected
+ * here rather than silently becoming whichever edge happened to appear last.
+ */
+function validateMacroDefinition(def: RuntimeMacroDef, macros: RuntimeMacroMap): GraphSemanticValidation {
+  const byId = new Map<string, RuntimeNode>();
+  for (const node of def.nodes) {
+    if (byId.has(node.id)) {
+      return error({ code: "invalid-node-shape", nodeId: node.id, message: `Macro ${JSON.stringify(def.id)} has duplicate node id ${JSON.stringify(node.id)}` });
+    }
+    byId.set(node.id, node);
+    const inputs = pinMap(node.inputs, node.id, "input");
+    if (isValidation(inputs)) return inputs;
+    const outputs = pinMap(node.outputs, node.id, "output");
+    if (isValidation(outputs)) return outputs;
+    if (node.type === MACRO_IN && node.inputs.length !== 0) {
+      return error({ code: "invalid-node-shape", nodeId: node.id, message: `Macro input boundary ${JSON.stringify(node.id)} cannot have inputs` });
+    }
+    if (node.type === MACRO_OUT && node.outputs.length !== 0) {
+      return error({ code: "invalid-node-shape", nodeId: node.id, message: `Macro output boundary ${JSON.stringify(node.id)} cannot have outputs` });
+    }
+    if (node.type === "macro") {
+      const nested = ownValue(macros, String(node.config?.macroId ?? ""));
+      if (!nested) return error({ code: "unknown-macro", nodeId: node.id, message: `Unknown macro ${JSON.stringify(String(node.config?.macroId ?? ""))}` });
+      const placement = validateMacroPlacement(node, nested);
+      if (!placement.ok) return placement;
+    }
+  }
+
+  const boundaryInputs = def.nodes.filter((node) => node.type === MACRO_IN).flatMap((node) => node.outputs);
+  const boundaryOutputs = def.nodes.filter((node) => node.type === MACRO_OUT).flatMap((node) => node.inputs);
+  const inputContract = validatePinContract(boundaryInputs, def.inputs, `Macro ${JSON.stringify(def.id)}`, "input");
+  if (!inputContract.ok) return inputContract;
+  const outputContract = validatePinContract(boundaryOutputs, def.outputs, `Macro ${JSON.stringify(def.id)}`, "output");
+  if (!outputContract.ok) return outputContract;
+
+  const edgeIds = new Set<string>();
+  const incoming = new Set<string>();
+  for (const edge of def.edges) {
+    if (edgeIds.has(edge.id)) return error({ code: "invalid-edge", edgeId: edge.id, message: `Macro ${JSON.stringify(def.id)} has duplicate edge id ${JSON.stringify(edge.id)}` });
+    edgeIds.add(edge.id);
+    const source = byId.get(edge.from.node);
+    const target = byId.get(edge.to.node);
+    const sourcePin = source?.outputs.find((pin) => pin.id === edge.from.pin);
+    const targetPin = target?.inputs.find((pin) => pin.id === edge.to.pin);
+    if (!source || !target || !sourcePin || !targetPin) {
+      return error({ code: "invalid-edge", edgeId: edge.id, message: `Macro edge ${JSON.stringify(edge.id)} does not connect an existing output to an existing input` });
+    }
+    const targetKey = pinKey(edge.to.node, edge.to.pin);
+    if (incoming.has(targetKey)) {
+      return error({ code: "duplicate-input-source", edgeId: edge.id, nodeId: edge.to.node, message: `Macro input ${JSON.stringify(`${edge.to.node}:${edge.to.pin}`)} has more than one source` });
+    }
+    incoming.add(targetKey);
+    if (!typesCompatible(sourcePin.type, targetPin.type)) {
+      return error({ code: "type-mismatch", edgeId: edge.id, message: `Macro edge ${JSON.stringify(edge.id)} connects ${sourcePin.type} to ${targetPin.type}` });
+    }
+  }
+  return { ok: true };
+}
+
+/** Validate every reachable macro and placement before expansion drops unresolved structure. */
 export function validateReachableMacros(nodes: RuntimeNode[], macros: RuntimeMacroMap): GraphSemanticValidation {
   const visited = new Set<string>();
   const active = new Set<string>();
@@ -188,13 +277,20 @@ export function validateReachableMacros(nodes: RuntimeNode[], macros: RuntimeMac
       if (!result.ok) return result;
     }
     active.delete(macroId);
+    const shape = validateMacroDefinition(macro, macros);
+    if (!shape.ok) return shape;
     visited.add(macroId);
     return { ok: true };
   };
   for (const node of nodes) {
     if (node.type !== "macro") continue;
-    const result = visit(String(node.config?.macroId ?? ""));
+    const macroId = String(node.config?.macroId ?? "");
+    const def = ownValue(macros, macroId);
+    if (!def) return error({ code: "unknown-macro", nodeId: node.id, message: `Unknown macro ${JSON.stringify(macroId)}` });
+    const result = visit(macroId);
     if (!result.ok) return result;
+    const placement = validateMacroPlacement(node, def);
+    if (!placement.ok) return placement;
   }
   return { ok: true };
 }

@@ -30,6 +30,21 @@ describe("startup deployment policy", () => {
     expect(deploy).toHaveBeenCalledWith({ nodes: [], edges: [], macros: {} });
   });
 
+  it("rejects a persisted runtime node with no definition without deploying", () => {
+    const write = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    const deploy = vi.fn();
+    const controller = new AutoDeployController(deploy);
+    const invalid = snapshot(true);
+    invalid.flows[0]!.nodes.push({ id: "missing-def", type: "rw", position: { x: 0, y: 0 }, data: {} });
+
+    const result = applyStartupDeploymentPolicy(invalid, controller);
+
+    expect(result.kind).toBe("rejected");
+    if (result.kind === "rejected") expect(result.error).toContain("Unknown node type");
+    expect(deploy).not.toHaveBeenCalled();
+    write.mockRestore();
+  });
+
   it("rejects an invalid persisted auto-deploy graph without deploying", () => {
     const write = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
     const deploy = vi.fn();

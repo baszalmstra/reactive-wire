@@ -139,6 +139,25 @@ describe("collab deploy adapter", () => {
     deployer.stop();
   });
 
+  it("rejects a malformed runtime node without replacing the last valid deployment", () => {
+    const write = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    const deployed: DeployRequest[] = [];
+    const controller = new AutoDeployController((graph) => deployed.push(graph));
+    const valid = snapshot({ settings: { autoDeploy: true, deployFlowId: "flow-a", deployedFlowIds: ["flow-a"] } });
+    expect(controller.maybeDeploy(valid)).toMatchObject({ ok: true });
+
+    const malformed = snapshot({
+      flows: [{ id: "flow-a", name: "A", nodes: [{ id: "broken", type: "rw", position: { x: 0, y: 0 }, data: {} }], edges: [] }],
+      settings: { autoDeploy: true, deployFlowId: "flow-a", deployedFlowIds: ["flow-a"] },
+    });
+    const result = controller.maybeDeploy(malformed);
+
+    expect(result).toMatchObject({ ok: false });
+    if (result && !result.ok) expect(result.error).toContain("Unknown node type");
+    expect(deployed).toHaveLength(1);
+    write.mockRestore();
+  });
+
   it("skips and logs an invalid def instead of deploying it", () => {
     const write = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
     const deployed: DeployRequest[] = [];

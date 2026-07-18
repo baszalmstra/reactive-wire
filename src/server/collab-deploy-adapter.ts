@@ -28,8 +28,29 @@ export function edgeFromCollab(edge: CollabEdge, nodeIds: Set<string>): ViewEdge
   };
 }
 
+function invalidRuntimeNode(node: CollabNode): NodeData {
+  return {
+    id: node.id,
+    type: "__invalid-collab-runtime-node",
+    title: "Invalid runtime node",
+    subtitle: "",
+    icon: "const",
+    x: node.position?.x ?? 0,
+    y: node.position?.y ?? 0,
+    inputs: [],
+    outputs: [],
+  };
+}
+
 function graphFromCollabFlow(flow: EditorDocumentSnapshot["flows"][number]): RuntimeFlowGraph {
-  const rawNodes = flow.nodes.map(nodeDefFromCollab).filter((n): n is NodeData => !!n);
+  const rawNodes = flow.nodes.flatMap((node) => {
+    const def = nodeDefFromCollab(node);
+    if (def) return [def];
+    // Comments and other presentation-only canvas nodes are intentionally absent at runtime. A
+    // malformed runtime node must instead survive to the shared validation gate; silently
+    // omitting it could turn a corrupt live flow into a valid empty replacement deployment.
+    return node.type === "rw" ? [invalidRuntimeNode(node)] : [];
+  });
   const nodeIds = new Set(rawNodes.map((n) => n.id));
   const edges = flow.edges.map((edge) => edgeFromCollab(edge, nodeIds)).filter((edge): edge is ViewEdge => !!edge);
   // Heal a persisted def to the code's current pin shapes as it is read, so a removed pin surfaces

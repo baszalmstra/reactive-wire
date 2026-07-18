@@ -61,6 +61,55 @@ describe("deploy graph validation", () => {
     if (!unknownType.ok) expect(unknownType.error).toContain("Unknown node type");
   });
 
+  it("rejects lossy macro boundary and placement shapes before expansion", () => {
+    const bool = (id: string, value: boolean) => ({
+      id, type: "const-bool", title: "Boolean", subtitle: "", icon: "const", x: 0, y: 0,
+      inputs: [], outputs: [{ id: "out", label: "out", type: "bool", editable: true }], values: { out: value },
+    });
+    const placement = (outputs = [{ id: "y", label: "y", type: "bool" }]) => ({
+      id: "p", type: "macro", title: "Macro", subtitle: "", icon: "macro", x: 0, y: 0,
+      config: { macroId: "m" }, inputs: [], outputs,
+    });
+    const definition = (edges: unknown[], boundaryPin = "y") => ({
+      id: "m", name: "Macro", inputs: [], outputs: [{ id: "y", label: "y", type: "bool" }], stateful: false,
+      nodes: [
+        bool("a", false), bool("b", true),
+        { id: "out", type: "macro-out", title: "Output", subtitle: "", icon: "io-out", x: 0, y: 0,
+          inputs: [{ id: boundaryPin, label: boundaryPin, type: "bool" }], outputs: [] },
+      ],
+      edges,
+    });
+    const edgeTo = (id: string, source: string, pin = "y") => ({ id, from: { node: source, pin: "out" }, to: { node: "out", pin } });
+
+    for (const edges of [
+      [edgeTo("a-out", "a"), edgeTo("b-out", "b")],
+      [edgeTo("b-out", "b"), edgeTo("a-out", "a")],
+    ]) {
+      const duplicate = sanitizeDeployRequest({ nodes: [placement()], edges: [], macros: { m: definition(edges) } });
+      expect(duplicate.ok).toBe(false);
+      if (!duplicate.ok) expect(duplicate.error).toContain("more than one source");
+    }
+
+    const unknownBoundaryPin = sanitizeDeployRequest({
+      nodes: [placement()], edges: [], macros: { m: definition([edgeTo("bad", "a", "missing")]) },
+    });
+    expect(unknownBoundaryPin.ok).toBe(false);
+    if (!unknownBoundaryPin.ok) expect(unknownBoundaryPin.error).toContain("existing output to an existing input");
+
+    const boundaryMismatch = sanitizeDeployRequest({
+      nodes: [placement()], edges: [], macros: { m: definition([edgeTo("wire", "a", "z")], "z") },
+    });
+    expect(boundaryMismatch.ok).toBe(false);
+    if (!boundaryMismatch.ok) expect(boundaryMismatch.error).toContain("does not match");
+
+    const placementMismatch = sanitizeDeployRequest({
+      nodes: [placement([{ id: "wrong", label: "wrong", type: "bool" }])], edges: [],
+      macros: { m: definition([edgeTo("wire", "a")]) },
+    });
+    expect(placementMismatch.ok).toBe(false);
+    if (!placementMismatch.ok) expect(placementMismatch.error).toContain("does not match its macro definition");
+  });
+
   it("rejects prototype-sensitive graph identifiers", () => {
     const reservedNode = sanitizeDeployRequest({
       nodes: [{ id: "__proto__", type: "const-number", title: "Number", subtitle: "", icon: "const", x: 0, y: 0, inputs: [], outputs: [] }],
