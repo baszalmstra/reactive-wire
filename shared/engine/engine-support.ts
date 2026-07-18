@@ -16,8 +16,10 @@ export interface NodeMemory {
   prev?: boolean;
   /** Last latched value held by a hold node. */
   held?: RWValue | null;
-  /** Previous ok input value, for change detection by edge/rising/falling. */
+  /** Previous acknowledged value (or edge-node reading). */
   prevVal?: RWValue | null;
+  /** Most recently observed transient input, advanced independently from delivery acknowledgement. */
+  observedVal?: RWValue | null;
   /** Set once the node's initial state has been established (seeded). */
   seeded?: boolean;
   /** Set once a fold/scan node has folded in at least one value, so min/max can take the first. */

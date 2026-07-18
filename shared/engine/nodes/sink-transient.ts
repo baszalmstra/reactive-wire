@@ -3,29 +3,33 @@ import { base } from "./template-base.js";
 
 /**
  * An edge-triggered transient call (notify / TTS): a fire-and-forget effect with no queryable
- * state, so it fires on a *change* of the message, not on its value. The last fired message is
- * remembered per node and seeded at boot from the message currently present, so a restart with
- * an unchanged message does not re-announce. A non-ok message is never sent and does not
- * advance the remembered value, so a momentarily offline source can't fire a stale message.
+ * state, so it fires on a *change* of the message, not on its value. Observation state preserves
+ * every A→B→A transition, while the server advances the separate acknowledged baseline only after
+ * delivery succeeds. Both are seeded at boot from the current message, so a restart with an
+ * unchanged message does not re-announce. A non-ok message is never sent and advances neither.
  */
 function buildTransientCall({ n, cfg, okInput, previousMemory }: SinkCtx): SinkEvaluation {
   const msg = okInput("message");
   const m = { ...previousMemory };
   if (m.prevVal === undefined) m.prevVal = null;
+  if (m.observedVal === undefined) m.observedVal = m.prevVal;
   if (m.seeded === undefined) m.seeded = false;
   // Seed at boot: the first message present establishes the baseline without announcing it,
   // so a freshly deployed or restarted graph doesn't fire for a pre-existing message.
   if (!m.seeded) {
     if (msg) {
       m.prevVal = msg;
+      m.observedVal = msg;
       m.seeded = true;
     }
     return { call: null, nextMemory: m };
   }
   if (!msg) return { call: null, nextMemory: m };
-  const prev = m.prevVal ?? null;
+  const prev = m.observedVal ?? null;
   const changed = !prev || prev.status !== "ok" || prev.v !== msg.v;
-  m.prevVal = msg;
+  // Observation advances transactionally so A→B→A is retained, but the acknowledged `prevVal`
+  // baseline is advanced only by the server after Home Assistant accepts the call.
+  m.observedVal = msg;
   if (!changed) return { call: null, nextMemory: m };
   if (n.type === "sink-tts") {
     const service = String(cfg.service ?? "speak");

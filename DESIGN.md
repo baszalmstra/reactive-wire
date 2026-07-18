@@ -409,7 +409,13 @@ the sinks `sink-light`/`sink-call`/`sink-climate`/`sink-cover`/`sink-input`/`sin
   every entity change and on a 1 s clock tick. Each sink owns a serialized delivery channel:
   reconciling/command work coalesces to the latest desired call, while transient work uses a
   bounded FIFO with visible overflow state. Thus Home Assistant never receives overlapping calls
-  from one sink. Preview remains dry-run and the non-`Ok` safety gate remains in the engine.
+  from one sink. Delivery tracks observed, enqueued, attempted, and acknowledged states separately;
+  failures retry on a capped exponential timer rather than incidental graph ticks. Retries pause
+  while HA is not ready, reconciling work is revalidated before replay, and transient work remains
+  queued until acknowledgement (at-least-once within a running process). Preview remains dry-run
+  and the non-`Ok` safety gate remains in the engine. Delivery queues are currently memory-only:
+  a process crash after HA accepts a transient call but before its acknowledgement is observed has
+  an unavoidable ambiguous duplicate/loss window until a durable idempotency protocol is added.
   `stop()` is a terminal, idempotent lifecycle
   boundary: it unsubscribes sources, invalidates async generations, clears live state, and rejects
   later deployments. A service call already accepted by Home Assistant cannot be recalled, but its

@@ -1,5 +1,5 @@
 import { evaluate, isSink, isTransientSink, sinkCalls, type Memory, type ViewEdge } from "../../shared/engine/evaluate.js";
-import { createMemory } from "../../shared/engine/engine-support.js";
+import { createMemory, memoryValue, setMemoryValue } from "../../shared/engine/engine-support.js";
 import { expandMacros } from "../../shared/engine/expand.js";
 import type { RuntimeMacroMap } from "../../shared/macros.js";
 import type { Health } from "../../shared/node-types.js";
@@ -43,6 +43,18 @@ export interface DebugSink {
   nextSequence: number;
   /** Whether the bounded transient queue rejected an event. */
   overflowed: boolean;
+  /** Latest proposal observed by the runtime. */
+  observedKey: string | null;
+  /** Latest proposal accepted into delivery state. */
+  enqueuedKey: string | null;
+  /** Latest proposal passed to Home Assistant. */
+  attemptedKey: string | null;
+  /** Latest proposal whose call resolved successfully. */
+  acknowledgedKey: string | null;
+  /** Consecutive delivery failures. */
+  failures: number;
+  /** Epoch ms of the independently scheduled retry, or null. */
+  nextRetryAt: number | null;
   /** The most recent call this sink attempted or dry-ran. */
   lastCall: ServiceCall | null;
   /** Epoch ms when the most recent call was triggered, or null if it has never triggered. */
@@ -79,6 +91,9 @@ interface Delivery {
   key: string;
   failureKey: string;
   call: ServiceCall;
+  attempts: number;
+  /** For transient sinks, the value whose successful delivery advances the acknowledged baseline. */
+  transientValue?: RWValue;
 }
 
 interface SinkChannel {
@@ -91,9 +106,19 @@ interface SinkChannel {
   queue: Delivery[];
   nextSequence: number;
   overflowed: boolean;
+  observedKey: string | null;
+  enqueuedKey: string | null;
+  attemptedKey: string | null;
+  acknowledgedKey: string | null;
+  failures: number;
+  retryDelivery: Delivery | null;
+  retryTimer: ReturnType<typeof setTimeout> | null;
+  nextRetryAt: number | null;
 }
 
 const MAX_TRANSIENT_QUEUE = 100;
+const RETRY_BASE_MS = 1_000;
+const RETRY_MAX_MS = 60_000;
 
 /** A value that survives JSON serialization, or its string form when it would throw (circular, BigInt). */
 function jsonSafe(value: unknown): unknown {
@@ -232,7 +257,7 @@ export class Deployer {
     if (this.stopped) throw new Error("Deployer has been stopped");
     const flat = expandMacros(nodes, edges, macros, undefined, true);
     this.generation += 1;
-    this.channels.clear();
+    this.resetChannels();
     this.lastNonReconciling.clear();
     this.lastReconcilingAttempt.clear();
     this.callFailures.clear();
@@ -265,7 +290,7 @@ export class Deployer {
       this.tick = null;
     }
     this.poller.stop();
-    this.channels.clear();
+    this.resetChannels();
     this.lastNonReconciling.clear();
     this.lastReconcilingAttempt.clear();
     this.callFailures.clear();
@@ -312,6 +337,12 @@ export class Deployer {
             activeSequence: channel?.active?.sequence ?? null,
             nextSequence: channel?.nextSequence ?? 1,
             overflowed: channel?.overflowed ?? false,
+            observedKey: channel?.observedKey ?? null,
+            enqueuedKey: channel?.enqueuedKey ?? null,
+            attemptedKey: channel?.attemptedKey ?? null,
+            acknowledgedKey: channel?.acknowledgedKey ?? null,
+            failures: channel?.failures ?? 0,
+            nextRetryAt: channel?.nextRetryAt ?? null,
             lastCall: lastCall ? debugCall(lastCall) : null,
             lastTriggeredAt: this.lastTriggeredAt.get(n.id) ?? null,
             lastCommand: this.lastNonReconciling.get(n.id) ?? null,
@@ -330,6 +361,13 @@ export class Deployer {
     };
   }
 
+  private resetChannels(): void {
+    for (const channel of this.channels.values()) {
+      if (channel.retryTimer) clearTimeout(channel.retryTimer);
+    }
+    this.channels.clear();
+  }
+
   private recordTriggered(nodeId: string, call: ServiceCall): void {
     this.lastTriggeredAt.set(nodeId, Date.now());
     this.lastTriggeredCall.set(nodeId, call);
@@ -342,7 +380,10 @@ export class Deployer {
     this.lastReconcilingAttempt.clear();
     if (status.phase === "ready") {
       this.run();
-      for (const channel of this.channels.values()) this.pumpChannel(channel);
+      for (const channel of this.channels.values()) {
+        if (channel.retryDelivery && !channel.retryTimer) this.scheduleRetry(channel, 0);
+        this.pumpChannel(channel);
+      }
     }
   }
 
@@ -355,11 +396,14 @@ export class Deployer {
     this.lastRunAt = Date.now();
     const byId = new Map(this.graph.nodes.map((n) => [n.id, n]));
     for (const n of this.graph.nodes) {
-      if (!isSink(n.type) || !isReconcilingSinkType(n.type) || results.sinks[n.id]) continue;
-      this.lastReconcilingAttempt.delete(n.id);
+      if (!isSink(n.type) || isTransientSink(n.type) || results.sinks[n.id]) continue;
+      if (isReconcilingSinkType(n.type)) this.lastReconcilingAttempt.delete(n.id);
       this.callFailures.delete(n.id);
       const channel = this.channels.get(n.id);
-      if (channel) channel.pendingLatest = null;
+      if (channel) {
+        channel.pendingLatest = null;
+        this.cancelRetry(channel);
+      }
     }
     for (const { nodeId, call } of sinkCalls(this.graph.nodes, results)) {
       const nodeType = byId.get(nodeId)?.type ?? "";
@@ -367,24 +411,43 @@ export class Deployer {
       const key = keyOf(call);
       const failureKey = mode === "reconciling" ? reconcilingAttemptKey(call, entities) : key;
       if (this.callFailures.get(nodeId)?.key !== failureKey) this.callFailures.delete(nodeId);
-      this.enqueueDelivery(nodeId, mode, key, failureKey, call);
+      const transientValue = mode === "transient" ? results.inputs[pinKey(nodeId, "message")] ?? undefined : undefined;
+      this.enqueueDelivery(nodeId, mode, key, failureKey, call, transientValue && transientValue.status === "ok" ? transientValue : undefined);
     }
   }
 
   private channelFor(nodeId: string, mode: SinkMode): SinkChannel {
     let channel = this.channels.get(nodeId);
     if (!channel) {
-      channel = { nodeId, mode, active: null, pendingLatest: null, queue: [], nextSequence: 1, overflowed: false };
+      channel = {
+        nodeId, mode, active: null, pendingLatest: null, queue: [], nextSequence: 1,
+        overflowed: false, observedKey: null, enqueuedKey: null, attemptedKey: null,
+        acknowledgedKey: null, failures: 0, retryDelivery: null, retryTimer: null, nextRetryAt: null,
+      };
       this.channels.set(nodeId, channel);
     }
     return channel;
   }
 
-  private enqueueDelivery(nodeId: string, mode: SinkMode, key: string, failureKey: string, call: ServiceCall): void {
+  private enqueueDelivery(
+    nodeId: string,
+    mode: SinkMode,
+    key: string,
+    failureKey: string,
+    call: ServiceCall,
+    transientValue?: RWValue,
+  ): void {
     const channel = this.channelFor(nodeId, mode);
+    channel.observedKey = key;
+    if (channel.retryDelivery) {
+      if (channel.retryDelivery.failureKey === failureKey) return;
+      this.cancelRetry(channel);
+    }
     if (mode === "command" && this.lastNonReconciling.get(nodeId) === key) return;
     if (mode === "reconciling" && this.lastReconcilingAttempt.get(nodeId) === failureKey
       && channel.active?.failureKey !== failureKey && channel.pendingLatest?.failureKey !== failureKey) return;
+    const lastTransient = channel.queue[channel.queue.length - 1] ?? channel.active;
+    if (mode === "transient" && lastTransient?.key === key) return;
     const status = this.ha.connectionStatus();
     const delivery: Delivery = {
       generation: this.generation,
@@ -393,7 +456,10 @@ export class Deployer {
       key,
       failureKey,
       call,
+      attempts: 0,
+      ...(transientValue ? { transientValue } : {}),
     };
+    channel.enqueuedKey = key;
     if (mode === "transient") {
       if (channel.active) {
         if (channel.queue.length >= MAX_TRANSIENT_QUEUE) {
@@ -414,7 +480,7 @@ export class Deployer {
   }
 
   private pumpChannel(channel: SinkChannel): void {
-    if (this.stopped || channel.active || channel.nodeId !== this.channels.get(channel.nodeId)?.nodeId) return;
+    if (this.stopped || channel.active || channel.retryDelivery || this.channels.get(channel.nodeId) !== channel) return;
     if (this.ha.connectionStatus().phase !== "ready") return;
     const delivery = channel.mode === "transient" ? channel.queue.shift() ?? null : channel.pendingLatest;
     if (!delivery) return;
@@ -422,6 +488,8 @@ export class Deployer {
     if (delivery.generation !== this.generation) return;
     delivery.connectionEpoch = this.ha.connectionStatus().epoch;
     channel.active = delivery;
+    delivery.attempts += 1;
+    channel.attemptedKey = delivery.key;
     if (channel.mode === "reconciling") this.lastReconcilingAttempt.set(channel.nodeId, delivery.failureKey);
     this.callFailures.delete(channel.nodeId);
     this.recordTriggered(channel.nodeId, delivery.call);
@@ -433,11 +501,50 @@ export class Deployer {
   }
 
   private completeDryRun(channel: SinkChannel, delivery: Delivery): void {
-    if (channel.mode === "command") this.lastNonReconciling.set(channel.nodeId, delivery.key);
+    this.acknowledgeDelivery(channel, delivery);
     const targetId = delivery.call.target?.entity_id ?? "";
     log("info", "deployer", "sink call", { mode: "dry-run", service: delivery.call.service, entity: targetId, data: delivery.call.data });
     channel.active = null;
     this.pumpChannel(channel);
+  }
+
+  private acknowledgeDelivery(channel: SinkChannel, delivery: Delivery): void {
+    channel.acknowledgedKey = delivery.key;
+    channel.failures = 0;
+    this.callFailures.delete(channel.nodeId);
+    if (channel.mode === "command") this.lastNonReconciling.set(channel.nodeId, delivery.key);
+    if (channel.mode === "transient" && delivery.transientValue) {
+      const previous = memoryValue(this.mem, channel.nodeId) ?? {};
+      setMemoryValue(this.mem, channel.nodeId, { ...previous, prevVal: delivery.transientValue, seeded: true });
+    }
+  }
+
+  private cancelRetry(channel: SinkChannel): void {
+    if (channel.retryTimer) clearTimeout(channel.retryTimer);
+    channel.retryTimer = null;
+    channel.nextRetryAt = null;
+    channel.retryDelivery = null;
+  }
+
+  private scheduleRetry(channel: SinkChannel, delay?: number): void {
+    const delivery = channel.retryDelivery;
+    if (!delivery || channel.retryTimer || delivery.generation !== this.generation) return;
+    const wait = delay ?? Math.min(RETRY_MAX_MS, RETRY_BASE_MS * (2 ** Math.max(0, channel.failures - 1)));
+    channel.nextRetryAt = Date.now() + wait;
+    channel.retryTimer = setTimeout(() => {
+      channel.retryTimer = null;
+      channel.nextRetryAt = null;
+      if (this.stopped || this.channels.get(channel.nodeId) !== channel || delivery.generation !== this.generation) return;
+      if (this.ha.connectionStatus().phase !== "ready") return;
+      // Re-evaluation may cancel a stale command/correction or replace it with newer desired work.
+      if (channel.mode !== "transient") this.run();
+      if (channel.retryDelivery !== delivery) return;
+      channel.retryDelivery = null;
+      delivery.connectionEpoch = this.ha.connectionStatus().epoch;
+      if (channel.mode === "transient") channel.queue.unshift(delivery);
+      else channel.pendingLatest = delivery;
+      this.pumpChannel(channel);
+    }, wait);
   }
 
   private async executeDelivery(channel: SinkChannel, delivery: Delivery): Promise<void> {
@@ -454,21 +561,34 @@ export class Deployer {
       if (!isCurrent() || !readyForEpoch()) return;
       const response = this.ha.callService(delivery.call);
       if (response && typeof response.then === "function") await response;
-      acknowledged = true;
       if (isCurrent() && readyForEpoch()) {
-        if (channel.mode === "command") this.lastNonReconciling.set(channel.nodeId, delivery.key);
-        this.callFailures.delete(channel.nodeId);
+        acknowledged = true;
+        this.acknowledgeDelivery(channel, delivery);
+      } else if (isCurrent()) {
+        channel.failures += 1;
+        channel.retryDelivery = delivery;
+        this.callFailures.set(channel.nodeId, { key: delivery.failureKey, message: "connection epoch changed before acknowledgement" });
       }
       log("info", "deployer", "sink call", { mode: "live", service: delivery.call.service, entity: targetId, data: delivery.call.data });
     } catch (err) {
       const msg = serviceErrorMessage(err);
-      if (isCurrent() && readyForEpoch()) this.callFailures.set(channel.nodeId, { key: delivery.failureKey, message: msg });
+      if (isCurrent()) {
+        channel.failures += 1;
+        channel.retryDelivery = delivery;
+        this.callFailures.set(channel.nodeId, { key: delivery.failureKey, message: msg });
+      }
       log("error", "deployer", "sink call failed", { mode: "live", service: delivery.call.service, entity: targetId, error: msg });
     } finally {
       if (!isCurrent()) return;
+      if (!acknowledged && !channel.retryDelivery) {
+        channel.failures += 1;
+        channel.retryDelivery = delivery;
+        this.callFailures.set(channel.nodeId, { key: delivery.failureKey, message: "delivery paused before acknowledgement" });
+      }
       channel.active = null;
       if (acknowledged && channel.pendingLatest?.key === delivery.key) channel.pendingLatest = null;
-      this.pumpChannel(channel);
+      if (channel.retryDelivery === delivery) this.scheduleRetry(channel);
+      else this.pumpChannel(channel);
     }
   }
 }

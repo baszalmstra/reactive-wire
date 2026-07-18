@@ -97,6 +97,82 @@ describe("Deployer — transient notify sink", () => {
   });
 });
 
+describe("Deployer — acknowledged transient delivery", () => {
+  it("retains a failed event and retries it independently until acknowledged", async () => {
+    vi.useFakeTimers();
+    const ha = new MockHA();
+    let attempts = 0;
+    ha.callService = (call) => {
+      ha.calls.push(call);
+      attempts += 1;
+      return attempts === 1 ? Promise.reject(new Error("temporary")) : Promise.resolve();
+    };
+    let deployer: Deployer | undefined;
+    try {
+      ha.setState("sensor.msg", "A");
+      deployer = new Deployer(ha, 100_000);
+      const { nodes, edges } = notifyGraph();
+      deployer.deploy(nodes, edges, true);
+      ha.setState("sensor.msg", "B");
+      await flushPromises();
+      expect(ha.calls.map((call) => call.data.message)).toEqual(["B"]);
+      expect(deployer.inspect().sinks.snk).toMatchObject({ failures: 1, acknowledgedKey: null });
+
+      ha.setState("sensor.noise", "unrelated");
+      await flushPromises();
+      expect(ha.calls).toHaveLength(1);
+      vi.advanceTimersByTime(1_000);
+      await flushPromises();
+      expect(ha.calls.map((call) => call.data.message)).toEqual(["B", "B"]);
+      expect(deployer.inspect().sinks.snk).toMatchObject({ failures: 0, acknowledgedKey: expect.any(String) });
+
+      // The acknowledged B is now the delivery baseline; a real B→A change produces a new event.
+      ha.setState("sensor.msg", "A");
+      await flushPromises();
+      expect(ha.calls.map((call) => call.data.message)).toEqual(["B", "B", "A"]);
+    } finally {
+      deployer?.stop();
+      vi.useRealTimers();
+    }
+  });
+
+  it("pauses retry while HA is disconnected and invalidates it on redeploy", async () => {
+    vi.useFakeTimers();
+    const ha = new MockHA();
+    ha.callService = (call) => {
+      ha.calls.push(call);
+      return Promise.reject(new Error("temporary"));
+    };
+    let deployer: Deployer | undefined;
+    try {
+      ha.setState("sensor.msg", "A");
+      deployer = new Deployer(ha, 100_000);
+      const notify = notifyGraph();
+      deployer.deploy(notify.nodes, notify.edges, true);
+      ha.setState("sensor.msg", "B");
+      await flushPromises();
+      expect(ha.calls).toHaveLength(1);
+
+      ha.disconnect();
+      vi.advanceTimersByTime(5_000);
+      await flushPromises();
+      expect(ha.calls).toHaveLength(1);
+
+      // A new generation owns fresh delivery state; the old timer/promise cannot replay into it.
+      const call = callGraph();
+      deployer.deploy(call.nodes, call.edges, false);
+      ha.beginReconnect();
+      ha.completeReconnect({ "binary_sensor.x": { state: "off", attributes: {} } });
+      vi.advanceTimersByTime(60_000);
+      await flushPromises();
+      expect(ha.calls).toHaveLength(1);
+    } finally {
+      deployer?.stop();
+      vi.useRealTimers();
+    }
+  });
+});
+
 describe("Deployer — serialized sink channels", () => {
   it("never overlaps command calls and runs the latest pending desired call next", async () => {
     const ha = new MockHA();
@@ -125,6 +201,23 @@ describe("Deployer — serialized sink channels", () => {
     expect(maxActive).toBe(1);
     resolvers.shift()?.();
     await flushPromises();
+    deployer.stop();
+  });
+
+  it("reports and bounds transient overflow by rejecting the newest event", () => {
+    const ha = new MockHA();
+    ha.callService = (call) => {
+      ha.calls.push(call);
+      return new Promise<void>(() => {});
+    };
+    ha.setState("sensor.msg", "seed");
+    const deployer = new Deployer(ha, 100_000);
+    const { nodes, edges } = notifyGraph();
+    deployer.deploy(nodes, edges, true);
+    for (let i = 0; i < 102; i += 1) ha.setState("sensor.msg", `message-${i}`);
+
+    expect(ha.calls).toHaveLength(1);
+    expect(deployer.inspect().sinks.snk).toMatchObject({ inFlight: true, queueDepth: 100, overflowed: true, status: "error" });
     deployer.stop();
   });
 
@@ -182,30 +275,38 @@ describe("Deployer — generic call-service sink", () => {
     deployer.stop();
   });
 
-  it("retries a generic service call after a failed attempt", async () => {
+  it("retries a failed command on bounded backoff, not on unrelated recomputes", async () => {
+    vi.useFakeTimers();
     const ha = new MockHA();
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     let attempts = 0;
     ha.callService = (call) => {
       ha.calls.push(call);
       attempts += 1;
       return attempts === 1 ? Promise.reject(new Error("boom")) : Promise.resolve();
     };
+    let deployer: Deployer | undefined;
     try {
       ha.setState("binary_sensor.x", "on");
-      const deployer = new Deployer(ha, 100_000);
+      deployer = new Deployer(ha, 100_000);
       const { nodes, edges } = callGraph();
       deployer.deploy(nodes, edges, true);
       await flushPromises();
       expect(ha.calls).toHaveLength(1);
 
-      ha.setState("sensor.noise", "retry");
+      ha.setState("sensor.noise", "not-a-retry-trigger");
+      await flushPromises();
+      expect(ha.calls).toHaveLength(1);
+      vi.advanceTimersByTime(999);
+      await flushPromises();
+      expect(ha.calls).toHaveLength(1);
+      vi.advanceTimersByTime(1);
       await flushPromises();
       expect(ha.calls).toHaveLength(2);
       expect(ha.lastCall()?.service).toBe("turn_on");
-      deployer.stop();
+      expect(deployer.inspect().sinks.snk).toMatchObject({ failures: 0, acknowledgedKey: expect.any(String) });
     } finally {
-      errorSpy.mockRestore();
+      deployer?.stop();
+      vi.useRealTimers();
     }
   });
 });
@@ -239,6 +340,35 @@ describe("Deployer — reconciling light sink", () => {
     expect(ha.lastCall()?.service).toBe("turn_off");
 
     deployer.stop();
+  });
+
+  it("revalidates reconciling retries and cancels them when the target already matches", async () => {
+    vi.useFakeTimers();
+    const ha = new MockHA();
+    ha.callService = (call) => {
+      ha.calls.push(call);
+      return Promise.reject(new Error("temporary"));
+    };
+    let deployer: Deployer | undefined;
+    try {
+      ha.setState("light.lr", "on");
+      ha.setState("binary_sensor.x", "off");
+      deployer = new Deployer(ha, 100_000);
+      const { nodes, edges } = lightGraph();
+      deployer.deploy(nodes, edges, true);
+      await flushPromises();
+      expect(ha.calls).toHaveLength(1);
+
+      // The HA echo/world update removes the correction before its retry deadline.
+      ha.setState("light.lr", "off");
+      vi.advanceTimersByTime(5_000);
+      await flushPromises();
+      expect(ha.calls).toHaveLength(1);
+      expect(deployer.inspect().sinks.snk).toMatchObject({ nextRetryAt: null, inFlight: false });
+    } finally {
+      deployer?.stop();
+      vi.useRealTimers();
+    }
   });
 
   it("marks a failed call as an error and suppresses the same failed context", async () => {
