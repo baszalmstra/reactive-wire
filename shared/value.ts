@@ -1,5 +1,5 @@
 import { durationLiteralSeconds } from "./duration.js";
-import type { ValueType } from "./theme.js";
+import type { ValuePayloadMap, ValueType } from "./runtime-types.js";
 
 export type Status = "ok" | "unavailable" | "error" | "stale";
 
@@ -9,17 +9,29 @@ export type Status = "ok" | "unavailable" | "error" | "stale";
  * shape; the runtime engine's `Value<T>` maps onto it by attaching the pin's type and a
  * stale flag derived from the connection.
  */
-export interface RWValue {
-  type: ValueType;
-  v: unknown;
-  status: Status;
+type PresentValue<T extends ValueType> = {
+  type: T;
+  v: ValuePayloadMap[T];
+  status: "ok" | "stale";
   msg?: string;
-}
+};
 
-export const V = (type: ValueType, v: unknown): RWValue => ({ type, v, status: "ok" });
-export const UN = (type: ValueType): RWValue => ({ type, v: null, status: "unavailable" });
-export const ER = (type: ValueType, msg?: string): RWValue => ({ type, v: null, status: "error", msg });
-export const ST = (type: ValueType, v: unknown): RWValue => ({ type, v, status: "stale" });
+type AbsentValue<T extends ValueType> = {
+  type: T;
+  v: null;
+  status: "unavailable" | "error";
+  msg?: string;
+};
+
+/** A distributive type/value/status union; narrowing `type` also narrows its payload. */
+export type RWValue<T extends ValueType = ValueType> = T extends ValueType
+  ? PresentValue<T> | AbsentValue<T>
+  : never;
+
+export const V = <T extends ValueType>(type: T, v: ValuePayloadMap[T]): RWValue<T> => ({ type, v, status: "ok" }) as RWValue<T>;
+export const UN = <T extends ValueType>(type: T): RWValue<T> => ({ type, v: null, status: "unavailable" }) as RWValue<T>;
+export const ER = <T extends ValueType>(type: T, msg?: string): RWValue<T> => ({ type, v: null, status: "error", msg }) as RWValue<T>;
+export const ST = <T extends ValueType>(type: T, v: ValuePayloadMap[T]): RWValue<T> => ({ type, v, status: "stale" }) as RWValue<T>;
 
 export type ChipKind = "none" | "error" | "unavail" | "bool" | "num" | "str" | "color" | "duration" | "datetime" | "any";
 

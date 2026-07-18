@@ -118,7 +118,7 @@ distinct visual that recolors on resolution; serialization stores **per-node pin
 - **D12 (Color representation, Q4a) — resolved:** `Color` is a hex string (`#rrggbb`);
   HA `rgb_color` arrays are parsed to/from it.
 - **D12 (type system) — extended.** The wire types are no longer just the primitives + `Color`.
-  Two temporal types are now first-class (`shared/theme.ts` `ValueType`, `shared/value.ts`):
+  Two temporal types are now first-class (`shared/runtime-types.ts` `ValueType`, `shared/value.ts`):
   **`duration`** (a span carried internally as seconds) and **`datetime`** (an instant carried
   internally as epoch-ms). They have their own wire color, chip formatting, and parsing, and back
   the time nodes below. Entity **state** pin typing is now **device-class-driven**, not a
@@ -378,6 +378,11 @@ safety rule). Supporting modules: `engine/expand.ts` (macro inlining), `engine/n
 (the `NodeDef` contract), `engine/engine-support.ts` and `engine/ha-reconcile.ts` (shared
 reconcile/diff helpers), plus `value.ts`, `results.ts`, `node-types.ts`, `entities.ts`,
 `theme.ts`, `macros.ts`, and `collab.ts` (the collaborative-document model — see below).
+Runtime semantics are deliberately separate from editor presentation: `runtime-types.ts` defines
+`RuntimeNode`, typed pin/value payloads, and known config contracts; `node-types.ts` composes those
+semantics with `NodeViewState` for the persisted canvas. Deployment sanitization discards geometry,
+icons, and widgets before the graph reaches the evaluator. `theme.ts` only re-exports the domain
+`ValueType` for source compatibility.
 
 **Node registry — `shared/engine/nodes/`**: each node type is a self-contained `NodeDef` (plain
 object, not a class) — its palette template, one-line description, atomic `eval(ctx)` returning

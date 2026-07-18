@@ -1,4 +1,5 @@
 import type { NodeData, PinDef } from "./node-types.js";
+import type { RuntimeNode, RuntimePin } from "./runtime-types.js";
 import type { ViewEdge } from "./engine/evaluate.js";
 import { ownValue } from "./record.js";
 
@@ -15,23 +16,27 @@ import { ownValue } from "./record.js";
  * being inlined at evaluate time rather than run by a second engine. A macro that contains any
  * stateful node is itself stateful.
  */
-export interface MacroDef {
-  /** Stable identifier referenced by every placement and by nested dependencies. */
+export interface RuntimeMacroDef {
   id: string;
   name: string;
-  /** External input pins, exposed in the order they appear on a placement. */
-  inputs: PinDef[];
-  /** External output pins. */
-  outputs: PinDef[];
-  /** The inner subgraph: plain nodes (including the boundary nodes) and edges. */
-  nodes: NodeData[];
+  inputs: RuntimePin[];
+  outputs: RuntimePin[];
+  nodes: RuntimeNode[];
   edges: ViewEdge[];
-  /** True if any inner node (or nested macro) carries memory. */
   stateful: boolean;
+}
+
+export interface MacroDef extends RuntimeMacroDef {
+  /** Stable identifier referenced by every placement and by nested dependencies. */
+  /** Editor macro definitions retain complete view-rich nodes in the persisted document. */
+  inputs: PinDef[];
+  outputs: PinDef[];
+  nodes: NodeData[];
 }
 
 /** A library of macro definitions keyed by id, the form the engine and editor consume. */
 export type MacroMap = Record<string, MacroDef>;
+export type RuntimeMacroMap = Record<string, RuntimeMacroDef>;
 
 export const MACRO_IN = "macro-in";
 export const MACRO_OUT = "macro-out";

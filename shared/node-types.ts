@@ -1,4 +1,4 @@
-import type { ValueType } from "./theme.js";
+import type { RuntimeNode, RuntimePin } from "./runtime-types.js";
 
 export type IconName =
   | "sun" | "motion" | "bulb" | "and" | "cmp" | "const"
@@ -8,40 +8,28 @@ export type IconName =
   | "power" | "energy" | "battery" | "timestamp" | "duration"
   | "illuminance" | "pressure" | "connectivity";
 
-export interface PinDef {
-  id: string;
-  label: string;
-  type: ValueType;
-  unit?: string;
-  variadic?: boolean;
-  ghost?: boolean;
-  missing?: string;
-  /** This pin has an editable literal value (an input default, or a constant output). */
-  editable?: boolean;
-}
+/** Editor pin name retained for compatibility; its semantics are the shared runtime pin. */
+export interface PinDef extends RuntimePin {}
 
 export type Health = "ok" | "warn" | "error";
 
-export interface NodeData {
-  id: string;
-  type: string;
+/** Canvas-only presentation attached to a runtime node in the persisted editor document. */
+export interface NodeViewState {
   title: string;
   subtitle: string;
   icon: IconName;
   x: number;
   y: number;
   w?: number;
-  inputs: PinDef[];
-  outputs: PinDef[];
-  stateful?: boolean;
-  config?: Record<string, unknown>;
   bodyExtra?: number;
   /** An inline body widget below the pins. */
   widget?: "color" | "sink";
-  /** Literal values for editable pins, keyed by pin id (input defaults / constant outputs). */
-  values?: Record<string, unknown>;
-  /** Generic pins (type "any") that resolve to one shared type, e.g. compare's [a, b]. */
-  typeGroup?: string[];
+}
+
+/** Persisted/editor node: runtime semantics composed with canvas-only view state. */
+export interface NodeData extends RuntimeNode, NodeViewState {
+  inputs: PinDef[];
+  outputs: PinDef[];
 }
 
 const HEADER_H = 40;

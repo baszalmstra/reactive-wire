@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "
 import { dirname, join } from "node:path";
 import { setMemoryValue, statePolicy, type Memory, type NodeMemory } from "../../shared/engine/engine-support.js";
 import { copyRecord, createRecord } from "../../shared/record.js";
-import type { NodeData } from "../../shared/node-types.js";
+import type { RuntimeNode } from "../../shared/runtime-types.js";
 import type { DurableMemory } from "./runtime.js";
 import { log } from "./log.js";
 
@@ -44,7 +44,7 @@ export class DurableMemoryStore implements DurableMemory {
   }
 
   /** Restore durable slots into `mem` and forget slots that no longer belong to the deployed graph. */
-  restore(nodes: NodeData[], mem: Memory): void {
+  restore(nodes: RuntimeNode[], mem: Memory): void {
     const durable = durableTypes(nodes);
     const kept = createRecord<StoredSlot>();
     for (const [id, type] of durable) {
@@ -59,7 +59,7 @@ export class DurableMemoryStore implements DurableMemory {
   }
 
   /** Capture the current durable slots from `mem` after a tick, scheduling a debounced write on change. */
-  capture(nodes: NodeData[], mem: Memory): void {
+  capture(nodes: RuntimeNode[], mem: Memory): void {
     const durable = durableTypes(nodes);
     const next = createRecord<StoredSlot>();
     for (const [id, type] of durable) {
@@ -147,7 +147,7 @@ function toPersistable(id: string, slot: NodeMemory): NodeMemory | null {
 }
 
 /** Map of node id to node type for every node whose declared state policy is "durable". */
-function durableTypes(nodes: NodeData[]): Map<string, string> {
+function durableTypes(nodes: RuntimeNode[]): Map<string, string> {
   const out = new Map<string, string>();
   for (const n of nodes) {
     if (statePolicy(n.config ?? {}) === "durable") out.set(n.id, n.type);

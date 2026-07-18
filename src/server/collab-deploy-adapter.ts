@@ -1,6 +1,6 @@
 import type { ViewEdge } from "../../shared/engine/evaluate.js";
 import { combineFlowGraphs, type RuntimeFlowGraph } from "../../shared/engine/flow-graphs.js";
-import type { MacroMap } from "../../shared/macros.js";
+import type { RuntimeMacroMap } from "../../shared/macros.js";
 import type { NodeData } from "../../shared/node-types.js";
 import type { CollabEdge, CollabNode, EditorDocumentSnapshot } from "../../shared/collab.js";
 import { currentNodeTemplates, reconcileDefs } from "../../shared/engine/reconcile-defs.js";
@@ -91,7 +91,7 @@ export class AutoDeployController {
     const signature = JSON.stringify({ flowIds: snapshot.settings.deployedFlowIds ?? [snapshot.settings.deployFlowId], nodes: graph.nodes, edges: graph.edges, macros: graph.macros ?? {} });
     if (signature === this.lastSignature) return;
     this.lastSignature = signature;
-    this.deploy({ nodes: graph.nodes, edges: graph.edges, macros: (graph.macros ?? {}) as MacroMap });
+    this.deploy({ nodes: graph.nodes, edges: graph.edges, macros: (graph.macros ?? {}) as RuntimeMacroMap });
     return { ok: true, unsupported: [] };
   }
 }

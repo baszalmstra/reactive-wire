@@ -3,13 +3,12 @@
 // type-checked by the root tsc). The directory carries no DOM or UI dependencies and
 // compiles under the ES2022-only library, so both tsconfigs include shared/ and resolve
 // these files through plain relative ".js" imports.
-import type { NodeData, PinDef } from "../node-types.js";
-import type { ValueType } from "../theme.js";
+import type { RuntimeNode, RuntimePin, ValueType } from "../runtime-types.js";
 import type { EntityMap } from "../entities.js";
 import { UN, parseEntityValue, type RWValue } from "../value.js";
 import type { EvalResults, SinkAction, ServiceCall } from "../results.js";
 import { expandMacros, joinPath } from "./expand.js";
-import { isMacroInstance, type MacroMap } from "../macros.js";
+import { isMacroInstance, type RuntimeMacroMap } from "../macros.js";
 import { REGISTRY } from "./nodes/index.js";
 import type { NodeDef } from "./node-def.js";
 import { copyRecord, createRecord, ownValue, setOwn } from "../record.js";
@@ -62,7 +61,7 @@ function callNote(call: ServiceCall): string {
  * why, so the editor shows "holds" rather than a fabricated action; a sink that has nothing to
  * change (desired already matches actual) reads as a no-op.
  */
-function describeSink(n: NodeData, results: EvalResults): SinkAction {
+function describeSink(n: RuntimeNode, results: EvalResults): SinkAction {
   const blocked = sinkCommandStatus(n, results);
   if (blocked) return blocked;
   const call = results.sinks[n.id];
@@ -76,7 +75,7 @@ function describeSink(n: NodeData, results: EvalResults): SinkAction {
  * preview note and the real call agree: a missing entity, or a command input that is
  * unavailable/errored, blocks the call entirely.
  */
-function sinkCommandStatus(n: NodeData, results: EvalResults): SinkAction | null {
+function sinkCommandStatus(n: RuntimeNode, results: EvalResults): SinkAction | null {
   const entityId = String(n.config?.entity_id ?? "");
   // notify/tts target a service name, not an entity; the rest need an entity to act on.
   if (!entityId && n.type !== "sink-notify" && n.type !== "sink-tts") {
@@ -115,13 +114,13 @@ function okInput(results: EvalResults, nodeId: string, pinId: string): RWValue |
  * so those nodes degrade to a still-loading value rather than breaking.
  */
 export function evaluate(
-  nodes: NodeData[],
+  nodes: RuntimeNode[],
   edges: ViewEdge[],
   entities: EntityMap,
   memory: Memory,
   now: number = Date.now(),
   sources: SourceMap = {},
-  macros: MacroMap = {},
+  macros: RuntimeMacroMap = {},
 ): EvalResults {
   // A graph with macro placements is inlined into a flat graph first: each placement becomes a
   // namespaced copy of its definition's subgraph, so the same single engine evaluates it and
@@ -131,7 +130,7 @@ export function evaluate(
   if (nodes.some((n) => isMacroInstance(n.type))) {
     return evaluateWithMacros(nodes, edges, entities, memory, now, sources, macros);
   }
-  const byId = createRecord<NodeData>();
+  const byId = createRecord<RuntimeNode>();
   for (const n of nodes) setOwn(byId, n.id, n);
   const incoming = createRecord<{ node: string; pin: string }>();
   edges.forEach((e) => setOwn(incoming, pinKey(e.to.node, e.to.pin), e.from));
@@ -156,7 +155,7 @@ export function evaluate(
     return v;
   }
 
-  function resolveType(n: NodeData, declared: ValueType, fallbackPins: string[]): ValueType {
+  function resolveType(n: RuntimeNode, declared: ValueType, fallbackPins: string[]): ValueType {
     if (declared !== "any") return declared;
     for (const pid of fallbackPins) {
       const iv = inVal(n.id, pid);
@@ -165,7 +164,7 @@ export function evaluate(
     return "any";
   }
 
-  function resolveGroupType(n: NodeData, fallback: ValueType): ValueType {
+  function resolveGroupType(n: RuntimeNode, fallback: ValueType): ValueType {
     for (const pid of n.typeGroup ?? []) {
       const src = incoming[pinKey(n.id, pid)];
       if (src) {
@@ -176,13 +175,13 @@ export function evaluate(
     return fallback;
   }
 
-  function effType(n: NodeData, pin: PinDef): ValueType {
+  function effType(n: RuntimeNode, pin: RuntimePin): ValueType {
     if (pin.type !== "any") return pin.type;
     if (n.type === "sink-input" && pin.id === "value") return inputHelperType(n);
     return resolveGroupType(n, "num");
   }
 
-  function inEff(n: NodeData, pinId: string): RWValue | null {
+  function inEff(n: RuntimeNode, pinId: string): RWValue | null {
     const pin = n.inputs.find((p) => p.id === pinId);
     if (!pin) return null;
     if (incoming[pinKey(n.id, pinId)]) return inVal(n.id, pinId);
@@ -207,7 +206,7 @@ export function evaluate(
     return cloneMemoryValue(slot ?? {}) as NodeMemory;
   }
 
-  function booleanSeed(n: NodeData, cfg: Record<string, unknown>): NodeMemory {
+  function booleanSeed(n: RuntimeNode, cfg: Record<string, unknown>): NodeMemory {
     const previous = memoryValue(memory, n.id);
     if (previous?.seeded) return cloneMemory(previous);
     let initial = !!cfg.initial;
@@ -222,7 +221,7 @@ export function evaluate(
     return { state, prev: previous?.prev ?? false, seeded };
   }
 
-  function computeNode(n: NodeData): ReturnType<NodeDef["eval"]> {
+  function computeNode(n: RuntimeNode): ReturnType<NodeDef["eval"]> {
     const cached = ownValue(nodeCache, n.id);
     if (cached) return cached;
     if (visiting[n.id]) throw new Error(`Graph cycle reached node ${JSON.stringify(n.id)}`);
@@ -340,13 +339,13 @@ export function evaluate(
  * placement's whole subgraph, and any inner sink actions surfaced under the placement.
  */
 function evaluateWithMacros(
-  nodes: NodeData[],
+  nodes: RuntimeNode[],
   edges: ViewEdge[],
   entities: EntityMap,
   memory: Memory,
   now: number,
   sources: SourceMap,
-  macros: MacroMap,
+  macros: RuntimeMacroMap,
 ): EvalResults {
   const flat = expandMacros(nodes, edges, macros);
   const inner = evaluate(flat.nodes, flat.edges, entities, memory, now, sources, macros);
@@ -415,7 +414,7 @@ function evaluateWithMacros(
  * their namespaced ids; the caller resolves the type via its own node map, which after expansion
  * holds those inner sink nodes too.
  */
-export function sinkCalls(nodes: NodeData[], results: EvalResults): Array<{ nodeId: string; call: ServiceCall }> {
+export function sinkCalls(nodes: RuntimeNode[], results: EvalResults): Array<{ nodeId: string; call: ServiceCall }> {
   const out: Array<{ nodeId: string; call: ServiceCall }> = [];
   for (const n of nodes) {
     if (!isSink(n.type)) continue;

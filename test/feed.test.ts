@@ -19,6 +19,9 @@ describe("deploy graph validation", () => {
     if (result.ok) {
       expect(result.graph.nodes[0]?.id).toBe("n1");
       expect(result.graph.nodes[0]?.outputs[0]?.type).toBe("num");
+      expect(result.graph.nodes[0]).not.toHaveProperty("title");
+      expect(result.graph.nodes[0]).not.toHaveProperty("x");
+      expect(result.graph.nodes[0]).not.toHaveProperty("widget");
     }
   });
 

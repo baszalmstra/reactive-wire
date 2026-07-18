@@ -1,8 +1,9 @@
 import { evaluate, isSink, isTransientSink, sinkCalls, type Memory, type ViewEdge } from "../../shared/engine/evaluate.js";
 import { createMemory } from "../../shared/engine/engine-support.js";
 import { expandMacros } from "../../shared/engine/expand.js";
-import type { MacroMap } from "../../shared/macros.js";
-import type { Health, NodeData } from "../../shared/node-types.js";
+import type { RuntimeMacroMap } from "../../shared/macros.js";
+import type { Health } from "../../shared/node-types.js";
+import type { RuntimeNode } from "../../shared/runtime-types.js";
 import type { EntityMap } from "../../shared/entities.js";
 import type { EvalResults, ServiceCall } from "../../shared/results.js";
 import type { RWValue } from "../../shared/value.js";
@@ -135,9 +136,9 @@ const noFetch: FetchFn = () => Promise.reject(new Error("no fetch configured"));
  */
 export interface DurableMemory {
   /** Seed durable slots into a freshly cleared memory for the given graph. */
-  restore(nodes: NodeData[], mem: Memory): void;
+  restore(nodes: RuntimeNode[], mem: Memory): void;
   /** Record the current durable slots after a recompute. */
-  capture(nodes: NodeData[], mem: Memory): void;
+  capture(nodes: RuntimeNode[], mem: Memory): void;
   /** Flush any pending write and release resources. */
   stop(): void;
 }
@@ -155,7 +156,7 @@ export interface DurableMemory {
  * core recompute itself stays synchronous and simply reads those last values.
  */
 export class Deployer {
-  private graph: { nodes: NodeData[]; edges: ViewEdge[] } | null = null;
+  private graph: { nodes: RuntimeNode[]; edges: ViewEdge[] } | null = null;
   private mem: Memory = createMemory();
   private actuate = false;
   private generation = 0;
@@ -194,7 +195,7 @@ export class Deployer {
    * those inside macros — is reconciled, with each placement's state kept separate by its namespaced
    * ids. When `actuate` is true sinks call services; otherwise they dry-run.
    */
-  deploy(nodes: NodeData[], edges: ViewEdge[], actuate: boolean, macros: MacroMap = {}): void {
+  deploy(nodes: RuntimeNode[], edges: ViewEdge[], actuate: boolean, macros: RuntimeMacroMap = {}): void {
     if (this.stopped) throw new Error("Deployer has been stopped");
     const flat = expandMacros(nodes, edges, macros, undefined, true);
     this.generation += 1;

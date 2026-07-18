@@ -1,16 +1,15 @@
 import type { ViewEdge } from "../../shared/engine/evaluate.js";
-import type { MacroDef, MacroMap } from "../../shared/macros.js";
-import type { NodeData, PinDef } from "../../shared/node-types.js";
-import type { ValueType } from "../../shared/theme.js";
+import type { RuntimeMacroDef, RuntimeMacroMap } from "../../shared/macros.js";
+import type { RuntimeNode, RuntimePin, ValueType } from "../../shared/runtime-types.js";
 import { isSafeIdentifier } from "../../shared/record.js";
 import { expandMacros } from "../../shared/engine/expand.js";
 import { validateExpandedGraph, validateReachableMacros } from "../../shared/engine/validate-graph.js";
 
 export interface DeployRequest {
-  nodes: NodeData[];
+  nodes: RuntimeNode[];
   edges: ViewEdge[];
   /** Macro definitions referenced by macro placements in `nodes`, keyed by id. */
-  macros?: MacroMap;
+  macros?: RuntimeMacroMap;
 }
 
 export type DeployValidation =
@@ -43,11 +42,6 @@ function asIdentifier(v: unknown, label: string, fallback = "", max = 240): stri
   return id;
 }
 
-function asNumber(v: unknown, fallback = 0): number {
-  const n = Number(v);
-  return Number.isFinite(n) ? n : fallback;
-}
-
 function safeJson(v: unknown, depth = 0): unknown {
   if (v == null || typeof v === "string" || typeof v === "number" || typeof v === "boolean") return v;
   if (depth >= 6) return null;
@@ -67,7 +61,7 @@ function safeRecord(v: unknown): Record<string, unknown> {
   return isRecord(v) ? (safeJson(v) as Record<string, unknown>) : {};
 }
 
-function sanitizePins(raw: unknown, label: string): PinDef[] {
+function sanitizePins(raw: unknown, label: string): RuntimePin[] {
   if (raw === undefined) return [];
   if (!Array.isArray(raw)) throw new Error(`${label} must be an array`);
   if (raw.length > MAX_PINS) throw new Error(`${label} has too many pins`);
@@ -76,7 +70,7 @@ function sanitizePins(raw: unknown, label: string): PinDef[] {
     const id = asIdentifier(p.id, `${label}[${i}].id`);
     const rawType = asString(p.type, "any");
     const type = VALUE_TYPES.has(rawType as ValueType) ? (rawType as ValueType) : "any";
-    const pin: PinDef = { id, label: asString(p.label, id), type };
+    const pin: RuntimePin = { id, label: asString(p.label, id), type };
     if (typeof p.unit === "string") pin.unit = p.unit.slice(0, 40);
     if (typeof p.variadic === "boolean") pin.variadic = p.variadic;
     if (typeof p.ghost === "boolean") pin.ghost = p.ghost;
@@ -86,27 +80,19 @@ function sanitizePins(raw: unknown, label: string): PinDef[] {
   });
 }
 
-function sanitizeNode(raw: unknown, index: number): NodeData {
+function sanitizeNode(raw: unknown, index: number): RuntimeNode {
   if (!isRecord(raw)) throw new Error(`nodes[${index}] must be an object`);
   const id = asIdentifier(raw.id, `nodes[${index}].id`);
   const type = asIdentifier(raw.type, `nodes[${index}].type`);
-  const node: NodeData = {
+  const node: RuntimeNode = {
     id,
     type,
-    title: asString(raw.title, type),
-    subtitle: asString(raw.subtitle, ""),
-    icon: asString(raw.icon, "const") as NodeData["icon"],
-    x: asNumber(raw.x),
-    y: asNumber(raw.y),
     inputs: sanitizePins(raw.inputs, `nodes[${index}].inputs`),
     outputs: sanitizePins(raw.outputs, `nodes[${index}].outputs`),
   };
   if (typeof raw.stateful === "boolean") node.stateful = raw.stateful;
   if (raw.config !== undefined) node.config = safeRecord(raw.config);
   if (raw.values !== undefined) node.values = safeRecord(raw.values);
-  if (Number.isFinite(Number(raw.w)) && Number(raw.w) > 0) node.w = asNumber(raw.w);
-  if (Number.isFinite(Number(raw.bodyExtra)) && Number(raw.bodyExtra) >= 0) node.bodyExtra = asNumber(raw.bodyExtra);
-  if (raw.widget === "color" || raw.widget === "sink") node.widget = raw.widget;
   if (Array.isArray(raw.typeGroup)) {
     node.typeGroup = raw.typeGroup
       .slice(0, MAX_PINS)
@@ -134,7 +120,7 @@ function sanitizeEdges(raw: unknown, nodeIds: Set<string>, label = "edges"): Vie
   });
 }
 
-function sanitizeGraph(raw: RawRecord, label = "graph"): { nodes: NodeData[]; edges: ViewEdge[] } {
+function sanitizeGraph(raw: RawRecord, label = "graph"): { nodes: RuntimeNode[]; edges: ViewEdge[] } {
   if (!Array.isArray(raw.nodes)) throw new Error(`${label}.nodes must be an array`);
   if (raw.nodes.length > MAX_NODES) throw new Error(`${label}.nodes has too many entries`);
   const nodes = raw.nodes.map((n, i) => sanitizeNode(n, i));
@@ -147,7 +133,7 @@ function sanitizeGraph(raw: RawRecord, label = "graph"): { nodes: NodeData[]; ed
   return { nodes, edges };
 }
 
-function sanitizeMacro(key: string, raw: unknown): MacroDef {
+function sanitizeMacro(key: string, raw: unknown): RuntimeMacroDef {
   if (!isRecord(raw)) throw new Error(`macros.${key} must be an object`);
   const id = asIdentifier(raw.id, `macros.${key}.id`, key);
   const { nodes, edges } = sanitizeGraph(raw, `macros.${key}`);
@@ -166,7 +152,7 @@ export function sanitizeDeployRequest(raw: unknown): DeployValidation {
   try {
     if (!isRecord(raw)) return { ok: false, error: "Deploy graph must be an object" };
     const { nodes, edges } = sanitizeGraph(raw);
-    let macros: MacroMap | undefined;
+    let macros: RuntimeMacroMap | undefined;
     if (raw.macros !== undefined) {
       if (!isRecord(raw.macros)) throw new Error("graph.macros must be an object");
       const entries = Object.entries(raw.macros);

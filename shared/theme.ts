@@ -3,9 +3,11 @@
 // Value-type colors and health/error colors are shared across aesthetics and only
 // tuned per light/dark, so the type language stays learnable everywhere.
 
+import type { ValueType } from "./runtime-types.js";
+export type { ValueType } from "./runtime-types.js";
+
 export type Aesthetic = "ide" | "blueprint" | "warm";
 export type Mode = "dark" | "light";
-export type ValueType = "bool" | "num" | "str" | "color" | "duration" | "datetime" | "any";
 
 // One wire type (behaviors); color encodes the value type carried. Consistent
 // lightness/chroma, hue does the work — desaturated enough to survive a dense graph.

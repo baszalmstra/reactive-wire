@@ -1,5 +1,5 @@
-import type { IconName, NodeData, PinDef } from "../node-types.js";
-import type { ValueType } from "../theme.js";
+import type { IconName, NodeData } from "../node-types.js";
+import type { NodeConfigFor, RuntimeNode, RuntimePin, ValueType } from "../runtime-types.js";
 import type { EntityMap } from "../entities.js";
 import type { RWValue } from "../value.js";
 import type { ServiceCall } from "../results.js";
@@ -45,10 +45,10 @@ export interface SinkEvaluation {
  * stays in the engine. Memory is read-only previous-transaction state; definitions propose a
  * replacement through NodeEvaluation rather than mutating the caller's memory during evaluation.
  */
-export interface EvalCtx {
-  n: NodeData;
-  cfg: Record<string, unknown>;
-  conn: PinDef[];
+export interface EvalCtx<TType extends string = string> {
+  n: RuntimeNode<TType>;
+  cfg: NodeConfigFor<TType>;
+  conn: RuntimePin[];
   inVal: (pinId: string) => RWValue | null;
   inEff: (pinId: string) => RWValue | null;
   resolveType: (declared: ValueType, fallbackPins: string[]) => ValueType;
@@ -63,9 +63,9 @@ export interface EvalCtx {
 }
 
 /** Everything a sink's evalSink needs to build its desired service call. */
-export interface SinkCtx {
-  n: NodeData;
-  cfg: Record<string, unknown>;
+export interface SinkCtx<TType extends string = string> {
+  n: RuntimeNode<TType>;
+  cfg: NodeConfigFor<TType>;
   okInput: (pinId: string) => RWValue | null;
   entities: EntityMap;
   /** This sink's memory from the last committed transaction. Never mutate it. */
@@ -92,14 +92,14 @@ export function statelessSink(evaluate: (ctx: SinkCtx) => ServiceCall | null): (
 }
 
 /** A self-contained definition of one node type. */
-export interface NodeDef {
-  type: string;
+export interface NodeDef<TType extends string = string> {
+  type: TType;
   template: NodeTemplate;
   description: string;
   /** Compute all declared outputs and proposed memory exactly once per transaction. */
-  eval: (ctx: EvalCtx) => NodeEvaluation;
+  eval: (ctx: EvalCtx<TType>) => NodeEvaluation;
   /** For sinks: compute the desired call and proposed memory exactly once per transaction. */
-  evalSink?: (ctx: SinkCtx) => SinkEvaluation;
+  evalSink?: (ctx: SinkCtx<TType>) => SinkEvaluation;
   sinkGatePin?: string;
   transient?: boolean;
 }

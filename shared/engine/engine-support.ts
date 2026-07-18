@@ -1,5 +1,4 @@
-import type { NodeData } from "../node-types.js";
-import type { ValueType } from "../theme.js";
+import type { RuntimeNode, ValueType } from "../runtime-types.js";
 import type { RWValue, Status } from "../value.js";
 import { createRecord, ownValue, setOwn } from "../record.js";
 export { durationSeconds } from "../duration.js";
@@ -173,7 +172,7 @@ export function shiftInstant(instantMs: number, seconds: number, dir: 1 | -1): n
 }
 
 /** The value type a configured input-helper sink expects, taken from its target entity's domain. */
-export function inputHelperType(n: NodeData): ValueType {
+export function inputHelperType(n: RuntimeNode): ValueType {
   const domain = String(n.config?.entity_id ?? "").split(".")[0] ?? "";
   switch (domain) {
     case "input_boolean": return "bool";

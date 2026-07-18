@@ -1,4 +1,4 @@
-import type { NodeData } from "../../shared/node-types.js";
+import type { RuntimeNode } from "../../shared/runtime-types.js";
 import type { SourceMap, SourceResult } from "../../shared/engine/evaluate.js";
 import { createRecord } from "../../shared/record.js";
 
@@ -27,7 +27,7 @@ const MIN_INTERVAL_MS = 1_000;
 export const FETCH_TIMEOUT_MS = 30_000;
 export const MAX_RETRY_DELAY_MS = 5 * 60_000;
 
-function fetchConfig(n: NodeData): FetchConfig | null {
+function fetchConfig(n: RuntimeNode): FetchConfig | null {
   const url = String(n.config?.url ?? "").trim();
   if (!url) return null;
   const seconds = Number(n.config?.interval);
@@ -73,7 +73,7 @@ export class Poller {
   }
 
   /** Replace the current schedule and immediately fetch each configured source once. */
-  start(nodes: NodeData[]): void {
+  start(nodes: RuntimeNode[]): void {
     this.stop();
     const generation = this.generation;
     for (const n of nodes) {

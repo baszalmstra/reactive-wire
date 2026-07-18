@@ -1,15 +1,15 @@
-import type { NodeData } from "../node-types.js";
+import type { RuntimeNode } from "../runtime-types.js";
 import type { ViewEdge } from "./evaluate.js";
 import { joinPath } from "./expand.js";
 
 export interface RuntimeFlowGraph {
   flowId: string;
-  nodes: NodeData[];
+  nodes: RuntimeNode[];
   edges: ViewEdge[];
 }
 
 export interface RuntimeGraph {
-  nodes: NodeData[];
+  nodes: RuntimeNode[];
   edges: ViewEdge[];
 }
 
@@ -36,7 +36,7 @@ export function namespaceFlowGraph(flow: RuntimeFlowGraph): RuntimeGraph {
 
 /** Combine all enabled editor flows into the single flat graph the existing runtime deploys. */
 export function combineFlowGraphs(flows: RuntimeFlowGraph[]): RuntimeGraph {
-  const nodes: NodeData[] = [];
+  const nodes: RuntimeNode[] = [];
   const edges: ViewEdge[] = [];
   for (const flow of flows) {
     const namespaced = namespaceFlowGraph(flow);

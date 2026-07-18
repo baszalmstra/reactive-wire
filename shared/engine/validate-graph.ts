@@ -1,6 +1,5 @@
-import type { MacroMap } from "../macros.js";
-import type { NodeData, PinDef } from "../node-types.js";
-import type { ValueType } from "../theme.js";
+import type { RuntimeMacroMap } from "../macros.js";
+import type { RuntimeNode, RuntimePin, ValueType } from "../runtime-types.js";
 import { ownValue } from "../record.js";
 import { pinKey } from "../identity.js";
 import type { ViewEdge } from "./evaluate.js";
@@ -62,8 +61,8 @@ function error(value: GraphSemanticError): GraphSemanticValidation {
   return { ok: false, error: value };
 }
 
-function pinMap(pins: PinDef[], nodeId: string, side: "input" | "output"): Map<string, PinDef> | GraphSemanticValidation {
-  const out = new Map<string, PinDef>();
+function pinMap(pins: RuntimePin[], nodeId: string, side: "input" | "output"): Map<string, RuntimePin> | GraphSemanticValidation {
+  const out = new Map<string, RuntimePin>();
   for (const pin of pins) {
     if (out.has(pin.id)) {
       return error({ code: "invalid-pin", nodeId, message: `Node ${JSON.stringify(nodeId)} has duplicate ${side} pin ${JSON.stringify(pin.id)}` });
@@ -76,20 +75,20 @@ function pinMap(pins: PinDef[], nodeId: string, side: "input" | "output"): Map<s
   return out;
 }
 
-function isValidation(value: Map<string, PinDef> | GraphSemanticValidation): value is GraphSemanticValidation {
+function isValidation(value: Map<string, RuntimePin> | GraphSemanticValidation): value is GraphSemanticValidation {
   return "ok" in value;
 }
 
-function expectedPinMap(pins: PinDef[]): Map<string, PinDef> {
+function expectedPinMap(pins: RuntimePin[]): Map<string, RuntimePin> {
   return new Map(pins.map((pin) => [pin.id, pin]));
 }
 
 function validateRequiredPins(
-  node: NodeData,
-  actual: Map<string, PinDef>,
-  expected: Map<string, PinDef>,
+  node: RuntimeNode,
+  actual: Map<string, RuntimePin>,
+  expected: Map<string, RuntimePin>,
   side: "input" | "output",
-  allowExtra: (pin: PinDef) => boolean,
+  allowExtra: (pin: RuntimePin) => boolean,
 ): GraphSemanticValidation {
   for (const [pinId, wanted] of expected) {
     const got = actual.get(pinId);
@@ -109,7 +108,7 @@ function validateRequiredPins(
   return { ok: true };
 }
 
-function validateNodeShape(node: NodeData): GraphSemanticValidation {
+function validateNodeShape(node: RuntimeNode): GraphSemanticValidation {
   const def = ownValue(REGISTRY, node.type);
   if (!def) return error({ code: "unknown-node-type", nodeId: node.id, message: `Unknown node type ${JSON.stringify(node.type)}` });
   const inputs = pinMap(node.inputs, node.id, "input");
@@ -174,7 +173,7 @@ function validateNodeShape(node: NodeData): GraphSemanticValidation {
 }
 
 /** Validate every reachable macro reference before expansion drops unresolved placements. */
-export function validateReachableMacros(nodes: NodeData[], macros: MacroMap): GraphSemanticValidation {
+export function validateReachableMacros(nodes: RuntimeNode[], macros: RuntimeMacroMap): GraphSemanticValidation {
   const visited = new Set<string>();
   const active = new Set<string>();
   const visit = (macroId: string): GraphSemanticValidation => {
@@ -201,8 +200,8 @@ export function validateReachableMacros(nodes: NodeData[], macros: MacroMap): Gr
 }
 
 /** Validate a fully expanded graph before it may reach evaluation or actuation. */
-export function validateExpandedGraph(nodes: NodeData[], edges: ViewEdge[]): GraphSemanticValidation {
-  const byId = new Map<string, NodeData>();
+export function validateExpandedGraph(nodes: RuntimeNode[], edges: ViewEdge[]): GraphSemanticValidation {
+  const byId = new Map<string, RuntimeNode>();
   for (const node of nodes) {
     if (byId.has(node.id)) {
       return error({ code: "invalid-node-shape", nodeId: node.id, message: `Expanded graph has duplicate node id ${JSON.stringify(node.id)}` });

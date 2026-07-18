@@ -1,6 +1,6 @@
-import type { NodeData } from "../node-types.js";
+import type { RuntimeNode } from "../runtime-types.js";
 import type { ViewEdge } from "./evaluate.js";
-import { MACRO_IN, MACRO_OUT, isMacroInstance, type MacroMap } from "../macros.js";
+import { MACRO_IN, MACRO_OUT, isMacroInstance, type RuntimeMacroMap } from "../macros.js";
 import { createRecord, ownValue } from "../record.js";
 import { appendPath, pinKey } from "../identity.js";
 
@@ -46,7 +46,7 @@ interface ExpansionBudget {
 }
 
 export interface ExpandResult {
-  nodes: NodeData[];
+  nodes: RuntimeNode[];
   edges: ViewEdge[];
   /**
    * For each macro placement, how its boundary maps onto expanded node pins, so a caller can
@@ -97,13 +97,13 @@ interface BoundaryContext {
  * that (incorrectly) references itself so expansion always terminates.
  */
 export function expandMacros(
-  nodes: NodeData[],
+  nodes: RuntimeNode[],
   edges: ViewEdge[],
-  macros: MacroMap,
+  macros: RuntimeMacroMap,
   limits: Readonly<MacroExpansionLimits> = DEFAULT_MACRO_EXPANSION_LIMITS,
   rootIdsArePaths = false,
 ): ExpandResult {
-  const outNodes: NodeData[] = [];
+  const outNodes: RuntimeNode[] = [];
   const outEdges: ViewEdge[] = [];
   const instances = createRecord<InstanceBinding>();
   const budget: ExpansionBudget = { limits: { ...limits }, instances: 0 };
@@ -111,7 +111,7 @@ export function expandMacros(
   return { nodes: outNodes, edges: outEdges, instances };
 }
 
-function emitNode(outNodes: NodeData[], node: NodeData, budget: ExpansionBudget): void {
+function emitNode(outNodes: RuntimeNode[], node: RuntimeNode, budget: ExpansionBudget): void {
   if (outNodes.length >= budget.limits.maxNodes) {
     throw new MacroExpansionError(`Expanded graph exceeds ${budget.limits.maxNodes} nodes`);
   }
@@ -133,12 +133,12 @@ function reserveInstance(budget: ExpansionBudget): void {
 }
 
 function expandInto(
-  nodes: NodeData[],
+  nodes: RuntimeNode[],
   edges: ViewEdge[],
-  macros: MacroMap,
+  macros: RuntimeMacroMap,
   prefix: string,
   active: Set<string>,
-  outNodes: NodeData[],
+  outNodes: RuntimeNode[],
   outEdges: ViewEdge[],
   instances: Record<string, InstanceBinding>,
   boundary: BoundaryContext | null,
@@ -251,12 +251,12 @@ function resolveTarget(
  * a macro-out input binds to whatever inner pin is wired to it.
  */
 function expandInstance(
-  def: { id: string; nodes: NodeData[]; edges: ViewEdge[] },
-  inst: NodeData,
+  def: { id: string; nodes: RuntimeNode[]; edges: ViewEdge[] },
+  inst: RuntimeNode,
   instPath: string,
-  macros: MacroMap,
+  macros: RuntimeMacroMap,
   active: Set<string>,
-  outNodes: NodeData[],
+  outNodes: RuntimeNode[],
   outEdges: ViewEdge[],
   instances: Record<string, InstanceBinding>,
   budget: ExpansionBudget,
@@ -317,17 +317,12 @@ function expandInstance(
 function passthroughNode(
   id: string,
   pin: string,
-  type: NodeData["inputs"][number]["type"],
+  type: RuntimeNode["inputs"][number]["type"],
   literal: unknown,
-): NodeData {
+): RuntimeNode {
   return {
     id,
     type: "passthrough",
-    title: "",
-    subtitle: "",
-    icon: "macro",
-    x: 0,
-    y: 0,
     inputs: [{ id: pin, label: "", type, editable: literal !== undefined }],
     outputs: [{ id: pin, label: "", type }],
     values: literal === undefined ? undefined : { [pin]: literal },
