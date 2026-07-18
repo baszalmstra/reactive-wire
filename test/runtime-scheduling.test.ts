@@ -36,6 +36,42 @@ describe("runtime cause-aware scheduling", () => {
     deployer.stop();
   });
 
+  it("does not replay an expired pulse into a sink when another join branch changes", () => {
+    const ha = new MockHA();
+    ha.setState("binary_sensor.motion", "off");
+    ha.setState("binary_sensor.other", "off");
+    const motion = boolEntity("motion", "binary_sensor.motion");
+    const other = boolEntity("other", "binary_sensor.other");
+    const rising = made("rising", "rising");
+    const join = made("and", "join");
+    const sink = made("sink-call", "sink");
+    sink.config = {
+      entity_id: "input_boolean.target",
+      domain: "input_boolean",
+      service: "turn_on",
+      service_off: "turn_off",
+    };
+    const deployer = new Deployer(ha, 100_000);
+    deployer.deploy(
+      [motion, other, rising, join, sink],
+      [
+        { id: "motion-rising", from: { node: "motion", pin: "state" }, to: { node: "rising", pin: "in" } },
+        { id: "rising-join", from: { node: "rising", pin: "out" }, to: { node: "join", pin: "i0" } },
+        { id: "other-join", from: { node: "other", pin: "state" }, to: { node: "join", pin: "i1" } },
+        { id: "join-sink", from: { node: "join", pin: "out" }, to: { node: "sink", pin: "on" } },
+      ],
+      true,
+    );
+
+    ha.setState("binary_sensor.motion", "on");
+    expect(deployer.inspect().lastEvaluatedNodeCount).toBe(4);
+    ha.setState("binary_sensor.other", "on");
+
+    expect(ha.calls.filter((call) => call.service === "turn_on")).toEqual([]);
+    expect(deployer.inspect()).toMatchObject({ lastCause: "entities", lastEvaluatedNodeCount: 4 });
+    deployer.stop();
+  });
+
   it("creates clock work only for clock-dependent closures", () => {
     vi.useFakeTimers();
     const ha = new MockHA();

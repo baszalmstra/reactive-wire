@@ -18,11 +18,13 @@ function boolEntity(id: string, entityId: string): RuntimeNode {
   return node;
 }
 
-const edge = (id: string, from: string, to: string) => ({
+const wire = (id: string, from: string, fromPin: string, to: string, toPin: string) => ({
   id,
-  from: { node: from, pin: "state" },
-  to: { node: to, pin: "in" },
+  from: { node: from, pin: fromPin },
+  to: { node: to, pin: toPin },
 });
+
+const edge = (id: string, from: string, to: string) => wire(id, from, "state", to, "in");
 
 function entities(values: Record<string, string>): EntityMap {
   return Object.fromEntries(Object.entries(values).map(([id, state]) => [id, { state, attributes: {} }]));
@@ -46,6 +48,7 @@ describe("compiled incremental evaluation", () => {
     expect(compiled.entityRoots.get("binary_sensor.a")).toEqual(["source"]);
     expect(compiled.entityRoots.get("input_boolean.target")).toEqual(["sink"]);
     expect(compiled.clockRoots).toEqual(new Set(["now", "since"]));
+    expect(compiled.transactionRoots).toEqual(new Set());
     expect(compiled.sinkIds).toEqual(["sink"]);
     source.config!.entity_id = "changed-after-compile";
     expect(compiled.nodeById.get("source")?.config?.entity_id).toBe("binary_sensor.a");
@@ -79,6 +82,78 @@ describe("compiled incremental evaluation", () => {
     expect(incremental.results).toBe(initial.results);
     expect(incremental.results).toEqual(full);
     expect(incremental.results.outputs[pinKey("not-b", "out")]).toBe(initial.results.outputs[pinKey("not-b", "out")]);
+  });
+
+  it("expires a pulse before a separately dirtied branch reaches the same join", () => {
+    const motion = boolEntity("motion", "binary_sensor.motion");
+    const other = boolEntity("other", "binary_sensor.other");
+    const rising = made("rising", "rising");
+    const join = made("and", "join");
+    const edges = [
+      wire("motion-rising", "motion", "state", "rising", "in"),
+      wire("rising-join", "rising", "out", "join", "i0"),
+      wire("other-join", "other", "state", "join", "i1"),
+    ];
+    const compiled = compileGraph([motion, other, rising, join], edges);
+    expect(compiled.transactionRoots).toEqual(new Set(["rising"]));
+    const memory = createMemory();
+    let state = evaluateIncremental(
+      compiled, null, null,
+      entities({ "binary_sensor.motion": "off", "binary_sensor.other": "off" }),
+      memory, 1,
+    );
+    state = evaluateIncremental(
+      compiled, state.results, compiled.entityRoots.get("binary_sensor.motion") ?? [],
+      entities({ "binary_sensor.motion": "on", "binary_sensor.other": "off" }),
+      memory, 2,
+    );
+    expect(state.results.outputs[pinKey("rising", "out")]?.v).toBe(true);
+    expect(state.results.outputs[pinKey("join", "out")]?.v).toBe(false);
+
+    const oracleMemory = structuredClone(memory);
+    const finalEntities = entities({ "binary_sensor.motion": "on", "binary_sensor.other": "on" });
+    state = evaluateIncremental(
+      compiled, state.results, compiled.entityRoots.get("binary_sensor.other") ?? [],
+      finalEntities, memory, 3,
+    );
+    const full = evaluate(compiled.nodes, compiled.edges, finalEntities, oracleMemory, 3);
+
+    expect(new Set(state.evaluatedNodeIds)).toEqual(new Set(["other", "rising", "join"]));
+    expect(state.results.outputs[pinKey("rising", "out")]?.v).toBe(false);
+    expect(state.results.outputs[pinKey("join", "out")]).toEqual(full.outputs[pinKey("join", "out")]);
+    expect(state.results.outputs[pinKey("join", "out")]?.v).toBe(false);
+  });
+
+  it("refreshes clock roots during an entity-caused transaction", () => {
+    const clock = made("now", "now");
+    const timestamp = made("entity", "timestamp");
+    timestamp.config = { entity_id: "sensor.timestamp" };
+    timestamp.outputs = [{ id: "state", label: "state", type: "datetime" }];
+    const diff = made("dt-subtract", "diff");
+    const edges = [
+      wire("now-diff", "now", "time", "diff", "a"),
+      wire("timestamp-diff", "timestamp", "state", "diff", "b"),
+    ];
+    const compiled = compileGraph([clock, timestamp, diff], edges);
+    const memory = createMemory();
+    let state = evaluateIncremental(
+      compiled, null, null,
+      { "sensor.timestamp": { state: "1970-01-01T00:00:00.000Z", attributes: { device_class: "timestamp" } } },
+      memory, 1_000,
+    );
+    const nextEntities: EntityMap = {
+      "sensor.timestamp": { state: "1970-01-01T00:00:00.500Z", attributes: { device_class: "timestamp" } },
+    };
+    state = evaluateIncremental(
+      compiled, state.results, compiled.entityRoots.get("sensor.timestamp") ?? [],
+      nextEntities, memory, 2_000,
+    );
+    const full = evaluate(compiled.nodes, compiled.edges, nextEntities, createMemory(), 2_000);
+
+    expect(new Set(state.evaluatedNodeIds)).toEqual(new Set(["timestamp", "now", "diff"]));
+    expect(state.results.outputs[pinKey("now", "time")]?.v).toBe(2_000);
+    expect(state.results.outputs[pinKey("diff", "elapsed")]).toEqual(full.outputs[pinKey("diff", "elapsed")]);
+    expect(state.results.outputs[pinKey("diff", "elapsed")]?.v).toBe(1.5);
   });
 
   it("preserves every ordered stateful transition", () => {

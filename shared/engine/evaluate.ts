@@ -161,10 +161,21 @@ export function evaluateIncremental(
   now: number = Date.now(),
   sources: SourceMap = {},
 ): EvaluationState {
-  const dirty = previous && roots !== null
-    ? dirtyClosure(compiled, roots)
-    : new Set(compiled.nodes.map((node) => node.id));
-  if (previous && dirty.size === 0) return { results: previous, evaluatedNodeIds: [] };
+  let dirty: Set<string>;
+  if (!previous || roots === null) {
+    dirty = new Set(compiled.nodes.map((node) => node.id));
+  } else {
+    const requestedRoots = [...roots];
+    // An empty cause is not a transaction. Once any real cause runs, clock readers must observe
+    // this transaction's sampled `now`, and transaction-scoped pulses must expire rather than be
+    // retained into an independently dirtied reconvergent branch.
+    if (requestedRoots.length === 0) return { results: previous, evaluatedNodeIds: [] };
+    dirty = dirtyClosure(compiled, [
+      ...requestedRoots,
+      ...compiled.clockRoots,
+      ...compiled.transactionRoots,
+    ]);
+  }
 
   const incoming = compiled.incoming;
   const nodeCache = createRecord<ReturnType<NodeDef["eval"]>>();

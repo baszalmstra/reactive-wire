@@ -23,6 +23,8 @@ export interface CompiledGraph {
   readonly entityRoots: ReadonlyMap<string, readonly string[]>;
   readonly fetchRoots: ReadonlySet<string>;
   readonly clockRoots: ReadonlySet<string>;
+  /** Nodes whose outputs expire at the end of every evaluation transaction. */
+  readonly transactionRoots: ReadonlySet<string>;
   readonly sinkIds: readonly string[];
   readonly durableNodes: RuntimeNode[];
 }
@@ -78,6 +80,7 @@ export function compileGraph(
   const entityMutable = new Map<string, string[]>();
   const fetchRoots = new Set<string>();
   const clockRoots = new Set<string>();
+  const transactionRoots = new Set<string>();
   const sinkIds: string[] = [];
   const durableNodes: RuntimeNode[] = [];
   for (const node of ownedNodes) {
@@ -88,6 +91,7 @@ export function compileGraph(
     }
     if (node.type === "fetch") fetchRoots.add(node.id);
     if (def?.dependsOnClock) clockRoots.add(node.id);
+    if (def?.transactionScoped) transactionRoots.add(node.id);
     if (def?.evalSink) sinkIds.push(node.id);
     if (statePolicy(node.config ?? {}) === "durable") durableNodes.push(node);
   }
@@ -105,6 +109,7 @@ export function compileGraph(
     entityRoots,
     fetchRoots,
     clockRoots,
+    transactionRoots,
     sinkIds,
     durableNodes,
   });

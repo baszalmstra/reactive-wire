@@ -28,6 +28,7 @@ function evalTransition(kind: "edge" | "rising" | "falling", { inVal, previousMe
 export const edge: NodeDef = {
   type: "edge",
   description: "Pulses true for one update whenever the input value changes.",
+  transactionScoped: true,
   template: {
     type: "edge", category: "Stateful", label: "Edge", icon: "mem",
     make: (id) => base(id, {
@@ -43,6 +44,7 @@ export const edge: NodeDef = {
 export const rising: NodeDef = {
   type: "rising",
   description: "Pulses true when the input goes from false to true.",
+  transactionScoped: true,
   template: {
     type: "rising", category: "Stateful", label: "Rising", icon: "mem",
     make: (id) => base(id, {
@@ -58,6 +60,7 @@ export const rising: NodeDef = {
 export const falling: NodeDef = {
   type: "falling",
   description: "Pulses true when the input goes from true to false.",
+  transactionScoped: true,
   template: {
     type: "falling", category: "Stateful", label: "Falling", icon: "mem",
     make: (id) => base(id, {
