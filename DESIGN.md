@@ -365,9 +365,11 @@ and wire model, an always-on **`src/server/`**, a React **`frontend/`** editor, 
 
 **Shared engine — `shared/`** (single source of truth for semantics, imported by **both** the
 editor and the server; the server never reaches into `frontend/`): a neutral, DOM-free directory
-both tsconfigs include. `shared/engine/evaluate.ts` is a pure recompute over
+both tsconfigs include. `shared/engine/evaluate.ts` is a transactional recompute over
 `(nodes, edges, entityMap, memory, now, sources)` → resolved `RWValue` per pin, plus per-node
-health, sink display actions, and a `connected` map. Kleene 3-valued logic (D18); editable pin
+health, sink display actions, and a `connected` map. Each node runs once and proposes all outputs
+plus replacement memory; proposals commit together only after the complete recompute succeeds.
+Kleene 3-valued logic (D18); editable pin
 defaults via `inEff` (D22); generic-type resolution via `typeGroup`; strict-DAG cycle guard
 (D17). `sinkCalls()` turns sink inputs into concrete HA service calls (non-`Ok` → skipped — the
 safety rule). Supporting modules: `engine/expand.ts` (macro inlining), `engine/node-def.ts`
@@ -376,9 +378,10 @@ reconcile/diff helpers), plus `value.ts`, `results.ts`, `node-types.ts`, `entiti
 `theme.ts`, `macros.ts`, and `collab.ts` (the collaborative-document model — see below).
 
 **Node registry — `shared/engine/nodes/`**: each node type is a self-contained `NodeDef` (plain
-object, not a class) — its palette template, one-line description, pure `eval(ctx)`, and (for
-sinks) `evalSink`. `index.ts` assembles the registry; `evaluate.ts` keeps the cross-cutting
-machinery (Kleene helpers, generic/variadic resolution, memory threading) and dispatches to it.
+object, not a class) — its palette template, one-line description, atomic `eval(ctx)` returning
+all declared outputs and optional next memory, and (for sinks) an atomic `evalSink` proposal.
+`index.ts` assembles the registry; `evaluate.ts` keeps the cross-cutting machinery (Kleene helpers,
+generic/variadic resolution, transactional memory threading) and dispatches to it.
 `frontend/src/canvas/node-templates.ts` re-exports the registry-derived `PALETTE`/`describeNode`
 plus editor-side variadic-pin helpers, so a node's presentation and behavior live in one place.
 Built-in nodes: `entity`, `const`, `compare`, `logic`, `sum`, `select`, `passthrough`, the

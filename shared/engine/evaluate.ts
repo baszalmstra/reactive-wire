@@ -6,16 +6,15 @@
 import type { NodeData, PinDef } from "../node-types.js";
 import type { ValueType } from "../theme.js";
 import type { EntityMap } from "../entities.js";
-import { UN, ER, parseEntityValue, type RWValue } from "../value.js";
+import { UN, parseEntityValue, type RWValue } from "../value.js";
 import type { EvalResults, SinkAction, ServiceCall } from "../results.js";
 import { expandMacros, joinPath } from "./expand.js";
 import { isMacroInstance, type MacroMap } from "../macros.js";
 import { REGISTRY } from "./nodes/index.js";
-import type { EvalCtx, NodeDef, SinkCtx } from "./node-def.js";
+import type { NodeDef } from "./node-def.js";
 import { copyRecord, createRecord, ownValue, setOwn } from "../record.js";
 import { isDescendantPath, pinKey } from "../identity.js";
 import {
-  ensureMemoryValue,
   inputHelperType,
   memoryValue,
   setMemoryValue,
@@ -98,28 +97,9 @@ function okInput(results: EvalResults, nodeId: string, pinId: string): RWValue |
 }
 
 /**
- * Build the service call a sink wants to make right now, or null if it should hold. The decision
- * — the safety rule (never act on a non-ok desired value) and each reconciling diff — lives in
- * the sink's own definition; here the engine gates on the command status, then hands the sink an
- * already-resolved input reader, the entity map, and its memory slot. Edge-triggered sinks
- * (notify/tts) advance their per-node memory in evalSink, so it must be called exactly once.
- */
-function buildSinkCall(n: NodeData, def: NodeDef, results: EvalResults, entities: EntityMap, memory: Memory): ServiceCall | null {
-  if (sinkCommandStatus(n, results)) return null;
-  if (!def.evalSink) return null;
-  const ctx: SinkCtx = {
-    n,
-    cfg: n.config ?? {},
-    okInput: (pinId) => okInput(results, n.id, pinId),
-    entities,
-    mem: () => ensureMemoryValue(memory, n.id),
-  };
-  return def.evalSink(ctx);
-}
-
-/**
  * Resolve every pin to a current value, reading entity sources from the live entity map.
- * Pure except that `memory` is mutated for stateful nodes. Returns a flat map of values
+ * Node definitions propose memory privately; caller memory changes only after a complete successful
+ * transaction. Returns a flat map of values
  * plus per-node health and sink actions.
  *
  * Time is supplied as an explicit input (`now`, epoch milliseconds) rather than read from a
@@ -154,23 +134,17 @@ export function evaluate(
   const byId = createRecord<NodeData>();
   for (const n of nodes) setOwn(byId, n.id, n);
   const incoming = createRecord<{ node: string; pin: string }>();
-  edges.forEach((e) => {
-    setOwn(incoming, pinKey(e.to.node, e.to.pin), e.from);
-  });
-  const outCache = createRecord<RWValue>();
+  edges.forEach((e) => setOwn(incoming, pinKey(e.to.node, e.to.pin), e.from));
+  const nodeCache = createRecord<ReturnType<NodeDef["eval"]>>();
   const inCache = createRecord<RWValue | null>();
   const visiting = createRecord<boolean>();
+  const pendingMemory = createRecord<NodeMemory>();
 
   function outVal(nodeId: string, pinId: string): RWValue {
-    const key = pinKey(nodeId, pinId);
-    if (key in outCache) return outCache[key]!;
-    if (visiting[key]) return ER("any", "cycle");
-    visiting[key] = true;
     const n = ownValue(byId, nodeId);
-    const v = n ? computeOut(n, pinId) : UN("any");
-    visiting[key] = false;
-    outCache[key] = v;
-    return v;
+    if (!n) return UN("any");
+    const evaluation = computeNode(n);
+    return ownValue(evaluation.outputs, pinId) ?? UN(n.outputs.find((p) => p.id === pinId)?.type ?? "any");
   }
 
   function inVal(nodeId: string, pinId: string): RWValue | null {
@@ -191,7 +165,6 @@ export function evaluate(
     return "any";
   }
 
-  // The shared type of a node's generic pins, taken from whichever group pin is connected.
   function resolveGroupType(n: NodeData, fallback: ValueType): ValueType {
     for (const pid of n.typeGroup ?? []) {
       const src = incoming[pinKey(n.id, pid)];
@@ -202,79 +175,102 @@ export function evaluate(
     }
     return fallback;
   }
+
   function effType(n: NodeData, pin: PinDef): ValueType {
     if (pin.type !== "any") return pin.type;
-    // An input-helper sink's value pin takes whatever type the target helper holds, so its
-    // editable default parses to match (a string for input_text/input_select, etc.).
     if (n.type === "sink-input" && pin.id === "value") return inputHelperType(n);
     return resolveGroupType(n, "num");
   }
-  // An input pin's effective value: the wired value if connected, else its editable default.
+
   function inEff(n: NodeData, pinId: string): RWValue | null {
     const pin = n.inputs.find((p) => p.id === pinId);
     if (!pin) return null;
     if (incoming[pinKey(n.id, pinId)]) return inVal(n.id, pinId);
     if (pin.editable) {
-      // An unset editable default is "not provided" (null), not unavailable — so it neither
-      // actuates nor counts against the node's health.
       const raw = n.values?.[pinId];
       return raw === undefined ? null : parseEntityValue(raw, effType(n, pin));
     }
     return null;
   }
 
-  // Establish (once) and return a boolean stateful node's memory slot. The initial value
-  // comes from the node's config, except under "reseed-from-world" where it is read from the
-  // configured entity's current state so the node boots aligned with the real world.
-  function seedBool(n: NodeData, cfg: Record<string, unknown>): NodeMemory {
-    let mem = memoryValue(memory, n.id);
-    if (mem && mem.seeded) return mem;
+  function cloneMemoryValue(value: unknown): unknown {
+    if (Array.isArray(value)) return value.map(cloneMemoryValue);
+    if (value && typeof value === "object") {
+      const clone = createRecord<unknown>();
+      for (const [key, item] of Object.entries(value)) setOwn(clone, key, cloneMemoryValue(item));
+      return clone;
+    }
+    return value;
+  }
+
+  function cloneMemory(slot: NodeMemory | undefined): NodeMemory {
+    return cloneMemoryValue(slot ?? {}) as NodeMemory;
+  }
+
+  function booleanSeed(n: NodeData, cfg: Record<string, unknown>): NodeMemory {
+    const previous = memoryValue(memory, n.id);
+    if (previous?.seeded) return cloneMemory(previous);
     let initial = !!cfg.initial;
-    // Under reseed-from-world, defer marking the slot seeded until the configured entity is
-    // present and ok, so a node that boots before its entity arrives reseeds once it appears
-    // rather than locking onto the config fallback forever.
     let seeded = true;
     if (statePolicy(cfg) === "reseed-from-world") {
       const e = entities[String(cfg.entity_id ?? "")];
       const parsed = e ? parseEntityValue(e.state, "bool") : null;
-      if (parsed && parsed.status === "ok") initial = parsed.v === true;
+      if (parsed?.status === "ok") initial = parsed.v === true;
       else seeded = false;
     }
-    // While not yet seeded the slot tracks the (still-config) fallback; once the world value
-    // arrives it overrides, so the state isn't frozen on a pre-seed fallback.
-    const state = seeded || mem === undefined ? initial : mem.state;
-    mem = { state, prev: mem?.prev ?? false, seeded };
-    return setMemoryValue(memory, n.id, mem);
+    const state = seeded || previous === undefined ? initial : previous.state;
+    return { state, prev: previous?.prev ?? false, seeded };
   }
 
-  // Resolve one output pin by dispatching to its node definition with a context that carries
-  // already-resolved inputs and the shared machinery. An unknown node type reads as unavailable.
-  function computeOut(n: NodeData, pinId: string): RWValue {
-    const def = REGISTRY[n.type];
-    if (!def) return UN("any");
-    const cfg = n.config ?? {};
-    const ctx: EvalCtx = {
-      n,
-      pinId,
-      cfg,
-      conn: n.inputs.filter((p) => incoming[pinKey(n.id, p.id)]),
-      inVal: (pid) => inVal(n.id, pid),
-      inEff: (pid) => inEff(n, pid),
-      resolveType: (declared, fallbackPins) => resolveType(n, declared, fallbackPins),
-      resolveGroupType: (fallback) => resolveGroupType(n, fallback),
-      seedBool: () => seedBool(n, cfg),
-      mem: () => ensureMemoryValue(memory, n.id),
-      entities,
-      now,
-      sources,
-    };
-    return def.eval(ctx);
+  function computeNode(n: NodeData): ReturnType<NodeDef["eval"]> {
+    const cached = ownValue(nodeCache, n.id);
+    if (cached) return cached;
+    if (visiting[n.id]) throw new Error(`Graph cycle reached node ${JSON.stringify(n.id)}`);
+    visiting[n.id] = true;
+    try {
+      const def = REGISTRY[n.type];
+      if (!def) {
+        const outputs = createRecord<RWValue>();
+        for (const pin of n.outputs) setOwn(outputs, pin.id, UN(pin.type));
+        const unknown = { outputs };
+        setOwn(nodeCache, n.id, unknown);
+        return unknown;
+      }
+      const cfg = n.config ?? {};
+      let seed: NodeMemory | undefined;
+      const evaluation = def.eval({
+        n,
+        cfg,
+        conn: n.inputs.filter((p) => incoming[pinKey(n.id, p.id)]),
+        inVal: (pid) => inVal(n.id, pid),
+        inEff: (pid) => inEff(n, pid),
+        resolveType: (declared, fallbackPins) => resolveType(n, declared, fallbackPins),
+        resolveGroupType: (fallback) => resolveGroupType(n, fallback),
+        seedBool: () => (seed ??= booleanSeed(n, cfg)),
+        previousMemory: Object.freeze(cloneMemory(memoryValue(memory, n.id))),
+        entities,
+        now,
+        sources,
+      });
+      for (const pin of n.outputs) {
+        if (!ownValue(evaluation.outputs, pin.id)) {
+          throw new Error(`Node definition ${JSON.stringify(n.type)} omitted declared output ${JSON.stringify(pin.id)}`);
+        }
+      }
+      if (evaluation.nextMemory) setOwn(pendingMemory, n.id, { ...evaluation.nextMemory });
+      setOwn(nodeCache, n.id, evaluation);
+      return evaluation;
+    } finally {
+      visiting[n.id] = false;
+    }
   }
 
   const outputs = createRecord<RWValue>();
   const inputs = createRecord<RWValue | null>();
   const connected = createRecord<boolean>();
   nodes.forEach((n) => {
+    // Even output-less sinks participate in the node transaction exactly once.
+    computeNode(n);
     n.outputs.forEach((p) => { outputs[pinKey(n.id, p.id)] = outVal(n.id, p.id); });
     n.inputs.forEach((p) => {
       const key = pinKey(n.id, p.id);
@@ -307,14 +303,27 @@ export function evaluate(
     connected,
     sinks: createRecord<ServiceCall | null>(),
   };
-  // Compute each sink's desired call once (advancing edge-triggered sinks' memory exactly
-  // once), then derive its preview note from that same call so display and actuation agree.
   nodes.forEach((n) => {
     const def = REGISTRY[n.type];
     if (!def?.evalSink) return;
-    results.sinks[n.id] = buildSinkCall(n, def, results, entities, memory);
+    let call: ServiceCall | null = null;
+    if (!sinkCommandStatus(n, results)) {
+      const sink = def.evalSink({
+        n,
+        cfg: n.config ?? {},
+        okInput: (pinId) => okInput(results, n.id, pinId),
+        entities,
+        previousMemory: Object.freeze(cloneMemory(memoryValue(memory, n.id))),
+      });
+      call = sink.call;
+      if (sink.nextMemory) setOwn(pendingMemory, n.id, { ...sink.nextMemory });
+    }
+    results.sinks[n.id] = call;
     results.actions[n.id] = describeSink(n, results);
   });
+
+  // Commit only after every output, input, health result, and sink proposal succeeded.
+  for (const nodeId of Object.keys(pendingMemory)) setMemoryValue(memory, nodeId, pendingMemory[nodeId]!);
 
   return results;
 }

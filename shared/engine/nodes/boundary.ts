@@ -1,7 +1,14 @@
 import { UN } from "../../value.js";
-import type { NodeDef } from "../node-def.js";
+import type { EvalCtx, NodeDef, NodeEvaluation } from "../node-def.js";
+import { createRecord, setOwn } from "../../record.js";
 import { MACRO_IN, MACRO_OUT } from "../../macros.js";
 import { base } from "./template-base.js";
+
+function unavailableOutputs({ n }: EvalCtx): NodeEvaluation {
+  const outputs = createRecord<ReturnType<typeof UN>>();
+  for (const pin of n.outputs) setOwn(outputs, pin.id, UN(pin.type));
+  return { outputs };
+}
 
 /**
  * The boundary nodes that mark a macro's interface inside its definition canvas. They are dropped
@@ -23,7 +30,7 @@ export const macroIn: NodeDef = {
   },
   // No outside source feeds the boundary in a definition preview, so every input pin reads as
   // unavailable — a neutral placeholder, not an error.
-  eval: ({ n, pinId }) => UN(n.outputs.find((p) => p.id === pinId)?.type ?? "any"),
+  eval: unavailableOutputs,
 };
 
 export const macroOut: NodeDef = {
@@ -37,7 +44,6 @@ export const macroOut: NodeDef = {
       outputs: [],
     }),
   },
-  // A macro-out has only inputs, so eval is never asked for an output pin; it exists in the
-  // registry only so the boundary node is a known type rather than an unknown one.
-  eval: ({ n, pinId }) => UN(n.outputs.find((p) => p.id === pinId)?.type ?? "any"),
+  // A macro-out has only inputs, so its atomic output record is empty.
+  eval: unavailableOutputs,
 };

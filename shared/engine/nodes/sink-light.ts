@@ -1,6 +1,5 @@
-import { UN } from "../../value.js";
 import { reconcileLight } from "../ha-reconcile.js";
-import type { NodeDef } from "../node-def.js";
+import { noOutputs, statelessSink, type NodeDef } from "../node-def.js";
 import { base } from "./template-base.js";
 
 export const sinkLight: NodeDef = {
@@ -21,15 +20,15 @@ export const sinkLight: NodeDef = {
       outputs: [],
     }),
   },
-  eval: () => UN("any"),
+  eval: noOutputs,
   // A reconciling light call: compare the desired on/color/brightness against the entity's
   // current state and only write when at least one requested dimension differs. If the entity is
   // missing (or a requested attribute is absent), emit the desired call rather than assuming the
   // world already matches.
-  evalSink: ({ cfg, okInput, entities }) => reconcileLight(String(cfg.entity_id ?? ""), {
+  evalSink: statelessSink(({ cfg, okInput, entities }) => reconcileLight(String(cfg.entity_id ?? ""), {
     on: okInput("on"),
     color: okInput("color"),
     temperature: okInput("temperature"),
     brightness: okInput("brightness"),
-  }, entities),
+  }, entities)),
 };

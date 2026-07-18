@@ -1,5 +1,5 @@
 import { V, UN, ER } from "../../value.js";
-import type { EvalCtx, NodeDef } from "../node-def.js";
+import { singleOutput, type EvalCtx, type NodeDef } from "../node-def.js";
 import { base } from "./template-base.js";
 
 /**
@@ -33,7 +33,7 @@ export const and: NodeDef = {
       outputs: [{ id: "out", label: "all true", type: "bool" }],
     }),
   },
-  eval: (ctx) => evalKleene(true, ctx),
+  eval: singleOutput("out", (ctx) => evalKleene(true, ctx)),
 };
 
 export const or: NodeDef = {
@@ -51,7 +51,7 @@ export const or: NodeDef = {
       outputs: [{ id: "out", label: "any true", type: "bool" }],
     }),
   },
-  eval: (ctx) => evalKleene(false, ctx),
+  eval: singleOutput("out", (ctx) => evalKleene(false, ctx)),
 };
 
 export const not: NodeDef = {
@@ -65,11 +65,11 @@ export const not: NodeDef = {
       outputs: [{ id: "out", label: "not", type: "bool" }],
     }),
   },
-  eval: ({ inVal }) => {
+  eval: singleOutput("out", ({ inVal }) => {
     const v = inVal("in");
     if (!v) return UN("bool");
     if (v.status === "error") return ER("bool", v.msg);
     if (v.status === "unavailable") return UN("bool");
     return V("bool", v.v !== true);
-  },
+  }),
 };

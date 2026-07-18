@@ -17,11 +17,11 @@ export const hold: NodeDef = {
       outputs: [{ id: "out", label: "held", type: "any" }],
     }),
   },
-  eval: ({ cfg, inVal, mem }) => {
+  eval: ({ cfg, inVal, previousMemory }) => {
     const trig = inVal("in");
     const val = inVal("value");
     const t = val?.type ?? "any";
-    const m = mem();
+    const m = { ...previousMemory };
     if (m.held === undefined) {
       m.held = parseEntityValue(cfg.initial, t);
       m.prev = false;
@@ -33,6 +33,6 @@ export const hold: NodeDef = {
       if (trig.v === true && m.prev === false && val && val.status === "ok") m.held = val;
       m.prev = trig.v === true;
     }
-    return m.held ?? UN(t);
+    return { outputs: { out: m.held ?? UN(t) }, nextMemory: m };
   },
 };

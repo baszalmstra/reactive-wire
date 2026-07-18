@@ -3,6 +3,7 @@ import { V, UN, ER, parseEntityValue, entityStateType } from "../../value.js";
 import type { ValueType } from "../../theme.js";
 import type { EntityState } from "../../entities.js";
 import type { NodeDef } from "../node-def.js";
+import { createRecord, setOwn } from "../../record.js";
 import { base } from "./template-base.js";
 
 /**
@@ -35,23 +36,21 @@ export const entity: NodeDef = {
       ],
     }),
   },
-  eval: ({ n, pinId, cfg, entities }) => {
-    const pin = n.outputs.find((p) => p.id === pinId);
+  eval: ({ n, cfg, entities }) => {
+    const outputs = createRecord<ReturnType<typeof UN>>();
     const entityId = String(cfg.entity_id ?? "");
-    if (pin?.ghost) return ER(pin.type, `attribute '${pin.missing}' no longer exposed`);
     const e = entities[entityId];
-    // The state pin's type is taken from the entity's metadata, so the unavailable status it
-    // carries while the entity is missing still names the right type.
-    if (pinId === "state") {
-      if (!e) return UN(entityStateType(entityId, "", {}));
-      return stateValue(entityId, e);
+    // Capture every declared output from this one entity-map snapshot.
+    for (const pin of n.outputs) {
+      let value;
+      if (pin.ghost) value = ER(pin.type, `attribute '${pin.missing}' no longer exposed`);
+      else if (pin.id === "state") value = e ? stateValue(entityId, e) : UN(entityStateType(entityId, "", {}));
+      else if (!e) value = UN(pin.type);
+      else if (pin.id === "last_changed") value = e.last_changed == null ? UN("datetime") : V("datetime", e.last_changed);
+      else if (pin.id === "last_updated") value = e.last_updated == null ? UN("datetime") : V("datetime", e.last_updated);
+      else value = parseEntityValue(e.attributes[pin.id], pin.type);
+      setOwn(outputs, pin.id, value);
     }
-    const type = pin?.type ?? "any";
-    if (!e) return UN(type);
-    // The change/update timestamps are surfaced as datetime instants, so subtracting one from
-    // now() yields an elapsed duration. They are unavailable until the feed reports them.
-    if (pinId === "last_changed") return e.last_changed == null ? UN("datetime") : V("datetime", e.last_changed);
-    if (pinId === "last_updated") return e.last_updated == null ? UN("datetime") : V("datetime", e.last_updated);
-    return parseEntityValue(e.attributes[pinId], type);
+    return { outputs };
   },
 };

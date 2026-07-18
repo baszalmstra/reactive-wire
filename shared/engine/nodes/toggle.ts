@@ -21,6 +21,6 @@ export const toggle: NodeDef = {
       if (trig.v === true && mem.prev === false) mem.state = !mem.state;
       mem.prev = trig.v === true;
     }
-    return V("bool", mem.state === true);
+    return { outputs: { state: V("bool", mem.state === true) }, nextMemory: mem };
   },
 };

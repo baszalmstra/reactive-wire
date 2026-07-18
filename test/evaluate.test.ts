@@ -3,6 +3,9 @@ import { evaluate, sinkCalls, type Memory, type ViewEdge } from "../shared/engin
 import type { NodeData } from "../shared/node-types.js";
 import type { EntityMap } from "../shared/entities.js";
 import { pinKey } from "../shared/identity.js";
+import { V } from "../shared/value.js";
+import type { NodeDef } from "../shared/engine/node-def.js";
+import { REGISTRY } from "../shared/engine/nodes/index.js";
 
 // The canonical graph: sun down AND present -> light red, else off.
 const nodes: NodeData[] = [
@@ -77,5 +80,94 @@ describe("evaluate (single engine) — canonical example", () => {
   it("still turns off when the sun is up even if presence is unavailable (Kleene: determined false)", () => {
     const c = calls({ "sun.sun": up });
     expect(c[0]!.call.service).toBe("turn_off");
+  });
+});
+
+describe("atomic node transactions", () => {
+  const atomicNode = (id: string, type: string, outputs = ["first", "second"]): NodeData => ({
+    id, type, title: type, subtitle: "", icon: "const", x: 0, y: 0, inputs: [],
+    outputs: outputs.map((pin) => ({ id: pin, label: pin, type: "num" as const })),
+  });
+
+  function install(def: NodeDef): () => void {
+    const previous = REGISTRY[def.type];
+    REGISTRY[def.type] = def;
+    return () => {
+      if (previous) REGISTRY[def.type] = previous;
+      else delete REGISTRY[def.type];
+    };
+  }
+
+  it("evaluates a multi-output stateful node once and commits one coherent memory proposal", () => {
+    let count = 0;
+    const node = atomicNode("atomic", "test-atomic");
+    const restore = install({
+      type: "test-atomic",
+      description: "test",
+      template: { type: "test-atomic", category: "", label: "", icon: "const", make: () => node },
+      eval: ({ previousMemory }) => {
+        count += 1;
+        const generation = Number(previousMemory.state ?? 0) + 1;
+        return {
+          outputs: { first: V("num", generation), second: V("num", generation) },
+          nextMemory: { state: generation },
+        };
+      },
+    });
+    try {
+      const memory: Memory = {};
+      const result = evaluate([{ ...node, outputs: [...node.outputs].reverse() }], [], {}, memory, 0);
+      expect(count).toBe(1);
+      expect(result.outputs[pinKey("atomic", "first")]?.v).toBe(1);
+      expect(result.outputs[pinKey("atomic", "second")]?.v).toBe(1);
+      expect(memory.atomic?.state).toBe(1);
+    } finally {
+      restore();
+    }
+  });
+
+  it("rolls back all proposed memory when a later node definition fails", () => {
+    const first = atomicNode("first", "test-proposal", ["out"]);
+    const broken = atomicNode("broken", "test-broken", ["out"]);
+    const restoreFirst = install({
+      type: "test-proposal", description: "test",
+      template: { type: "test-proposal", category: "", label: "", icon: "const", make: () => first },
+      eval: () => ({ outputs: { out: V("num", 2) }, nextMemory: { state: 2 } }),
+    });
+    const restoreBroken = install({
+      type: "test-broken", description: "test",
+      template: { type: "test-broken", category: "", label: "", icon: "const", make: () => broken },
+      eval: () => ({ outputs: {} }),
+    });
+    try {
+      const memory: Memory = { first: { state: 1 } };
+      expect(() => evaluate([first, broken], [], {}, memory, 0)).toThrow('omitted declared output "out"');
+      expect(memory).toEqual({ first: { state: 1 } });
+    } finally {
+      restoreBroken();
+      restoreFirst();
+    }
+  });
+
+  it("advances transient sink memory once per transaction", () => {
+    let count = 0;
+    const sink = { ...atomicNode("sink", "test-transient", []), inputs: [], config: { entity_id: "switch.test" } };
+    const restore = install({
+      type: "test-transient", description: "test", transient: true,
+      template: { type: "test-transient", category: "", label: "", icon: "const", make: () => sink },
+      eval: () => ({ outputs: {} }),
+      evalSink: ({ previousMemory }) => {
+        count += 1;
+        return { call: null, nextMemory: { state: Number(previousMemory.state ?? 0) + 1 } };
+      },
+    });
+    try {
+      const memory: Memory = {};
+      evaluate([sink], [], {}, memory, 0);
+      expect(count).toBe(1);
+      expect(memory.sink?.state).toBe(1);
+    } finally {
+      restore();
+    }
   });
 });

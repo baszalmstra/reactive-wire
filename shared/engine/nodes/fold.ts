@@ -4,10 +4,10 @@ import { applyFold, round1, toNumber } from "../engine-support.js";
 import { base } from "./template-base.js";
 
 /** Accumulate the value input into running numeric state on the rising edge of the trigger. */
-function evalAccumulate({ cfg, inVal, mem }: EvalCtx) {
+function evalAccumulate({ cfg, inVal, previousMemory }: EvalCtx) {
   const trig = inVal("in");
   const val = inVal("value");
-  const m = mem();
+  const m = { ...previousMemory };
   if (m.state === undefined) {
     m.state = toNumber(cfg.initial, 0);
     m.prev = false;
@@ -19,7 +19,7 @@ function evalAccumulate({ cfg, inVal, mem }: EvalCtx) {
     }
     m.prev = trig.v === true;
   }
-  return V("num", round1(toNumber(m.state, 0)));
+  return { outputs: { out: V("num", round1(toNumber(m.state, 0))) }, nextMemory: m };
 }
 
 export const fold: NodeDef = {

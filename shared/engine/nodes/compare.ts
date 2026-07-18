@@ -1,5 +1,5 @@
 import { V, UN, ER } from "../../value.js";
-import type { NodeDef } from "../node-def.js";
+import { singleOutput, type NodeDef } from "../node-def.js";
 import { applyCompare, gate } from "../engine-support.js";
 import { base } from "./template-base.js";
 
@@ -20,12 +20,12 @@ export const compare: NodeDef = {
       outputs: [{ id: "result", label: "result", type: "bool" }],
     }),
   },
-  eval: ({ cfg, inEff }) => {
+  eval: singleOutput("result", ({ cfg, inEff }) => {
     const a = inEff("a");
     const b = inEff("b");
     const g = gate([a, b]);
     if (g === "error") return ER("bool", "input error");
     if (g === "unavailable") return UN("bool");
     return V("bool", applyCompare(a!.v, String(cfg.op ?? "<"), b!.v));
-  },
+  }),
 };

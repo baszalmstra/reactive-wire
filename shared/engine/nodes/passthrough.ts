@@ -1,5 +1,6 @@
 import { UN } from "../../value.js";
 import type { NodeDef } from "../node-def.js";
+import { createRecord, setOwn } from "../../record.js";
 import { base } from "./template-base.js";
 
 /**
@@ -18,9 +19,9 @@ export const passthrough: NodeDef = {
       outputs: [{ id: "out", label: "", type: "any" }],
     }),
   },
-  eval: ({ n, pinId, inEff }) => {
-    const v = inEff(pinId);
-    if (!v) return UN(n.outputs.find((p) => p.id === pinId)?.type ?? "any");
-    return v;
+  eval: ({ n, inEff }) => {
+    const outputs = createRecord<ReturnType<typeof UN>>();
+    for (const pin of n.outputs) setOwn(outputs, pin.id, inEff(pin.id) ?? UN(pin.type));
+    return { outputs };
   },
 };

@@ -1,6 +1,5 @@
-import { UN } from "../../value.js";
 import { reconcileCover } from "../ha-reconcile.js";
-import type { NodeDef } from "../node-def.js";
+import { noOutputs, statelessSink, type NodeDef } from "../node-def.js";
 import { base } from "./template-base.js";
 
 export const sinkCover: NodeDef = {
@@ -20,14 +19,14 @@ export const sinkCover: NodeDef = {
       outputs: [],
     }),
   },
-  eval: () => UN("any"),
+  eval: noOutputs,
   /**
    * A reconciling cover call: drives the cover to a desired position, or fully open/closed from a
    * boolean. Acts only when the desired position differs from the cover's current position, so a
    * cover already where it should be is left alone.
    */
-  evalSink: ({ cfg, okInput, entities }) => reconcileCover(String(cfg.entity_id ?? ""), {
+  evalSink: statelessSink(({ cfg, okInput, entities }) => reconcileCover(String(cfg.entity_id ?? ""), {
     position: okInput("position"),
     open: okInput("open"),
-  }, entities),
+  }, entities)),
 };

@@ -1,5 +1,5 @@
 import { V, UN, ER } from "../../value.js";
-import type { NodeDef } from "../node-def.js";
+import { singleOutput, type NodeDef } from "../node-def.js";
 import { durationSeconds, instantDiffSeconds, round1, shiftInstant, toNumber } from "../engine-support.js";
 import { base } from "./template-base.js";
 
@@ -16,7 +16,7 @@ export const now: NodeDef = {
   },
   // The current time as a datetime instant, taken from the clock the caller supplied.
   // Recomputing with a later `now` makes everything downstream of this node advance.
-  eval: ({ now: t }) => V("datetime", t),
+  eval: singleOutput("time", ({ now: t }) => V("datetime", t)),
 };
 
 export const since: NodeDef = {
@@ -30,7 +30,7 @@ export const since: NodeDef = {
       outputs: [{ id: "elapsed", label: "elapsed", type: "duration" }],
     }),
   },
-  eval: ({ inEff, now: t }) => {
+  eval: singleOutput("elapsed", ({ inEff, now: t }) => {
     // The Duration between the supplied instant and now (now minus that instant), carried as a
     // number of seconds. A non-ok instant propagates, so an entity that never reported a change
     // time reads as unavailable rather than reporting a bogus elapsed time.
@@ -39,7 +39,7 @@ export const since: NodeDef = {
     if (ts.status === "error") return ER("duration", ts.msg);
     if (ts.status !== "ok") return UN("duration");
     return V("duration", instantDiffSeconds(t, toNumber(ts.v, t)));
-  },
+  }),
 };
 
 export const datetimeSubtract: NodeDef = {
@@ -56,7 +56,7 @@ export const datetimeSubtract: NodeDef = {
       outputs: [{ id: "elapsed", label: "duration", type: "duration" }],
     }),
   },
-  eval: ({ inEff }) => {
+  eval: singleOutput("elapsed", ({ inEff }) => {
     // The Duration between two instants (a minus b), carried as a number of seconds. Either
     // input being non-ok propagates.
     const a = inEff("a");
@@ -66,7 +66,7 @@ export const datetimeSubtract: NodeDef = {
     if (b.status === "error") return ER("duration", b.msg);
     if (a.status !== "ok" || b.status !== "ok") return UN("duration");
     return V("duration", instantDiffSeconds(toNumber(a.v, 0), toNumber(b.v, 0)));
-  },
+  }),
 };
 
 export const datetimeShift: NodeDef = {
@@ -84,7 +84,7 @@ export const datetimeShift: NodeDef = {
       outputs: [{ id: "out", label: "datetime", type: "datetime" }],
     }),
   },
-  eval: ({ cfg, inEff }) => {
+  eval: singleOutput("out", ({ cfg, inEff }) => {
     // An instant moved forward (plus) or backward (minus) by a Duration, staying a datetime.
     const t = inEff("time");
     const by = inEff("by");
@@ -94,7 +94,7 @@ export const datetimeShift: NodeDef = {
     if (t.status !== "ok" || by.status !== "ok") return UN("datetime");
     const dir = String(cfg.dir) === "minus" ? -1 : 1;
     return V("datetime", shiftInstant(toNumber(t.v, 0), toNumber(by.v, 0), dir));
-  },
+  }),
 };
 
 export const duration: NodeDef = {
@@ -110,7 +110,7 @@ export const duration: NodeDef = {
       outputs: [{ id: "out", label: "duration", type: "duration" }],
     }),
   },
-  eval: ({ cfg, inEff }) => {
+  eval: singleOutput("out", ({ cfg, inEff }) => {
     // A Duration written in a friendlier unit (ms / sec / min / hr / day), carried as a number of
     // seconds. The count may be typed inline or wired from another number.
     const count = inEff("count");
@@ -118,5 +118,5 @@ export const duration: NodeDef = {
     if (count.status === "error") return ER("duration", count.msg);
     if (count.status !== "ok") return UN("duration");
     return V("duration", round1(durationSeconds(toNumber(count.v, 0), cfg.unit)));
-  },
+  }),
 };

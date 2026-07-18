@@ -1,5 +1,4 @@
-import { UN } from "../../value.js";
-import type { NodeDef } from "../node-def.js";
+import { noOutputs, statelessSink, type NodeDef } from "../node-def.js";
 import { base } from "./template-base.js";
 
 export const sinkCall: NodeDef = {
@@ -17,13 +16,13 @@ export const sinkCall: NodeDef = {
       outputs: [],
     }),
   },
-  eval: () => UN("any"),
+  eval: noOutputs,
   /**
    * A generic call to any domain/service, gated by the `on` boolean: on=false calls the
    * configured off-service (or skips if none), on=true calls the on-service. Any ok editable
    * data pins are passed through as call data under their pin id.
    */
-  evalSink: ({ n, cfg, okInput }) => {
+  evalSink: statelessSink(({ n, cfg, okInput }) => {
     const entity_id = String(cfg.entity_id ?? "");
     const on = okInput("on");
     if (!on) return null;
@@ -42,5 +41,5 @@ export const sinkCall: NodeDef = {
       if (v) data[p.id] = v.v;
     }
     return { domain, service, data, target: { entity_id } };
-  },
+  }),
 };

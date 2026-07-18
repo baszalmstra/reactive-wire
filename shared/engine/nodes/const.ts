@@ -1,11 +1,13 @@
 import { UN, parseEntityValue } from "../../value.js";
-import type { EvalCtx, NodeDef } from "../node-def.js";
+import type { EvalCtx, NodeDef, NodeEvaluation } from "../node-def.js";
+import { createRecord, setOwn } from "../../record.js";
 import { base } from "./template-base.js";
 
 /** A constant's output is the typed literal stored on its single editable output pin. */
-function evalConst({ n }: EvalCtx) {
-  const out = n.outputs[0];
-  return out ? parseEntityValue(n.values?.[out.id], out.type) : UN("any");
+function evalConst({ n }: EvalCtx): NodeEvaluation {
+  const outputs = createRecord<ReturnType<typeof UN>>();
+  for (const pin of n.outputs) setOwn(outputs, pin.id, parseEntityValue(n.values?.[pin.id], pin.type));
+  return { outputs };
 }
 
 export const constNumber: NodeDef = {

@@ -1,5 +1,5 @@
 import { V, UN, ER } from "../../value.js";
-import type { NodeDef } from "../node-def.js";
+import { singleOutput, type NodeDef } from "../node-def.js";
 import { gate, round1 } from "../engine-support.js";
 import { base } from "./template-base.js";
 
@@ -18,12 +18,12 @@ export const sum: NodeDef = {
       outputs: [{ id: "out", label: "sum", type: "num" }],
     }),
   },
-  eval: ({ conn, inVal }) => {
+  eval: singleOutput("out", ({ conn, inVal }) => {
     if (conn.length === 0) return UN("num");
     const vals = conn.map((p) => inVal(p.id));
     const g = gate(vals);
     if (g === "error") return ER("num", "input error");
     if (g === "unavailable") return UN("num");
     return V("num", round1(vals.reduce((s, x) => s + (Number(x!.v) || 0), 0)));
-  },
+  }),
 };

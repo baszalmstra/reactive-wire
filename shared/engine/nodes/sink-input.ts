@@ -1,6 +1,5 @@
-import { UN } from "../../value.js";
 import { reconcileInputHelper } from "../ha-reconcile.js";
-import type { NodeDef } from "../node-def.js";
+import { noOutputs, statelessSink, type NodeDef } from "../node-def.js";
 import { base } from "./template-base.js";
 
 export const sinkInput: NodeDef = {
@@ -18,13 +17,13 @@ export const sinkInput: NodeDef = {
       outputs: [],
     }),
   },
-  eval: () => UN("any"),
+  eval: noOutputs,
   /**
    * A reconciling helper (input_boolean / input_number / input_select / input_text) call: set the
    * helper to a desired value, acting only when it differs from the helper's current state. The
    * service is chosen from the entity's domain so one node covers all the input_* helpers.
    */
-  evalSink: ({ cfg, okInput, entities }) => reconcileInputHelper(String(cfg.entity_id ?? ""), {
+  evalSink: statelessSink(({ cfg, okInput, entities }) => reconcileInputHelper(String(cfg.entity_id ?? ""), {
     value: okInput("value"),
-  }, entities),
+  }, entities)),
 };

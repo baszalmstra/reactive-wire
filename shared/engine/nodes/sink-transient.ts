@@ -1,6 +1,4 @@
-import { UN } from "../../value.js";
-import type { ServiceCall } from "../../results.js";
-import type { SinkCtx, NodeDef } from "../node-def.js";
+import { noOutputs, type SinkCtx, type SinkEvaluation, type NodeDef } from "../node-def.js";
 import { base } from "./template-base.js";
 
 /**
@@ -10,9 +8,9 @@ import { base } from "./template-base.js";
  * an unchanged message does not re-announce. A non-ok message is never sent and does not
  * advance the remembered value, so a momentarily offline source can't fire a stale message.
  */
-function buildTransientCall({ n, cfg, okInput, mem }: SinkCtx): ServiceCall | null {
+function buildTransientCall({ n, cfg, okInput, previousMemory }: SinkCtx): SinkEvaluation {
   const msg = okInput("message");
-  const m = mem();
+  const m = { ...previousMemory };
   if (m.prevVal === undefined) m.prevVal = null;
   if (m.seeded === undefined) m.seeded = false;
   // Seed at boot: the first message present establishes the baseline without announcing it,
@@ -22,24 +20,25 @@ function buildTransientCall({ n, cfg, okInput, mem }: SinkCtx): ServiceCall | nu
       m.prevVal = msg;
       m.seeded = true;
     }
-    return null;
+    return { call: null, nextMemory: m };
   }
-  if (!msg) return null;
+  if (!msg) return { call: null, nextMemory: m };
   const prev = m.prevVal ?? null;
   const changed = !prev || prev.status !== "ok" || prev.v !== msg.v;
   m.prevVal = msg;
-  if (!changed) return null;
+  if (!changed) return { call: null, nextMemory: m };
   if (n.type === "sink-tts") {
     const service = String(cfg.service ?? "speak");
     const data: Record<string, unknown> = { message: msg.v };
     const entityId = String(cfg.entity_id ?? "");
     if (entityId) data.media_player_entity_id = entityId;
     // Only target a media player when one is configured; an empty entity target is rejected.
-    return entityId ? { domain: "tts", service, data, target: { entity_id: entityId } } : { domain: "tts", service, data };
+    const call = entityId ? { domain: "tts", service, data, target: { entity_id: entityId } } : { domain: "tts", service, data };
+    return { call, nextMemory: m };
   }
   // notify routes by service name and takes no entity target.
   const service = String(cfg.service ?? "notify");
-  return { domain: "notify", service, data: { message: msg.v } };
+  return { call: { domain: "notify", service, data: { message: msg.v } }, nextMemory: m };
 }
 
 export const sinkNotify: NodeDef = {
@@ -57,7 +56,7 @@ export const sinkNotify: NodeDef = {
       outputs: [],
     }),
   },
-  eval: () => UN("any"),
+  eval: noOutputs,
   evalSink: buildTransientCall,
 };
 
@@ -77,6 +76,6 @@ export const sinkTts: NodeDef = {
       outputs: [],
     }),
   },
-  eval: () => UN("any"),
+  eval: noOutputs,
   evalSink: buildTransientCall,
 };

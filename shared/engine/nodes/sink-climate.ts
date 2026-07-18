@@ -1,6 +1,5 @@
-import { UN } from "../../value.js";
 import { reconcileClimate } from "../ha-reconcile.js";
-import type { NodeDef } from "../node-def.js";
+import { noOutputs, statelessSink, type NodeDef } from "../node-def.js";
 import { base } from "./template-base.js";
 
 export const sinkClimate: NodeDef = {
@@ -20,14 +19,14 @@ export const sinkClimate: NodeDef = {
       outputs: [],
     }),
   },
-  eval: () => UN("any"),
+  eval: noOutputs,
   /**
    * A reconciling climate call: only the dimensions whose desired (ok) value differs from the
    * entity's current value are written, so re-asserting the same target is a no-op and a
    * self-write echo doesn't re-fire. A dimension with a non-ok desired value is left untouched.
    */
-  evalSink: ({ cfg, okInput, entities }) => reconcileClimate(String(cfg.entity_id ?? ""), {
+  evalSink: statelessSink(({ cfg, okInput, entities }) => reconcileClimate(String(cfg.entity_id ?? ""), {
     temperature: okInput("temperature"),
     hvac_mode: okInput("hvac_mode"),
-  }, entities),
+  }, entities)),
 };
