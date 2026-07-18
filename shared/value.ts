@@ -44,7 +44,7 @@ export interface Formatted {
 }
 
 /** Chip / inspector formatting for a value. */
-export function formatValue(value: RWValue | null | undefined): Formatted {
+export function formatValue(value: RWValue | null | undefined, timeZone?: string): Formatted {
   if (!value) return { text: "—", kind: "none" };
   if (value.status === "error") return { text: "error", kind: "error" };
   if (value.status === "unavailable") return { text: "unavailable", kind: "unavail" };
@@ -61,7 +61,7 @@ export function formatValue(value: RWValue | null | undefined): Formatted {
     case "duration":
       return { text: formatDuration(value.v), kind: "duration", stale };
     case "datetime":
-      return { text: formatDatetime(value.v), kind: "datetime", stale };
+      return { text: formatDatetime(value.v, timeZone), kind: "datetime", stale };
     default:
       return { text: String(value.v ?? "—"), kind: "any", stale };
   }
@@ -103,11 +103,12 @@ export function formatDuration(secondsValue: unknown): string {
  * time zone as a short, human-readable wall-clock string (e.g. "Jun 15, 14:03"). A non-finite
  * value falls back to its raw text rather than an invalid date.
  */
-export function formatDatetime(epochMs: unknown): string {
+export function formatDatetime(epochMs: unknown, timeZone?: string): string {
   const ms = Number(epochMs);
   if (!Number.isFinite(ms)) return String(epochMs);
   const d = new Date(ms);
   return d.toLocaleString(undefined, {
+    ...(timeZone ? { timeZone } : {}),
     month: "short",
     day: "numeric",
     hour: "2-digit",

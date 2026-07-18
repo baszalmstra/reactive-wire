@@ -5,6 +5,8 @@ import { V, UN, type RWValue } from "../../../shared/value.js";
 import { lightSinkPins, type LightCaps } from "../../../shared/engine/light-caps.js";
 import type { NodeData } from "../../../shared/node-types.js";
 import { pinKey } from "../../../shared/identity.js";
+import { DEMO_HOME_LOCATION } from "../../../shared/home.js";
+import { environmentalStoryFixture } from "./time-story-fixtures.js";
 
 const ID = "light";
 
@@ -69,4 +71,22 @@ export const LightTransitions: Story = {
     },
     results: resultsWith({ on: V("bool", true), color: V("color", "#ff3b30"), brightness: V("num", 229) }),
   },
+};
+
+const timeFixture = environmentalStoryFixture("time-of-day", "time");
+export const TimeOfDay: Story = {
+  args: { ...timeFixture, homeLocation: DEMO_HOME_LOCATION },
+};
+
+const twilightFixture = environmentalStoryFixture("twilight", "twilight");
+export const TwilightRange: Story = {
+  args: { ...twilightFixture, homeLocation: DEMO_HOME_LOCATION },
+};
+
+const wrappedTwilightFixture = environmentalStoryFixture("twilight", "twilight-wrap", {
+  start: "astronomical-dusk",
+  end: "civil-dawn",
+});
+export const TwilightNightWrap: Story = {
+  args: { ...wrappedTwilightFixture, homeLocation: DEMO_HOME_LOCATION },
 };

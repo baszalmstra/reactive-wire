@@ -100,6 +100,7 @@ const shutdown = async () => {
   stopFeed();
   stopSim();
   deployer.stop();
+  ha.stop?.();
   try {
     await documentStore.close();
     process.exit(0);

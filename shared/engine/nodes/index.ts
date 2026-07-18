@@ -7,6 +7,7 @@ import { createRecord, setOwn } from "../../record.js";
 import { entity } from "./entity.js";
 import { fetch } from "./fetch.js";
 import { compare } from "./compare.js";
+import { between } from "./between.js";
 import { and, or, not } from "./logic.js";
 import { sum } from "./sum.js";
 import { constNumber, constBool, constString, constColor, constDuration } from "./const.js";
@@ -18,6 +19,7 @@ import { fold, scan } from "./fold.js";
 import { passthrough } from "./passthrough.js";
 import { macroIn, macroOut } from "./boundary.js";
 import { now, since, datetimeSubtract, datetimeShift, duration } from "./time.js";
+import { timeOfDay, twilight } from "./environment-time.js";
 import { sinkLight } from "./sink-light.js";
 import { sinkCall } from "./sink-call.js";
 import { sinkClimate } from "./sink-climate.js";
@@ -34,6 +36,7 @@ const PALETTE_DEFS: RegisteredNodeDef[] = [
   entity,
   fetch,
   compare,
+  between,
   and,
   or,
   not,
@@ -52,6 +55,8 @@ const PALETTE_DEFS: RegisteredNodeDef[] = [
   fold,
   scan,
   now,
+  timeOfDay,
+  twilight,
   since,
   datetimeSubtract,
   datetimeShift,

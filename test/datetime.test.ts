@@ -14,6 +14,11 @@ describe("formatDatetime", () => {
     expect(text).not.toBe("");
     expect(text).not.toMatch(/Invalid/i);
   });
+  it("uses an explicit Home Assistant timezone independent of the host timezone", () => {
+    const instant = Date.parse("2026-06-15T12:00:00Z");
+    expect(formatDatetime(instant, "Pacific/Kiritimati")).toMatch(/(?:Jun.*16|16.*Jun).*02:00/);
+    expect(formatDatetime(instant, "America/New_York")).toMatch(/(?:Jun.*15|15.*Jun).*08:00/);
+  });
   it("falls back to raw text for a non-finite value", () => {
     expect(formatDatetime("not-a-date")).toBe("not-a-date");
   });
@@ -24,6 +29,11 @@ describe("formatValue for the datetime type", () => {
     const f = formatValue(V("datetime", Date.UTC(2026, 5, 15, 12, 0, 0)));
     expect(f.kind).toBe("datetime");
     expect(f.text).not.toBe("");
+  });
+
+  it("passes an explicit timezone through generic datetime chip formatting", () => {
+    const f = formatValue(V("datetime", Date.parse("2026-06-15T12:00:00Z")), "Pacific/Kiritimati");
+    expect(f.text).toMatch(/(?:Jun.*16|16.*Jun).*02:00/);
   });
 });
 

@@ -2,7 +2,7 @@ import type { Node, Edge, Connection } from "@xyflow/react";
 import type { NodeData } from "../../../shared/node-types.js";
 import type { ValueType } from "../../../shared/theme.js";
 import { TYPE_LABEL } from "../../../shared/theme.js";
-import { typesCompatible, wouldCreateCycle } from "../../../shared/engine/validate-graph.js";
+import { typeGroupConnectionCompatible, typesCompatible, wouldCreateCycle } from "../../../shared/engine/validate-graph.js";
 
 export { typesCompatible } from "../../../shared/engine/validate-graph.js";
 
@@ -38,6 +38,16 @@ export function connectionReason(nodes: RWNodeType[], edges: Edge[], c: Connecti
   const to = pinTypeOf(t, c.targetHandle, "target");
   if (!typesCompatible(from, to)) {
     return `Type mismatch — a ${TYPE_LABEL[from ?? "any"]} pin cannot feed a ${TYPE_LABEL[to ?? "any"]} pin.`;
+  }
+  const connectedGroupPins = edges.flatMap((edge) => {
+    // React Flow replaces the incumbent wire when a connection lands on the same input. Excluding
+    // only that wire lets a lone generic input change type while sibling inputs still constrain it.
+    if (edge.target !== c.target || edge.targetHandle === c.targetHandle || !edge.targetHandle || !edge.source || !edge.sourceHandle) return [];
+    const sourceNode = nodes.find((node) => node.id === edge.source);
+    return sourceNode ? [{ pinId: edge.targetHandle, type: pinTypeOf(sourceNode, edge.sourceHandle, "source") }] : [];
+  });
+  if (!typeGroupConnectionCompatible(t.data.def, c.targetHandle, from, connectedGroupPins)) {
+    return "Type mismatch — every connected pin in this generic group must use the same concrete type.";
   }
   if (wouldCycle(edges, c.source, c.target)) {
     return "That wire would create a cycle — values must flow forward.";

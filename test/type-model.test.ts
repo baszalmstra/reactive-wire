@@ -9,6 +9,9 @@ import { V } from "../shared/value.js";
 // Compile-time contract checks. These declarations intentionally stay at module scope so the
 // root typecheck verifies invalid payload/config/view combinations, not just Vitest at runtime.
 const entityConfig: NodeConfigFor<"entity"> = { entity_id: "sensor.room" };
+const betweenConfig: NodeConfigFor<"between"> = { includeMin: true, includeMax: false };
+// @ts-expect-error Between uses include/exclude terminology for each bound
+const invalidBetweenConfig: NodeConfigFor<"between"> = { minClosed: true, maxClosed: false };
 // @ts-expect-error entity runtime config requires a stable entity id
 const invalidEntityConfig: NodeConfigFor<"entity"> = {};
 const boolPayload: ValuePayloadMap["bool"] = true;
@@ -70,6 +73,8 @@ const editorNode: NodeData = {
   y: 20,
 };
 
+void betweenConfig;
+void invalidBetweenConfig;
 void invalidEntityConfig;
 void invalidBoolPayload;
 void missingEntityRuntimeConfig;

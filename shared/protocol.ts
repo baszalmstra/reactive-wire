@@ -1,6 +1,7 @@
 import type { DocErrorMessage, DocResetAckMessage, DocResetMessage, DocStateMessage, DocUpdateMessage } from "./collab.js";
 import type { EntityMap, EntityState } from "./entities.js";
 import type { HAConnectionStatus } from "./ha-status.js";
+import { isHomeLocation, type HomeLocation } from "./home.js";
 import { isRecord, parseJsonRecord } from "./json.js";
 import type { ServiceCall } from "./results.js";
 import type { ValueType } from "./runtime-types.js";
@@ -23,6 +24,11 @@ export interface EntityDeltaFrame {
   version: number;
   changed: EntityMap;
   removed: string[];
+}
+
+export interface HomeLocationFrame {
+  type: "homeLocation";
+  location: HomeLocation | null;
 }
 
 export interface HAStatusFrame {
@@ -71,7 +77,7 @@ export interface RuntimeStateFrame {
   history: Record<string, RuntimeValueSample[]>;
 }
 
-export type ServerFrame = EntitiesFrame | LegacyEntitiesFrame | EntityDeltaFrame | HAStatusFrame | DeployResultFrame | RuntimeStateFrame | DocStateMessage | DocUpdateMessage | DocErrorMessage | DocResetMessage;
+export type ServerFrame = EntitiesFrame | LegacyEntitiesFrame | EntityDeltaFrame | HomeLocationFrame | HAStatusFrame | DeployResultFrame | RuntimeStateFrame | DocStateMessage | DocUpdateMessage | DocErrorMessage | DocResetMessage;
 
 export interface DeployClientMessage {
   type: "deploy";
@@ -194,6 +200,11 @@ export function isRuntimeStateFrame(value: unknown): value is RuntimeStateFrame 
     && Object.values(value.history).every((samples) => Array.isArray(samples) && samples.every(isRuntimeValueSample));
 }
 
+export function isHomeLocationFrame(value: unknown): value is HomeLocationFrame {
+  return isRecord(value) && value.type === "homeLocation"
+    && (value.location === null || isHomeLocation(value.location));
+}
+
 export function isHAStatusFrame(value: unknown): value is HAStatusFrame {
   if (!isRecord(value) || value.type !== "haStatus" || !isRecord(value.status)) return false;
   const phase = value.status.phase;
@@ -217,7 +228,7 @@ export function isEntityDeltaFrame(value: unknown): value is EntityDeltaFrame {
 export function decodeServerFrame(raw: string): ServerFrame | null {
   const value = parseJsonRecord(raw);
   if (!value) return null;
-  if (isEntitiesFrame(value) || isEntityDeltaFrame(value) || isHAStatusFrame(value) || isDeployResultFrame(value) || isRuntimeStateFrame(value) || isDocStateMessage(value) || isDocUpdateMessage(value) || isDocErrorMessage(value) || isDocResetMessage(value)) return value;
+  if (isEntitiesFrame(value) || isEntityDeltaFrame(value) || isHomeLocationFrame(value) || isHAStatusFrame(value) || isDeployResultFrame(value) || isRuntimeStateFrame(value) || isDocStateMessage(value) || isDocUpdateMessage(value) || isDocErrorMessage(value) || isDocResetMessage(value)) return value;
   return null;
 }
 

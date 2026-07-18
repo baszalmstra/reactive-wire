@@ -13,6 +13,7 @@ import { REGISTRY } from "./nodes/index.js";
 import type { NodeDef } from "./node-def.js";
 import { copyRecord, createRecord, ownValue, setOwn } from "../record.js";
 import { isDescendantPath, pinKey } from "../identity.js";
+import type { EvaluationEnvironment } from "../home.js";
 import { compileGraph, dirtyClosure, type CompiledGraph } from "./compile.js";
 import {
   inputHelperType,
@@ -114,6 +115,7 @@ export function evaluate(
   now: number = Date.now(),
   sources: SourceMap = {},
   macros: RuntimeMacroMap = {},
+  environment: EvaluationEnvironment = {},
 ): EvalResults {
   // A graph with macro placements is inlined into a flat graph first: each placement becomes a
   // namespaced copy of its definition's subgraph, so the same single engine evaluates it and
@@ -121,9 +123,9 @@ export function evaluate(
   // flat graph, each placement's pins are projected back from the expanded pins they map to, so
   // callers read a macro instance's values exactly as they would any other node's.
   if (nodes.some((n) => isMacroInstance(n.type))) {
-    return evaluateWithMacros(nodes, edges, entities, memory, now, sources, macros);
+    return evaluateWithMacros(nodes, edges, entities, memory, now, sources, macros, environment);
   }
-  return evaluateCompiled(compileGraph(nodes, edges), entities, memory, now, sources);
+  return evaluateCompiled(compileGraph(nodes, edges), entities, memory, now, sources, environment);
 }
 
 /** Results plus operation-count evidence for one retained evaluation transaction. */
@@ -139,8 +141,9 @@ export function evaluateCompiled(
   memory: Memory,
   now: number = Date.now(),
   sources: SourceMap = {},
+  environment: EvaluationEnvironment = {},
 ): EvalResults {
-  return evaluateIncremental(compiled, null, null, entities, memory, now, sources).results;
+  return evaluateIncremental(compiled, null, null, entities, memory, now, sources, environment).results;
 }
 
 /** Recompute a downstream dirty closure while retaining clean results and memory. */
@@ -152,6 +155,7 @@ export function evaluateIncremental(
   memory: Memory,
   now: number = Date.now(),
   sources: SourceMap = {},
+  environment: EvaluationEnvironment = {},
 ): EvaluationState {
   let dirty: Set<string>;
   if (!previous || roots === null) {
@@ -289,6 +293,7 @@ export function evaluateIncremental(
         entities,
         now,
         sources,
+        environment,
       });
       for (const pin of n.outputs) {
         if (!ownValue(evaluation.outputs, pin.id)) {
@@ -397,9 +402,10 @@ function evaluateWithMacros(
   now: number,
   sources: SourceMap,
   macros: RuntimeMacroMap,
+  environment: EvaluationEnvironment,
 ): EvalResults {
   const flat = expandMacros(nodes, edges, macros);
-  const inner = evaluate(flat.nodes, flat.edges, entities, memory, now, sources, macros);
+  const inner = evaluate(flat.nodes, flat.edges, entities, memory, now, sources, macros, environment);
 
   const outputs = copyRecord(inner.outputs);
   const inputs = copyRecord(inner.inputs);

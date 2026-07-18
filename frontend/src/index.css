@@ -236,6 +236,31 @@
 .rw-cfg-field > span, .rw-cfg-row > span { font-size: 11px; color: var(--rw-dim); }
 .rw-cfg-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .rw-cfg-note { font-size: 11.5px; color: var(--rw-faint); line-height: 1.5; margin: 0; }
+.rw-home-location { margin: 0; padding: 7px 8px; border-radius: 7px; background: var(--rw-panel2); color: var(--rw-dim); font: 10.5px/1.4 var(--font-mono); }
+.rw-twilight-guide { display: flex; flex-direction: column; gap: 8px; min-width: 0; padding: 9px; border: 1px solid var(--rw-line-soft); border-radius: 9px; background: var(--rw-panel2); overflow: hidden; }
+.rw-twilight-heading { margin: 0; color: var(--rw-text); font-size: 11px; font-weight: 700; }
+.rw-twilight-profile { display: block; width: 100%; max-width: 264px; height: auto; border: 1px solid var(--rw-line); border-radius: 7px; background: var(--rw-bg); }
+.rw-twilight-band.day { fill: color-mix(in srgb, var(--rw-bg) 42%, #e8c26a); }
+.rw-twilight-band.civil { fill: color-mix(in srgb, var(--rw-bg) 48%, #cf806b); }
+.rw-twilight-band.nautical { fill: color-mix(in srgb, var(--rw-bg) 54%, #6178ae); }
+.rw-twilight-band.astronomical { fill: color-mix(in srgb, var(--rw-bg) 62%, #424d82); }
+.rw-twilight-band.night { fill: color-mix(in srgb, var(--rw-bg) 78%, #22284f); }
+.rw-twilight-threshold line { stroke: color-mix(in srgb, var(--rw-text) 38%, transparent); stroke-width: .8; }
+.rw-twilight-threshold text { fill: var(--rw-text); font: 10px var(--font-mono); paint-order: stroke; stroke: var(--rw-bg); stroke-width: 3px; stroke-linejoin: round; }
+.rw-twilight-phase-label rect { fill: var(--rw-bg); stroke: var(--rw-text); stroke-width: .6; }
+.rw-twilight-phase { fill: var(--rw-text); font: 650 9.5px var(--font-sans); letter-spacing: .03em; }
+.rw-twilight-course { fill: none; stroke: color-mix(in srgb, var(--rw-text) 55%, transparent); stroke-width: 2.4; stroke-linecap: round; }
+.rw-twilight-selection-outer, .rw-twilight-selection-inner { fill: none; stroke-linecap: round; stroke-linejoin: round; }
+.rw-twilight-selection-outer { stroke: var(--rw-text); stroke-width: 9; }
+.rw-twilight-selection-inner { stroke: var(--rw-t-datetime); stroke-width: 4.5; }
+.rw-twilight-continuation text { fill: var(--rw-text); font: 700 10.5px var(--font-sans); paint-order: stroke; stroke: var(--rw-bg); stroke-width: 3px; stroke-linejoin: round; }
+.rw-twilight-boundary-marker { fill: var(--rw-panel2); stroke: var(--rw-text); stroke-width: 1.2; }
+.rw-twilight-endpoint polygon, .rw-twilight-endpoint rect { fill: var(--rw-text); stroke: var(--rw-bg); stroke-width: 3; paint-order: stroke fill; }
+.rw-twilight-endpoint text { fill: var(--rw-text); font: 800 10px var(--font-mono); paint-order: stroke; stroke: var(--rw-bg); stroke-width: 2px; }
+.rw-twilight-disclaimer, .rw-twilight-key, .rw-twilight-summary { margin: 0; color: var(--rw-faint); font-size: 10.5px; line-height: 1.45; overflow-wrap: anywhere; }
+.rw-twilight-disclaimer, .rw-twilight-summary { color: var(--rw-text); }
+.rw-twilight-key b { color: var(--rw-text); font-weight: 650; }
+.rw-twilight-summary b { color: var(--rw-t-datetime); }
 .rw-input { height: 30px; padding: 0 9px; border-radius: 7px; border: 1px solid var(--rw-line); background: var(--rw-panel2); color: var(--rw-text); font: inherit; font-family: var(--font-mono); font-size: 12px; outline: none; width: 100%; }
 .rw-input:focus { border-color: var(--rw-accent); }
 .rw-btn { height: 34px; padding: 0 16px; border-radius: 8px; border: 1px solid transparent; font: inherit; font-size: 12.5px; font-weight: 600; cursor: pointer; }

@@ -223,6 +223,8 @@ export function startFeed(ha: EntityFeed & HAClient, portOrOptions: number | Fee
     const connectionTokenOk = tokenMatches(requestToken(req), options.deployToken);
     const entitySnapshot = ha.entitiesSnapshot();
     ws.send(JSON.stringify({ type: "entities", version: entitySnapshot.version, entities: entitySnapshot.entities }));
+    const homeLocation = ha.homeLocation();
+    ws.send(JSON.stringify({ type: "homeLocation", location: homeLocation }));
     ws.send(JSON.stringify({ type: "haStatus", status: ha.connectionStatus() }));
     if (handlers.inspect) {
       try {
@@ -409,6 +411,15 @@ export function startFeed(ha: EntityFeed & HAClient, portOrOptions: number | Fee
     }
   });
 
+  const unsubLocation = ha.onLocation((location) => {
+    // Missing is an authoritative replacement too: editors must clear their old location so
+    // preview evaluation remains aligned with the server's unavailable environmental values.
+    const msg = JSON.stringify({ type: "homeLocation", location });
+    for (const client of wss.clients) {
+      if (client.readyState === WebSocket.OPEN) client.send(msg);
+    }
+  });
+
   const unsubConnection = ha.onConnection((status) => {
     const msg = JSON.stringify({ type: "haStatus", status });
     for (const client of wss.clients) {
@@ -420,6 +431,7 @@ export function startFeed(ha: EntityFeed & HAClient, portOrOptions: number | Fee
     feedStopped = true;
     unsubRuntime();
     unsub();
+    unsubLocation();
     unsubConnection();
     wss.close();
     httpServer?.close();

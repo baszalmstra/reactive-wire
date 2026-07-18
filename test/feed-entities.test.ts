@@ -101,6 +101,48 @@ describe("versioned entity feed", () => {
     }
   });
 
+  it("streams the authoritative Home Assistant location on connection", async () => {
+    const port = await freePort();
+    const ha = new MockHA({ latitude: 1, longitude: 2, elevation: 3, timeZone: "Pacific/Kiritimati" });
+    const stop = startFeed(ha, { port, host: "127.0.0.1" });
+    const ws = new WebSocket(`ws://127.0.0.1:${port}`, { headers: { origin: "http://localhost:5173" } });
+    try {
+      const location = nextFrame(ws, "homeLocation");
+      await new Promise<void>((resolve, reject) => { ws.once("open", resolve); ws.once("error", reject); });
+      expect(await location).toEqual({
+        type: "homeLocation",
+        location: { latitude: 1, longitude: 2, elevation: 3, timeZone: "Pacific/Kiritimati" },
+      });
+    } finally {
+      ws.close();
+      stop();
+    }
+  });
+
+  it("broadcasts replacement and clear Home Assistant locations to already-connected editors", async () => {
+    const port = await freePort();
+    const ha = new MockHA({ latitude: 1, longitude: 2, elevation: 3, timeZone: "UTC" });
+    const stop = startFeed(ha, { port, host: "127.0.0.1" });
+    const ws = new WebSocket(`ws://127.0.0.1:${port}`, { headers: { origin: "http://localhost:5173" } });
+    try {
+      await new Promise<void>((resolve, reject) => { ws.once("open", resolve); ws.once("error", reject); });
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      const replacement = nextFrame(ws, "homeLocation");
+      ha.setHomeLocation({ latitude: -33.8688, longitude: 151.2093, elevation: 58, timeZone: "Australia/Sydney" });
+      expect(await replacement).toEqual({
+        type: "homeLocation",
+        location: { latitude: -33.8688, longitude: 151.2093, elevation: 58, timeZone: "Australia/Sydney" },
+      });
+
+      const cleared = nextFrame(ws, "homeLocation");
+      ha.setHomeLocation(null);
+      expect(await cleared).toEqual({ type: "homeLocation", location: null });
+    } finally {
+      ws.close();
+      stop();
+    }
+  });
+
   it("streams Home Assistant readiness separately from entity frames", async () => {
     const port = await freePort();
     const ha = new MockHA();

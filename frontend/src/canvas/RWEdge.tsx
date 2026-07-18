@@ -9,6 +9,7 @@ import { pinKey } from "../../../shared/identity.js";
 export type RWEdgeData = Record<string, unknown> & {
   valueType?: ValueType;
   value?: RWValue | null;
+  timeZone?: string;
 };
 
 export type RWEdgeType = Edge<RWEdgeData, "rw">;
@@ -23,6 +24,7 @@ interface DecoratedEdgeCache {
   baseData: Edge["data"];
   valueType: ValueType;
   value: RWValue | null;
+  timeZone: string | undefined;
   edge: RWEdgeType;
 }
 
@@ -41,6 +43,7 @@ export function withRWEdgeData(
   nodes: RWNodeType[],
   results: EvalResults,
   previous?: RWEdgeType[],
+  timeZone?: string,
 ): RWEdgeType[] {
   const decorated = edges.map((edge) => {
     const fallbackType = sourcePinType(nodes, edge);
@@ -48,7 +51,7 @@ export function withRWEdgeData(
     const valueType = value?.type ?? fallbackType;
     const cached = decoratedByBase.get(edge);
     if (cached && cached.baseData === edge.data && cached.valueType === valueType
-      && sameEdgeValue(cached.value, value)) return cached.edge;
+      && cached.timeZone === timeZone && sameEdgeValue(cached.value, value)) return cached.edge;
     const next: RWEdgeType = {
       ...edge,
       type: "rw",
@@ -57,9 +60,10 @@ export function withRWEdgeData(
         ...edge.data,
         valueType,
         value,
+        timeZone,
       },
     };
-    decoratedByBase.set(edge, { baseData: edge.data, valueType, value, edge: next });
+    decoratedByBase.set(edge, { baseData: edge.data, valueType, value, timeZone, edge: next });
     return next;
   });
   if (previous?.length === decorated.length
@@ -68,13 +72,13 @@ export function withRWEdgeData(
 }
 
 /** Retain both the decorated array and each clean edge across unrelated evaluation updates. */
-export function useRWEdgeData(edges: Edge[], nodes: RWNodeType[], results: EvalResults): RWEdgeType[] {
+export function useRWEdgeData(edges: Edge[], nodes: RWNodeType[], results: EvalResults, timeZone?: string): RWEdgeType[] {
   const previous = useRef<RWEdgeType[] | undefined>(undefined);
   return useMemo(() => {
-    const next = withRWEdgeData(edges, nodes, results, previous.current);
+    const next = withRWEdgeData(edges, nodes, results, previous.current, timeZone);
     previous.current = next;
     return next;
-  }, [edges, nodes, results]);
+  }, [edges, nodes, results, timeZone]);
 }
 
 function edgeStatus(value: RWValue): Status {
@@ -92,8 +96,8 @@ function isBooleanOff(value: RWValue): boolean {
   return value.type === "bool" && value.status === "ok" && value.v === false;
 }
 
-function EdgeValueBadge({ value }: { value: RWValue }) {
-  const formatted = formatValue(value);
+export function EdgeValueBadge({ value, timeZone }: { value: RWValue; timeZone?: string }) {
+  const formatted = formatValue(value, timeZone);
   const swatch = value.status === "ok" && value.type === "color" ? String(value.v) : null;
   const boolTone = value.status === "ok" && value.type === "bool" ? (value.v ? "bool-true" : "bool-false") : "";
   return (
@@ -195,7 +199,7 @@ export function RWEdge({
             ...style,
           }}
         >
-          <EdgeValueBadge value={value} />
+          <EdgeValueBadge value={value} timeZone={data?.timeZone} />
         </div>
       </EdgeLabelRenderer>
     </>

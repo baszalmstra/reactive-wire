@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { evaluate, type Memory } from "../shared/engine/evaluate.js";
 import { REGISTRY } from "../shared/engine/nodes/index.js";
+import { pinKey } from "../shared/identity.js";
 import type { RuntimeNode } from "../shared/runtime-types.js";
 import type { FetchFn } from "../src/server/poller.js";
 import { MockHA } from "../src/ha/mock.js";
@@ -123,6 +125,36 @@ describe("runtime cause-aware scheduling", () => {
     vi.advanceTimersByTime(100);
     expect(withClock.inspect()).toMatchObject({ transactionCount: 2, lastCause: "clock", lastEvaluatedNodeCount: 2 });
     withClock.stop();
+  });
+
+  it("fully reevaluates environmental nodes on location replacement and preserves missing/invalid safety", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(Date.parse("2026-01-01T18:00:00Z"));
+    const ha = new MockHA({ latitude: 0, longitude: 0, elevation: 0, timeZone: "UTC" });
+    const time = made("time-of-day", "home-time");
+    time.config = { time: "12:00" };
+    const deployer = new Deployer(ha, 100_000);
+    deployer.deploy([time], [], false);
+    expect(deployer.inspect().nodes["home-time"]?.outputs.time?.value).toBe(Date.parse("2026-01-01T12:00:00Z"));
+
+    ha.setHomeLocation({ latitude: 1.8721, longitude: -157.4278, elevation: 0, timeZone: "Pacific/Kiritimati" });
+    expect(deployer.inspect()).toMatchObject({ transactionCount: 2, lastCause: "location", lastEvaluatedNodeCount: 1 });
+    expect(deployer.inspect().nodes["home-time"]?.outputs.time?.value).toBe(Date.parse("2026-01-01T22:00:00Z"));
+
+    ha.setHomeLocation(null);
+    const serverValue = deployer.inspect().nodes["home-time"]?.outputs.time;
+    const previewValue = evaluate([time], [], {}, {} as Memory, Date.now(), {}, {}, { homeLocation: null })
+      .outputs[pinKey("home-time", "time")];
+    expect(serverValue?.status).toBe("unavailable");
+    expect(previewValue?.status).toBe(serverValue?.status);
+    ha.setHomeLocation({ latitude: 200, longitude: 0, elevation: 0, timeZone: "UTC" });
+    expect(deployer.inspect().nodes["home-time"]?.outputs.time?.status).toBe("error");
+
+    const transactions = deployer.inspect().transactionCount;
+    deployer.stop();
+    ha.setHomeLocation({ latitude: 0, longitude: 0, elevation: 0, timeZone: "UTC" });
+    expect(deployer.inspect().transactionCount).toBe(0);
+    expect(transactions).toBe(4);
   });
 
   it("recomputes only a completed fetch source closure", async () => {

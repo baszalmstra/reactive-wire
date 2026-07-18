@@ -29,6 +29,7 @@ import { macroDefFromFlow, macroDefToFlow } from "./macro-editing.js";
 import { RWEdge, useRWEdgeData } from "./RWEdge.js";
 import { ModalDialog } from "../components/ModalDialog.js";
 import { useMacroPreview } from "./macro-preview.js";
+import type { EvaluationEnvironment } from "../../../shared/home.js";
 
 const nodeTypes = { rw: RWNode };
 const edgeTypes = { rw: RWEdge };
@@ -45,6 +46,7 @@ export function MacroEditor({
   aesthetic,
   mode,
   themeVars,
+  environment,
   onSave,
   onClose,
 }: {
@@ -53,6 +55,7 @@ export function MacroEditor({
   aesthetic: Aesthetic;
   mode: "dark" | "light";
   themeVars: CSSProperties;
+  environment: EvaluationEnvironment;
   onSave: (def: MacroDef) => void;
   onClose: () => void;
 }) {
@@ -71,8 +74,8 @@ export function MacroEditor({
     to: { node: e.target, pin: e.targetHandle ?? "" },
   })), [edges]);
   const nodeDefs = useMemo(() => nodes.map((n) => n.data.def), [nodes]);
-  const results = useMacroPreview(nodeDefs, viewEdges, macros);
-  const displayEdges = useRWEdgeData(edges, nodes, results);
+  const results = useMacroPreview(nodeDefs, viewEdges, macros, environment);
+  const displayEdges = useRWEdgeData(edges, nodes, results, environment.homeLocation?.timeZone);
 
   const onConnect = useCallback(
     (c: Connection) => {
@@ -239,7 +242,7 @@ export function MacroEditor({
       <div className="relative flex-1 min-h-0 flex">
         <Palette onAdd={addNode} extra={boundaryTemplates} />
         <div className="relative flex-1 min-h-0" onDrop={onDrop} onDragOver={onDragOver}>
-          <ResultsProvider value={{ results, actuating: false, entities: {}, onConfig, onSetValue }}>
+          <ResultsProvider value={{ results, actuating: false, entities: {}, homeLocation: environment.homeLocation, onConfig, onSetValue }}>
             <ReactFlow<RWNodeType, Edge>
               onInit={(inst) => {
                 rf.current = inst;

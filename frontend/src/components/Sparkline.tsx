@@ -52,7 +52,7 @@ function plotNumber(s: Sample, kind: "num" | "duration"): number | null {
  * consecutive repeats so the user sees changes instead of the same value spammed over and over.
  * Absent and error samples leave gaps in numeric lines and muted slices in state strips.
  */
-export function Sparkline({ history }: { history: Sample[] }) {
+export function Sparkline({ history, timeZone }: { history: Sample[]; timeZone?: string }) {
   const valueType = useMemo(() => historyValueType(history), [history]);
   const numericKind = valueType === "num" || valueType === "duration" ? valueType : null;
 
@@ -123,9 +123,9 @@ export function Sparkline({ history }: { history: Sample[] }) {
     return <SamplingSparkline />;
   }
 
-  if (valueType === "datetime") return <DatetimeHistory history={history} />;
-  if (valueType === "bool") return <BooleanHistory history={history} />;
-  return <CategoricalHistory history={history} />;
+  if (valueType === "datetime") return <DatetimeHistory history={history} timeZone={timeZone} />;
+  if (valueType === "bool") return <BooleanHistory history={history} timeZone={timeZone} />;
+  return <CategoricalHistory history={history} timeZone={timeZone} />;
 }
 
 function SamplingSparkline() {
@@ -139,7 +139,7 @@ function SamplingSparkline() {
   );
 }
 
-function BooleanHistory({ history }: { history: Sample[] }) {
+function BooleanHistory({ history, timeZone }: { history: Sample[]; timeZone?: string }) {
   const runs = useMemo(() => buildRuns(history), [history]);
   const latest = history[history.length - 1];
   const valid = history.filter((s) => isPresent(s.value) && s.value.type === "bool");
@@ -147,16 +147,16 @@ function BooleanHistory({ history }: { history: Sample[] }) {
   const pct = valid.length ? `${Math.round((trueCount / valid.length) * 100)}% on` : "no live samples";
   return (
     <HistoryCard>
-      <StateStrip runs={runs} />
+      <StateStrip runs={runs} timeZone={timeZone} />
       <HistorySummary
-        primary={latest ? <CurrentValueSummary value={latest.value} /> : "waiting for value"}
+        primary={latest ? <CurrentValueSummary value={latest.value} timeZone={timeZone} /> : "waiting for value"}
         secondary={`${changeSummary(runs, history)} · ${pct}`}
       />
     </HistoryCard>
   );
 }
 
-function DatetimeHistory({ history }: { history: Sample[] }) {
+function DatetimeHistory({ history, timeZone }: { history: Sample[]; timeZone?: string }) {
   const runs = useMemo(() => buildRuns(history), [history]);
   const latest = latestDatetime(history);
   const fallback = history[history.length - 1];
@@ -165,35 +165,35 @@ function DatetimeHistory({ history }: { history: Sample[] }) {
   const primary = latest
     ? trackingNow
       ? "tracking now"
-      : formatRelativeInstant(latest.ms, now)
+      : formatRelativeInstant(latest.ms, now, timeZone)
     : fallback
-      ? formatHistoryLabel(fallback)
+      ? formatHistoryLabel(fallback, timeZone)
       : "waiting for value";
   const secondary = latest
-    ? `${formatDatetime(latest.ms)} · ${trackingNow ? "updates continuously" : changeSummary(runs, history)}`
+    ? `${formatDatetime(latest.ms, timeZone)} · ${trackingNow ? "updates continuously" : changeSummary(runs, history)}`
     : changeSummary(runs, history);
 
   return (
     <HistoryCard>
-      <StateStrip runs={runs} />
+      <StateStrip runs={runs} timeZone={timeZone} />
       <HistorySummary primary={primary} secondary={secondary} />
     </HistoryCard>
   );
 }
 
-function CategoricalHistory({ history }: { history: Sample[] }) {
+function CategoricalHistory({ history, timeZone }: { history: Sample[]; timeZone?: string }) {
   const runs = useMemo(() => buildRuns(history), [history]);
   const latest = history[history.length - 1];
   const distinct = new Set(history.filter((s) => isPresent(s.value)).map((s) => sampleKey(s, { ignoreStatus: true }))).size;
   const states = distinct > 1 ? ` · ${distinct} states` : "";
   return (
     <HistoryCard>
-      <StateStrip runs={runs} inlineLabels />
+      <StateStrip runs={runs} inlineLabels timeZone={timeZone} />
       <HistorySummary
-        primary={latest ? `currently ${formatHistoryLabel(latest)}` : "waiting for value"}
+        primary={latest ? `currently ${formatHistoryLabel(latest, timeZone)}` : "waiting for value"}
         secondary={`${changeSummary(runs, history)}${states}`}
       />
-      <RunPills runs={runs} />
+      <RunPills runs={runs} timeZone={timeZone} />
     </HistoryCard>
   );
 }
@@ -202,11 +202,11 @@ function HistoryCard({ children }: { children: React.ReactNode }) {
   return <div className="rounded-[7px] border border-rw-line bg-rw-panel2 px-2 py-1.5 flex flex-col gap-1.5">{children}</div>;
 }
 
-function CurrentValueSummary({ value }: { value: RWValue }) {
+function CurrentValueSummary({ value, timeZone }: { value: RWValue; timeZone?: string }) {
   return (
     <span className="inline-flex min-w-0 items-center gap-1">
       <span>currently</span>
-      <ValueChip value={value} />
+      <ValueChip value={value} timeZone={timeZone} />
     </span>
   );
 }
@@ -220,25 +220,25 @@ function HistorySummary({ primary, secondary }: { primary: React.ReactNode; seco
   );
 }
 
-function StateStrip({ runs, inlineLabels = false }: { runs: Run[]; inlineLabels?: boolean }) {
+function StateStrip({ runs, inlineLabels = false, timeZone }: { runs: Run[]; inlineLabels?: boolean; timeZone?: string }) {
   const visible = runs.slice(-48);
   return (
     <div className={`flex ${inlineLabels ? "h-7" : "h-6"} overflow-hidden rounded-[5px] border border-rw-line bg-rw-panel`}>
       {visible.map((run) => (
         <div
           key={`${run.start}:${run.key}`}
-          title={`${formatHistoryLabel(run.sample)} · ${run.count} sample${run.count === 1 ? "" : "s"}`}
+          title={`${formatHistoryLabel(run.sample, timeZone)} · ${run.count} sample${run.count === 1 ? "" : "s"}`}
           className={segmentClass(run.sample, inlineLabels)}
           style={segmentStyle(run)}
         >
-          {inlineLabels ? <span className="min-w-0 truncate px-1 text-[9px] font-mono font-semibold leading-none text-rw-text [text-shadow:0_1px_2px_rgba(0,0,0,.45)]">{formatHistoryLabel(run.sample)}</span> : null}
+          {inlineLabels ? <span className="min-w-0 truncate px-1 text-[9px] font-mono font-semibold leading-none text-rw-text [text-shadow:0_1px_2px_rgba(0,0,0,.45)]">{formatHistoryLabel(run.sample, timeZone)}</span> : null}
         </div>
       ))}
     </div>
   );
 }
 
-function RunPills({ runs }: { runs: Run[] }) {
+function RunPills({ runs, timeZone }: { runs: Run[]; timeZone?: string }) {
   const recent = runs.slice(-5);
   return (
     <div className="flex flex-wrap items-center gap-1">
@@ -246,11 +246,11 @@ function RunPills({ runs }: { runs: Run[] }) {
         <span
           key={`${run.start}:${run.key}`}
           className="min-w-0 max-w-full truncate inline-flex items-center gap-1 font-mono text-[9px] px-1.5 py-0.5 rounded-[4px] border-[0.5px] text-rw-dim border-rw-line bg-rw-panel"
-          title={formatHistoryLabel(run.sample)}
+          title={formatHistoryLabel(run.sample, timeZone)}
           style={segmentStyle(run)}
         >
           <span className="h-1.5 w-1.5 rounded-full bg-[var(--tc)] shadow-[0_0_0_1px_color-mix(in_oklab,var(--tc)_45%,transparent)]" />
-          <span className="truncate">{formatHistoryLabel(run.sample)}</span>
+          <span className="truncate">{formatHistoryLabel(run.sample, timeZone)}</span>
           {run.count > 1 ? <span className="text-rw-faint ml-0.5">×{run.count}</span> : null}
         </span>
       ))}
@@ -336,13 +336,13 @@ function formatPlotLabel(n: number, kind: "num" | "duration"): string | number {
   return kind === "duration" ? formatDuration(n) : round(n);
 }
 
-function formatHistoryLabel(sample: Sample): string {
+function formatHistoryLabel(sample: Sample, timeZone?: string): string {
   const value = sample.value;
   if (value.status === "error") return "error";
   if (value.status === "unavailable") return "—";
   if (isPresent(value) && value.type === "str") return truncateLabel(String(value.v), 18);
   if (value.type === "any" && value.v && typeof value.v === "object") return objectSummary(value.v);
-  const formatted = formatValue(value);
+  const formatted = formatValue(value, timeZone);
   return formatted.kind === "unavail" ? "—" : formatted.text;
 }
 
@@ -391,15 +391,15 @@ function isTrackingNow(history: Sample[]): boolean {
   return recent.length >= 3 && recent.every(({ sample, ms }) => Math.abs(ms - sample.t) < 2000);
 }
 
-function formatRelativeInstant(ms: number, now: number): string {
+function formatRelativeInstant(ms: number, now: number, timeZone?: string): string {
   const diff = ms - now;
   const abs = Math.abs(diff);
   if (abs < 15_000) return "now";
 
-  const dayDiff = calendarDayDiff(ms, now);
-  if (dayDiff === 1) return `tomorrow ${formatClock(ms)}`;
-  if (dayDiff === -1) return `yesterday ${formatClock(ms)}`;
-  if (Math.abs(dayDiff) > 1 && Math.abs(dayDiff) < 7) return `${formatWeekday(ms)} ${formatClock(ms)}`;
+  const dayDiff = calendarDayDiff(ms, now, timeZone);
+  if (dayDiff === 1) return `tomorrow ${formatClock(ms, timeZone)}`;
+  if (dayDiff === -1) return `yesterday ${formatClock(ms, timeZone)}`;
+  if (Math.abs(dayDiff) > 1 && Math.abs(dayDiff) < 7) return `${formatWeekday(ms, timeZone)} ${formatClock(ms, timeZone)}`;
 
   const delta = formatRelativeDelta(abs);
   return diff > 0 ? `in ${delta}` : `${delta} ago`;
@@ -416,20 +416,34 @@ function formatRelativeDelta(ms: number): string {
   return `${days}d`;
 }
 
-function calendarDayDiff(ms: number, now: number): number {
+function calendarDayDiff(ms: number, now: number, timeZone?: string): number {
+  if (!timeZone) {
+    const day = (x: number) => {
+      const d = new Date(x);
+      return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+    };
+    return Math.round((day(ms) - day(now)) / 86_400_000);
+  }
+  const formatter = new Intl.DateTimeFormat("en", { timeZone, year: "numeric", month: "numeric", day: "numeric" });
   const day = (x: number) => {
-    const d = new Date(x);
-    return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+    const parts = formatter.formatToParts(x);
+    const part = (type: Intl.DateTimeFormatPartTypes) => Number(parts.find((item) => item.type === type)?.value);
+    return Date.UTC(part("year"), part("month") - 1, part("day"));
   };
   return Math.round((day(ms) - day(now)) / 86_400_000);
 }
 
-function formatClock(ms: number): string {
-  return new Date(ms).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", hour12: false });
+function formatClock(ms: number, timeZone?: string): string {
+  return new Date(ms).toLocaleTimeString(undefined, {
+    ...(timeZone ? { timeZone } : {}),
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
 }
 
-function formatWeekday(ms: number): string {
-  return new Date(ms).toLocaleDateString(undefined, { weekday: "short" });
+function formatWeekday(ms: number, timeZone?: string): string {
+  return new Date(ms).toLocaleDateString(undefined, { ...(timeZone ? { timeZone } : {}), weekday: "short" });
 }
 
 function stableValueText(value: unknown): string {
