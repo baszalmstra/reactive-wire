@@ -12,8 +12,7 @@ import {
   type ReactFlowInstance,
 } from "@xyflow/react";
 import { TYPE_VAR, gridStyle, type Aesthetic } from "../../../shared/theme.js";
-import { evaluate, type ViewEdge } from "../../../shared/engine/evaluate.js";
-import { createMemory } from "../../../shared/engine/engine-support.js";
+import type { ViewEdge } from "../../../shared/engine/evaluate.js";
 import type { NodeData } from "../../../shared/node-types.js";
 import { RWNode } from "./RWNode.js";
 import { Palette } from "./Palette.js";
@@ -29,6 +28,7 @@ import type { ValueType } from "../../../shared/theme.js";
 import { macroDefFromFlow, macroDefToFlow } from "./macro-editing.js";
 import { RWEdge, withRWEdgeData } from "./RWEdge.js";
 import { ModalDialog } from "../components/ModalDialog.js";
+import { useMacroPreview } from "./macro-preview.js";
 
 const nodeTypes = { rw: RWNode };
 const edgeTypes = { rw: RWEdge };
@@ -65,15 +65,13 @@ export function MacroEditor({
   const rf = useRef<ReactFlowInstance<RWNodeType, Edge> | null>(null);
   const idc = useRef(0);
 
-  // A no-side-effect memory map: the definition preview shows shapes, not persisted runtime state.
-  const memory = useRef(createMemory());
-  const viewEdges: ViewEdge[] = edges.map((e) => ({
+  const viewEdges = useMemo<ViewEdge[]>(() => edges.map((e) => ({
     id: e.id,
     from: { node: e.source, pin: e.sourceHandle ?? "" },
     to: { node: e.target, pin: e.targetHandle ?? "" },
-  }));
-  const nodeDefs = nodes.map((n) => n.data.def);
-  const results = evaluate(nodeDefs, viewEdges, {}, memory.current, Date.now(), {}, macros);
+  })), [edges]);
+  const nodeDefs = useMemo(() => nodes.map((n) => n.data.def), [nodes]);
+  const results = useMacroPreview(nodeDefs, viewEdges, macros);
   const displayEdges = useMemo(() => withRWEdgeData(edges, nodes, results), [edges, nodes, results]);
 
   const onConnect = useCallback(
