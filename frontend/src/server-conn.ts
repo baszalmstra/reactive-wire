@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { EntityMap } from "../../shared/entities.js";
+import type { HAConnectionStatus } from "../../shared/ha-status.js";
 import type { DocErrorMessage, DocStateMessage, DocUpdateMessage } from "../../shared/collab.js";
 
 export interface DeployResult {
@@ -24,6 +25,8 @@ export interface DocPacket {
 
 export interface Server {
   connected: boolean;
+  /** Server-to-Home-Assistant readiness, separate from this editor's WebSocket. */
+  haStatus: HAConnectionStatus;
   entities: EntityMap;
   lastResult: DeployResult | null;
   docState: DocPacket | null;
@@ -77,6 +80,7 @@ function urlWithToken(url: string, token: string): string {
  */
 export function useServer(url: string = DEFAULT_URL): Server {
   const [connected, setConnected] = useState(false);
+  const [haStatus, setHAStatus] = useState<HAConnectionStatus>({ phase: "disconnected", epoch: 0, snapshotVersion: null });
   const [entities, setEntities] = useState<EntityMap>({});
   const [lastResult, setLastResult] = useState<DeployResult | null>(null);
   const [docState, setDocState] = useState<DocPacket | null>(null);
@@ -98,7 +102,11 @@ export function useServer(url: string = DEFAULT_URL): Server {
       ws.onmessage = (ev) => {
         try {
           const msg = JSON.parse(ev.data as string);
-          if (msg.type === "entities" && Number.isSafeInteger(msg.version) && msg.version >= 0 && msg.entities && typeof msg.entities === "object") {
+          if (msg.type === "haStatus" && msg.status && typeof msg.status === "object"
+            && (msg.status.phase === "disconnected" || msg.status.phase === "syncing" || msg.status.phase === "ready")
+            && Number.isSafeInteger(msg.status.epoch)) {
+            setHAStatus(msg.status as HAConnectionStatus);
+          } else if (msg.type === "entities" && Number.isSafeInteger(msg.version) && msg.version >= 0 && msg.entities && typeof msg.entities === "object") {
             const current = entityVersionRef.current;
             if (current === null || msg.version >= current) {
               entityVersionRef.current = msg.version;
@@ -171,5 +179,5 @@ export function useServer(url: string = DEFAULT_URL): Server {
     return true;
   }, []);
 
-  return { connected, entities, lastResult, docState, docUpdate, docError, deploy, sendDocUpdate };
+  return { connected, haStatus, entities, lastResult, docState, docUpdate, docError, deploy, sendDocUpdate };
 }

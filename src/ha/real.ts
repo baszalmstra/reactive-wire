@@ -9,7 +9,7 @@ import {
 } from "home-assistant-js-websocket";
 import type { EntityMap, EntityUpdate } from "../../shared/entities.js";
 import { applyEntityEvent, entityMapFromStates, translateEntity } from "./apply-entities.js";
-import { type EntityFeed, type HAClient, type ServiceCall } from "./client.js";
+import { type EntityFeed, type HAClient, type HAConnectionStatus, type ServiceCall } from "./client.js";
 
 /**
  * A live connection to Home Assistant. One canonical entity record is rebuilt only for a full
@@ -31,10 +31,12 @@ function authFor(url: string, token: string): Auth {
 export class RealHA implements HAClient, EntityFeed {
   private latest: EntityMap = Object.create(null) as EntityMap;
   private readonly listeners = new Set<(update: EntityUpdate) => void>();
+  private readonly connectionListeners = new Set<(status: HAConnectionStatus) => void>();
   private version = 0;
   private syncing = true;
   private buffered: StateChangedEvent[] = [];
   private syncGeneration = 0;
+  private status: HAConnectionStatus = { phase: "disconnected", epoch: 0, snapshotVersion: null };
 
   private constructor(private readonly connection: Connection) {}
 
@@ -42,16 +44,26 @@ export class RealHA implements HAClient, EntityFeed {
     const auth = authFor(url, token);
     const connection = await createConnection({ auth });
     const ha = new RealHA(connection);
-    connection.addEventListener("disconnected", () => { ha.syncing = true; });
-    connection.addEventListener("ready", () => { void ha.synchronize().catch(() => { /* the connection will retry */ }); });
+    connection.addEventListener("disconnected", () => ha.markDisconnected());
+    connection.addEventListener("ready", () => { void ha.beginSynchronization().catch(() => { /* the connection will retry */ }); });
     // Subscribe before requesting the full state so changes racing the snapshot are buffered.
     await connection.subscribeEvents<StateChangedEvent>((event) => ha.receive(event), "state_changed");
-    await ha.synchronize();
+    await ha.beginSynchronization();
     return ha;
   }
 
   async callService(call: ServiceCall): Promise<void> {
+    if (this.status.phase !== "ready") throw new Error(`Home Assistant is ${this.status.phase}`);
     await haCallService(this.connection, call.domain, call.service, call.data, call.target);
+  }
+
+  connectionStatus(): HAConnectionStatus {
+    return { ...this.status };
+  }
+
+  onConnection(cb: (status: HAConnectionStatus) => void): () => void {
+    this.connectionListeners.add(cb);
+    return () => this.connectionListeners.delete(cb);
   }
 
   entitiesSnapshot() {
@@ -65,6 +77,27 @@ export class RealHA implements HAClient, EntityFeed {
 
   private emit(update: EntityUpdate): void {
     this.listeners.forEach((cb) => cb(update));
+  }
+
+  private emitConnection(status: HAConnectionStatus): void {
+    this.status = status;
+    const snapshot = this.connectionStatus();
+    this.connectionListeners.forEach((cb) => cb(snapshot));
+  }
+
+  private markDisconnected(): void {
+    this.syncGeneration += 1;
+    this.syncing = true;
+    this.buffered = [];
+    this.emitConnection({ phase: "disconnected", epoch: this.status.epoch, snapshotVersion: null });
+  }
+
+  private async beginSynchronization(): Promise<void> {
+    const epoch = this.status.epoch + 1;
+    const generation = ++this.syncGeneration;
+    this.syncing = true;
+    this.emitConnection({ phase: "syncing", epoch, snapshotVersion: null });
+    await this.synchronize(generation, epoch);
   }
 
   private receive(event: StateChangedEvent): void {
@@ -91,16 +124,16 @@ export class RealHA implements HAClient, EntityFeed {
   }
 
   /** Fetch and install one full state after initial connection and every reconnect. */
-  private async synchronize(): Promise<void> {
-    const generation = ++this.syncGeneration;
-    this.syncing = true;
+  private async synchronize(generation: number, epoch: number): Promise<void> {
     const states = await getStates(this.connection);
     if (generation !== this.syncGeneration) return;
     this.latest = entityMapFromStates(states);
-    this.emit({ kind: "full", version: ++this.version, entities: this.latest });
+    const snapshotVersion = ++this.version;
+    this.emit({ kind: "full", version: snapshotVersion, entities: this.latest });
     const buffered = this.buffered;
     this.buffered = [];
     this.syncing = false;
     for (const event of buffered) if (this.eventIsNewer(event)) this.applyEvent(event);
+    if (generation === this.syncGeneration) this.emitConnection({ phase: "ready", epoch, snapshotVersion });
   }
 }

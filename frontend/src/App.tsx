@@ -49,7 +49,7 @@ import { MacroList } from "./canvas/MacroList.js";
 import { useServer } from "./server-conn.js";
 import { deriveProblems, problemCounts } from "./canvas/problems.js";
 import { ProblemsPanel } from "./components/ProblemsPanel.js";
-import { Banner } from "./components/Banner.js";
+import { Banner, HAStatusBanner } from "./components/Banner.js";
 import { Toast, type ToastMessage } from "./components/Toast.js";
 import { DeployGuard } from "./components/DeployGuard.js";
 import { StatusPill, deriveStatus } from "./components/StatusPill.js";
@@ -284,13 +284,14 @@ export function App() {
   }, [activeFlowId, nodeDefs, viewEdges, entities, now, macroLib.macros]);
   // While a previously connected feed is down, keep the last server values greyed as stale.
   // Before any server has connected, the app remains in local demo mode with live simulated values.
-  const results = server.connected || !hasSeenServer ? liveResults : staleResults(liveResults);
+  const haReady = server.haStatus.phase === "ready";
+  const results = (server.connected && haReady) || !hasSeenServer ? liveResults : staleResults(liveResults);
 
-  const problems = deriveProblems(nodeDefs, results, server.connected);
+  const problems = deriveProblems(nodeDefs, results, server.connected && haReady);
   const { errors: errorCount, warns: warnCount } = problemCounts(problems);
 
   // The active flow is actuating only when it is part of the live deployment set and the server is live.
-  const actuating = activeFlowDeployed && (autoDeploy || liveDeployed) && server.connected;
+  const actuating = activeFlowDeployed && (autoDeploy || liveDeployed) && server.connected && haReady;
 
   const deploy = server.deploy;
 
@@ -683,7 +684,7 @@ export function App() {
 
   const themeVars = buildThemeVars(aesthetic, mode) as CSSProperties;
   const grid = gridStyle(aesthetic);
-  const status = deriveStatus(server.connected, actuating, activeFlowDeployed ? !liveDeployed : false);
+  const status = deriveStatus(server.connected, actuating, activeFlowDeployed ? !liveDeployed : false, server.haStatus.phase);
   const problemTotal = errorCount + warnCount;
   const enabledFlowCount = flowTabs.filter((flow) => deployedFlowIdSet.has(flow.id)).length;
   const deployNote = deployPending
@@ -806,9 +807,9 @@ export function App() {
         </div>
 
         <div
-          className={cn("rw-ha-badge rw-hide-mobile", server.connected ? "online" : "offline")}
-          title={server.connected ? "Home Assistant feed connected" : "Home Assistant feed disconnected; live server state is unknown"}
-          aria-label={server.connected ? "Home Assistant connected" : "Home Assistant disconnected"}
+          className={cn("rw-ha-badge rw-hide-mobile", server.connected && haReady ? "online" : "offline")}
+          title={!server.connected ? "Editor feed disconnected; Home Assistant state is unknown" : haReady ? "Home Assistant ready" : `Home Assistant ${server.haStatus.phase}; deployed graph paused`}
+          aria-label={!server.connected ? "Home Assistant state unknown" : haReady ? "Home Assistant connected" : `Home Assistant ${server.haStatus.phase}`}
         >
           <Icon name="ha" size={16} />
         </div>
@@ -817,7 +818,9 @@ export function App() {
         </button>
       </header>
 
-      {!server.connected && <Banner lastSync={lastSync} />}
+      {!server.connected
+        ? <Banner lastSync={lastSync} />
+        : server.haStatus.phase !== "ready" && <HAStatusBanner phase={server.haStatus.phase} />}
 
       <FlowTabs
         flows={flowTabs}

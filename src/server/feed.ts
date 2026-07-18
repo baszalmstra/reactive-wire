@@ -19,7 +19,7 @@ import {
   isDeployClientMessage,
   isDocUpdateMessage,
 } from "../../shared/protocol.js";
-import { type EntityFeed } from "../ha/client.js";
+import { type EntityFeed, type HAClient } from "../ha/client.js";
 import {
   requestToken,
   tokenMatches,
@@ -143,7 +143,7 @@ function serveStatic(staticRoot: string, req: IncomingMessage, res: ServerRespon
  * Streams entity state to editor clients over WebSocket and accepts deploy/document messages.
  * Policy modules own validation and connection decisions; this module is the transport adapter.
  */
-export function startFeed(ha: EntityFeed, portOrOptions: number | FeedOptions, handlers: FeedHandlers = {}): () => void {
+export function startFeed(ha: EntityFeed & HAClient, portOrOptions: number | FeedOptions, handlers: FeedHandlers = {}): () => void {
   const options = normalizeOptions(portOrOptions);
   const maxDocUpdateBytes = handlers.documentStore?.maxUpdateBytes ?? DEFAULT_MAX_DOC_UPDATE_BYTES;
   const maxDocStateBytes = handlers.documentStore?.maxStateBytes ?? DEFAULT_MAX_DOC_STATE_BYTES;
@@ -167,6 +167,7 @@ export function startFeed(ha: EntityFeed, portOrOptions: number | FeedOptions, h
     const connectionTokenOk = tokenMatches(requestToken(req), options.deployToken);
     const entitySnapshot = ha.entitiesSnapshot();
     ws.send(JSON.stringify({ type: "entities", version: entitySnapshot.version, entities: entitySnapshot.entities }));
+    ws.send(JSON.stringify({ type: "haStatus", status: ha.connectionStatus() }));
     if (handlers.documentStore) {
       try {
         const frame: DocStateMessage = { type: "docState", update: encodeUpdateBase64(handlers.documentStore.encodeState()) };
@@ -279,8 +280,16 @@ export function startFeed(ha: EntityFeed, portOrOptions: number | FeedOptions, h
     }
   });
 
+  const unsubConnection = ha.onConnection((status) => {
+    const msg = JSON.stringify({ type: "haStatus", status });
+    for (const client of wss.clients) {
+      if (client.readyState === WebSocket.OPEN) client.send(msg);
+    }
+  });
+
   return () => {
     unsub();
+    unsubConnection();
     wss.close();
     httpServer?.close();
   };

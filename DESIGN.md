@@ -234,7 +234,9 @@ in HA is text-based templates.
 - Build one canonical current-state map from **`getStates`**, then apply raw
   **`state_changed` events in O(1)**. Initial connection and reconnect install a versioned full
   snapshot; ordinary changes publish ordered versioned deltas. This seeds every behavior from t=0
-  without rescanning, cloning, or retransmitting all H entities for each event.
+  without rescanning, cloning, or retransmitting all H entities for each event. Connection state is
+  an explicit `disconnected → syncing → ready` epoch: the runtime pauses evaluation/effects on loss
+  and cannot actuate again until that epoch's fresh full snapshot has been installed and reconciled.
 - Auth: `createLongLivedTokenAuth(url, token)` + `createConnection({auth})`. Under Node we
   must provide a `WebSocket` (the lib was browser-first) — relevant to where the runtime runs.
 - Actions: `callService(conn, domain, service, data?, target?)`.

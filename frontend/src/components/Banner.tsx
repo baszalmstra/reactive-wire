@@ -1,3 +1,5 @@
+import type { HAConnectionPhase } from "../../../shared/ha-status.js";
+
 /**
  * A full-width bar shown when the editor's server feed is down: values are stale and the live
  * server state is unknown. The connection retries on its own, so the bar only reports state.
@@ -19,6 +21,19 @@ export function Banner({ lastSync }: { lastSync: string | null }) {
       </span>
       <div className="flex-1" />
       <span className="text-[11px] text-rw-warn/70 shrink-0">Reconnecting…</span>
+    </div>
+  );
+}
+
+/** The editor feed is healthy, but the server has paused its graph until HA has a fresh snapshot. */
+export function HAStatusBanner({ phase }: { phase: Exclude<HAConnectionPhase, "ready"> }) {
+  return (
+    <div className="flex-none flex items-center gap-2.5 px-[14px] h-9 text-[11.5px] text-rw-warn border-b border-[color-mix(in_oklab,var(--rw-h-warn)_45%,var(--rw-line))] bg-[color-mix(in_oklab,var(--rw-h-warn)_12%,var(--rw-panel))] select-none">
+      <span className="w-2 h-2 rounded-full bg-rw-warn-fill shrink-0" />
+      <span className="min-w-0 truncate">
+        <b className="font-semibold">Home Assistant {phase === "syncing" ? "is synchronizing" : "is disconnected"}.</b>{" "}
+        Values are last-known and the deployed graph is paused; no service calls will be sent until a fresh snapshot is ready.
+      </span>
     </div>
   );
 }

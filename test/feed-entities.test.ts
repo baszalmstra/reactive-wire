@@ -73,6 +73,27 @@ describe("versioned entity feed", () => {
     }
   });
 
+  it("streams Home Assistant readiness separately from entity frames", async () => {
+    const port = await freePort();
+    const ha = new MockHA();
+    const stop = startFeed(ha, { port, host: "127.0.0.1" });
+    const ws = new WebSocket(`ws://127.0.0.1:${port}`, { headers: { origin: "http://localhost:5173" } });
+    try {
+      const frames: Record<string, unknown>[] = [];
+      ws.on("message", (raw) => frames.push(JSON.parse(String(raw)) as Record<string, unknown>));
+      await new Promise<void>((resolve, reject) => { ws.once("open", resolve); ws.once("error", reject); });
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      expect(frames).toContainEqual({ type: "haStatus", status: { phase: "ready", epoch: 1, snapshotVersion: 0 } });
+
+      const disconnected = nextFrame(ws, "haStatus");
+      ha.disconnect();
+      expect(await disconnected).toEqual({ type: "haStatus", status: { phase: "disconnected", epoch: 1, snapshotVersion: null } });
+    } finally {
+      ws.close();
+      stop();
+    }
+  });
+
   it("gives a newly connected client the latest full version", async () => {
     const port = await freePort();
     const ha = new MockHA();

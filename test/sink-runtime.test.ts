@@ -212,6 +212,55 @@ describe("Deployer — reconciling light sink", () => {
   });
 });
 
+describe("Deployer — Home Assistant readiness", () => {
+  it("pauses across disconnect and transport reconnect until a fresh snapshot is ready", async () => {
+    const ha = new MockHA();
+    ha.setState("light.lr", "on");
+    ha.setState("binary_sensor.x", "on");
+    const deployer = new Deployer(ha, 100_000);
+    const { nodes, edges } = lightGraph();
+    deployer.deploy(nodes, edges, true);
+    expect(ha.calls).toHaveLength(0);
+
+    ha.disconnect();
+    ha.setState("binary_sensor.x", "off");
+    ha.beginReconnect();
+    expect(deployer.inspect().haStatus).toMatchObject({ phase: "syncing", epoch: 2, snapshotVersion: null });
+    expect(ha.calls).toHaveLength(0);
+
+    ha.completeReconnect({
+      "light.lr": { state: "on", attributes: {} },
+      "binary_sensor.x": { state: "off", attributes: {} },
+    });
+    await flushPromises();
+    expect(deployer.inspect().haStatus).toMatchObject({ phase: "ready", epoch: 2 });
+    expect(ha.calls).toHaveLength(1);
+    expect(ha.lastCall()?.service).toBe("turn_off");
+    deployer.stop();
+  });
+
+  it("discards a stale correction when the reconnect snapshot already matches", async () => {
+    const ha = new MockHA();
+    ha.setState("light.lr", "off");
+    ha.setState("binary_sensor.x", "on");
+    const deployer = new Deployer(ha, 100_000);
+    const { nodes, edges } = lightGraph();
+    deployer.deploy(nodes, edges, true);
+    await flushPromises();
+    expect(ha.calls).toHaveLength(1);
+
+    ha.disconnect();
+    ha.beginReconnect();
+    ha.completeReconnect({
+      "light.lr": { state: "on", attributes: {} },
+      "binary_sensor.x": { state: "on", attributes: {} },
+    });
+    await flushPromises();
+    expect(ha.calls).toHaveLength(1);
+    deployer.stop();
+  });
+});
+
 describe("Deployer lifecycle", () => {
   it("terminally deactivates callbacks, ticks, actuation, and durable work", async () => {
     vi.useFakeTimers();

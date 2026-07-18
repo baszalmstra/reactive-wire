@@ -75,10 +75,18 @@ describe("useServer", () => {
 
     act(() => latest().emitOpen());
     expect(result.current.connected).toBe(true);
+    expect(result.current.haStatus.phase).toBe("disconnected");
+
+    act(() => latest().emit({ type: "haStatus", status: { phase: "ready", epoch: 3, snapshotVersion: 1 } }));
+    expect(result.current.haStatus).toEqual({ phase: "ready", epoch: 3, snapshotVersion: 1 });
 
     const entities = { "light.bedroom": { state: "on", attributes: {} } };
     act(() => latest().emit({ type: "entities", version: 1, entities }));
     expect(result.current.entities).toEqual(entities);
+
+    act(() => latest().emit({ type: "haStatus", status: { phase: "disconnected", epoch: 3, snapshotVersion: null } }));
+    expect(result.current.connected).toBe(true);
+    expect(result.current.haStatus.phase).toBe("disconnected");
   });
 
   it("applies ordered entity deltas including additions, updates, and removals", () => {

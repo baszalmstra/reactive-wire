@@ -7,7 +7,7 @@ import type { EntityMap } from "../../shared/entities.js";
 import type { EvalResults, ServiceCall } from "../../shared/results.js";
 import type { RWValue } from "../../shared/value.js";
 import { pinKey } from "../../shared/identity.js";
-import { type EntityFeed, type HAClient } from "../ha/client.js";
+import { type EntityFeed, type HAClient, type HAConnectionStatus } from "../ha/client.js";
 import { log } from "./log.js";
 import { Poller, type FetchFn } from "./poller.js";
 
@@ -47,6 +47,8 @@ export interface DeployerSnapshot {
   deployed: boolean;
   generation: number;
   mode: "live" | "dry-run";
+  /** Home Assistant transport/snapshot readiness; live mode is paused unless this is ready. */
+  haStatus: HAConnectionStatus;
   /** Epoch ms of the last recompute, or null if the graph has never run. */
   evaluatedAt: number | null;
   nodes: Record<string, DebugNode>;
@@ -166,6 +168,7 @@ export class Deployer {
   private tick: ReturnType<typeof setInterval> | null;
   private readonly poller: Poller;
   private readonly unsubscribeEntities: () => void;
+  private readonly unsubscribeConnection: () => void;
   private stopped = false;
   private lastResults: EvalResults | null = null;
   private lastRunAt: number | null = null;
@@ -177,6 +180,7 @@ export class Deployer {
     private readonly durable?: DurableMemory,
   ) {
     this.unsubscribeEntities = ha.onEntities(() => this.run());
+    this.unsubscribeConnection = ha.onConnection((status) => this.connectionChanged(status));
     this.poller = new Poller(fetchFn, () => this.run());
     // A clock tick re-evaluates on a fixed interval so derivations that depend on time (now,
     // elapsed durations) advance even when no entity changes — without it, "open for 10 min"
@@ -221,6 +225,7 @@ export class Deployer {
     this.graph = null;
     this.generation += 1;
     this.unsubscribeEntities();
+    this.unsubscribeConnection();
     if (this.tick !== null) {
       clearInterval(this.tick);
       this.tick = null;
@@ -278,6 +283,7 @@ export class Deployer {
       deployed: graph !== null,
       generation: this.generation,
       mode: this.actuate ? "live" : "dry-run",
+      haStatus: this.ha.connectionStatus(),
       evaluatedAt: this.lastRunAt,
       nodes,
       sinks,
@@ -289,8 +295,17 @@ export class Deployer {
     this.lastTriggeredCall.set(nodeId, call);
   }
 
+  private connectionChanged(status: HAConnectionStatus): void {
+    if (this.stopped) return;
+    // An accepted service call cannot be recalled, but it must not carry acknowledgement or
+    // reconciliation state into another connection epoch.
+    this.inFlight.clear();
+    this.lastReconcilingAttempt.clear();
+    if (status.phase === "ready") this.run();
+  }
+
   private run(): void {
-    if (this.stopped || !this.graph) return;
+    if (this.stopped || !this.graph || this.ha.connectionStatus().phase !== "ready") return;
     const entities: EntityMap = this.ha.entitiesSnapshot().entities as EntityMap;
     const results = evaluate(this.graph.nodes, this.graph.edges, entities, this.mem, Date.now(), this.poller.sources());
     // The evaluate above mutated durable nodes' slots in place; persist them (debounced) so the
@@ -308,6 +323,7 @@ export class Deployer {
       }
     }
     const generation = this.generation;
+    const connectionEpoch = this.ha.connectionStatus().epoch;
     for (const { nodeId, call } of sinkCalls(this.graph.nodes, results)) {
       // Reconciling sinks already compare desired values with the target entity snapshot. The
       // runtime adds a second guard: one correction is attempted for a given desired call and
@@ -328,7 +344,7 @@ export class Deployer {
       this.callFailures.delete(nodeId);
       this.recordTriggered(nodeId, call);
       if (this.actuate) {
-        void this.executeCall(generation, nodeId, key, failureKey, call, rememberUntilChange);
+        void this.executeCall(generation, connectionEpoch, nodeId, key, failureKey, call, rememberUntilChange);
       } else {
         this.inFlight.delete(nodeId);
         if (rememberUntilChange) this.lastNonReconciling.set(nodeId, key);
@@ -340,6 +356,7 @@ export class Deployer {
 
   private async executeCall(
     generation: number,
+    connectionEpoch: number,
     nodeId: string,
     key: string,
     failureKey: string,
@@ -347,21 +364,26 @@ export class Deployer {
     rememberUntilChange: boolean,
   ): Promise<void> {
     const targetId = call.target?.entity_id ?? "";
+    const readyForEpoch = () => {
+      const status = this.ha.connectionStatus();
+      return status.phase === "ready" && status.epoch === connectionEpoch;
+    };
     try {
+      if (generation !== this.generation || !readyForEpoch()) return;
       await this.ha.callService(call);
-      if (generation === this.generation && this.inFlight.get(nodeId) === key) {
+      if (generation === this.generation && readyForEpoch() && this.inFlight.get(nodeId) === key) {
         if (rememberUntilChange) this.lastNonReconciling.set(nodeId, key);
         this.callFailures.delete(nodeId);
       }
       log("info", "deployer", "sink call", { mode: "live", service: call.service, entity: targetId, data: call.data });
     } catch (err) {
       const msg = serviceErrorMessage(err);
-      if (generation === this.generation && this.inFlight.get(nodeId) === key) {
+      if (generation === this.generation && readyForEpoch() && this.inFlight.get(nodeId) === key) {
         this.callFailures.set(nodeId, { key: failureKey, message: msg });
       }
       log("error", "deployer", "sink call failed", { mode: "live", service: call.service, entity: targetId, error: msg });
     } finally {
-      if (generation === this.generation && this.inFlight.get(nodeId) === key) this.inFlight.delete(nodeId);
+      if (generation === this.generation && readyForEpoch() && this.inFlight.get(nodeId) === key) this.inFlight.delete(nodeId);
     }
   }
 }
