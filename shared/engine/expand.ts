@@ -2,6 +2,7 @@ import type { NodeData } from "../node-types.js";
 import type { ViewEdge } from "./evaluate.js";
 import { MACRO_IN, MACRO_OUT, isMacroInstance, type MacroMap } from "../macros.js";
 import { createRecord, ownValue } from "../record.js";
+import { appendPath, pinKey } from "../identity.js";
 
 /**
  * The separator between an instance path and an inner node id in an expanded graph. Inner ids
@@ -12,9 +13,9 @@ import { createRecord, ownValue } from "../record.js";
  */
 export const PATH_SEP = "/";
 
-/** Join an instance path and an inner id into a namespaced id, e.g. "inst1/toggle". */
+/** Join an encoded instance path and one raw inner id into a collision-free namespaced id. */
 export function joinPath(prefix: string, innerId: string): string {
-  return prefix ? `${prefix}${PATH_SEP}${innerId}` : innerId;
+  return appendPath(prefix, innerId);
 }
 
 export interface MacroExpansionLimits {
@@ -56,12 +57,17 @@ export interface ExpandResult {
   instances: Record<string, InstanceBinding>;
 }
 
+export interface ExpandedEndpoint {
+  node: string;
+  pin: string;
+}
+
 export interface InstanceBinding {
   prefix: string;
-  /** macro output pin id -> `${node}:${pin}` of the expanded pin that produces it. */
-  outputs: Record<string, string | null>;
-  /** macro input pin id -> `${node}:${pin}` of the expanded macro-in pin that exposes it. */
-  inputs: Record<string, string>;
+  /** Macro output pin id -> expanded pin that produces it. */
+  outputs: Record<string, ExpandedEndpoint | null>;
+  /** Macro input pin id -> expanded passthrough pin that exposes it. */
+  inputs: Record<string, ExpandedEndpoint>;
 }
 
 /**
@@ -71,8 +77,8 @@ export interface InstanceBinding {
  * as the macro output rather than emitting an edge.
  */
 interface BoundaryContext {
-  /** macro-in `${node}:${pin}` -> the expanded passthrough output that carries that input. */
-  passOut: Record<string, { node: string; pin: string }>;
+  /** Collision-free macro-in pin key -> expanded passthrough output carrying that input. */
+  passOut: Record<string, ExpandedEndpoint>;
   /** Ids of macro-in boundary nodes at this level. */
   inIds: Set<string>;
   /** Ids of macro-out boundary nodes at this level. */
@@ -95,12 +101,13 @@ export function expandMacros(
   edges: ViewEdge[],
   macros: MacroMap,
   limits: Readonly<MacroExpansionLimits> = DEFAULT_MACRO_EXPANSION_LIMITS,
+  rootIdsArePaths = false,
 ): ExpandResult {
   const outNodes: NodeData[] = [];
   const outEdges: ViewEdge[] = [];
   const instances = createRecord<InstanceBinding>();
   const budget: ExpansionBudget = { limits: { ...limits }, instances: 0 };
-  expandInto(nodes, edges, macros, "", new Set(), outNodes, outEdges, instances, null, budget, 0);
+  expandInto(nodes, edges, macros, "", new Set(), outNodes, outEdges, instances, null, budget, 0, rootIdsArePaths);
   return { nodes: outNodes, edges: outEdges, instances };
 }
 
@@ -137,13 +144,14 @@ function expandInto(
   boundary: BoundaryContext | null,
   budget: ExpansionBudget,
   depth: number,
+  rootIdsArePaths: boolean,
 ): void {
   if (depth > budget.limits.maxDepth) {
     throw new MacroExpansionError(`Macro nesting exceeds depth ${budget.limits.maxDepth}`);
   }
   // Every node id seen at this level, namespaced by the current path. Edges between siblings
   // are rewritten to these ids; edges touching a macro placement are spliced through it.
-  const local = (id: string) => joinPath(prefix, id);
+  const local = (id: string) => prefix || !rootIdsArePaths ? joinPath(prefix, id) : id;
 
   // Index the macro definitions we will inline so we can resolve their boundary wiring.
   const macroNodes = nodes.filter((n) => isMacroInstance(n.type));
@@ -168,7 +176,7 @@ function expandInto(
       bindings.set(inst.id, { prefix: instPath, outputs: createRecord(), inputs: createRecord() });
       continue;
     }
-    const binding = expandInstance(def, inst, instPath, macros, active, outNodes, outEdges, instances, budget, depth + 1);
+    const binding = expandInstance(def, inst, instPath, macros, active, outNodes, outEdges, instances, budget, depth + 1, rootIdsArePaths);
     bindings.set(inst.id, binding);
     instances[instPath] = binding;
   }
@@ -185,7 +193,7 @@ function expandInto(
     // emitted, because the macro-out node is dropped and its value is read via the binding.
     if (boundary?.outIds.has(e.to.node)) {
       const src = resolveSource(e.from, macroIds, bindings, boundary, local);
-      boundary.binding.outputs[e.to.pin] = src ? `${src.node}:${src.pin}` : null;
+      boundary.binding.outputs[e.to.pin] = src;
       continue;
     }
 
@@ -211,11 +219,10 @@ function resolveSource(
   local: (id: string) => string,
 ): { node: string; pin: string } | null {
   if (macroIds.has(from.node)) {
-    const src = bindings.get(from.node)?.outputs[from.pin] ?? null;
-    return src ? splitPin(src) : null;
+    return bindings.get(from.node)?.outputs[from.pin] ?? null;
   }
   if (boundary?.inIds.has(from.node)) {
-    return boundary.passOut[`${from.node}:${from.pin}`] ?? null;
+    return boundary.passOut[pinKey(from.node, from.pin)] ?? null;
   }
   return { node: local(from.node), pin: from.pin };
 }
@@ -232,8 +239,7 @@ function resolveTarget(
   local: (id: string) => string,
 ): { node: string; pin: string } | null {
   if (macroIds.has(to.node)) {
-    const inPin = bindings.get(to.node)?.inputs[to.pin] ?? null;
-    return inPin ? splitPin(inPin) : null;
+    return bindings.get(to.node)?.inputs[to.pin] ?? null;
   }
   return { node: local(to.node), pin: to.pin };
 }
@@ -255,6 +261,7 @@ function expandInstance(
   instances: Record<string, InstanceBinding>,
   budget: ExpansionBudget,
   depth: number,
+  rootIdsArePaths: boolean,
 ): InstanceBinding {
   const nextActive = new Set(active);
   nextActive.add(def.id);
@@ -270,13 +277,13 @@ function expandInstance(
   // consumer reads from its output, so one source fans out unchanged. An unwired macro input
   // falls back to the literal the placement set on that pin, exactly like a primitive node's
   // editable default — so a literal supplied on a placement flows into its subgraph.
-  const passOut = createRecord<{ node: string; pin: string }>();
+  const passOut = createRecord<ExpandedEndpoint>();
   for (const b of boundaryIn) {
     for (const pin of b.outputs) {
-      const passId = joinPath(instPath, `in${PATH_SEP}${b.id}${PATH_SEP}${pin.id}`);
+      const passId = joinPath(joinPath(joinPath(instPath, "in"), b.id), pin.id);
       const passPin = "v";
-      binding.inputs[pin.id] = `${passId}:${passPin}`;
-      passOut[`${b.id}:${pin.id}`] = { node: passId, pin: passPin };
+      binding.inputs[pin.id] = { node: passId, pin: passPin };
+      passOut[pinKey(b.id, pin.id)] = { node: passId, pin: passPin };
       const literal = inst.values?.[pin.id];
       emitNode(outNodes, passthroughNode(passId, passPin, pin.type, literal), budget);
     }
@@ -293,7 +300,7 @@ function expandInstance(
     outIds: new Set(boundaryOut.map((n) => n.id)),
     binding,
   };
-  expandInto(inner, def.edges, macros, instPath, nextActive, outNodes, outEdges, instances, ctx, budget, depth);
+  expandInto(inner, def.edges, macros, instPath, nextActive, outNodes, outEdges, instances, ctx, budget, depth, rootIdsArePaths);
 
   // Ensure every declared macro output has an entry, even when nothing is wired to its boundary
   // input (the edge-rewrite pass only writes outputs that have an incoming edge).
@@ -325,10 +332,4 @@ function passthroughNode(
     outputs: [{ id: pin, label: "", type }],
     values: literal === undefined ? undefined : { [pin]: literal },
   };
-}
-
-/** Split a `${node}:${pin}` key back into its parts. */
-function splitPin(key: string): { node: string; pin: string } {
-  const i = key.lastIndexOf(":");
-  return { node: key.slice(0, i), pin: key.slice(i + 1) };
 }

@@ -18,6 +18,7 @@ import { cn } from "./cn.js";
 import { evaluate, type Memory, type ViewEdge } from "../../shared/engine/evaluate.js";
 import { createMemory } from "../../shared/engine/engine-support.js";
 import { createRecord } from "../../shared/record.js";
+import { pinKey } from "../../shared/identity.js";
 import { combineFlowGraphs, type RuntimeFlowGraph } from "../../shared/engine/flow-graphs.js";
 import { simulate } from "./example/sim.js";
 import { nodeGeom, type NodeData } from "../../shared/node-types.js";
@@ -700,7 +701,7 @@ export function App() {
 
   // Buffer recent values for the selected node's output pins so the inspector can draw a sparkline.
   const observedPins = useMemo(
-    () => (selectedDef ? selectedDef.outputs.map((p) => `${selectedDef.id}:${p.id}`) : []),
+    () => (selectedDef ? selectedDef.outputs.map((p) => pinKey(selectedDef.id, p.id)) : []),
     [selectedDef],
   );
   const valueHistory = useValueHistory(results, observedPins);

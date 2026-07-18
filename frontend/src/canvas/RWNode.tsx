@@ -11,6 +11,7 @@ import { portTone } from "../components/port-style.js";
 import { useResults } from "./results-context.js";
 import type { PinDef } from "../../../shared/node-types.js";
 import type { RWNodeType } from "./validation.js";
+import { pinKey } from "../../../shared/identity.js";
 
 const HEADER = 40;
 const PAD_T = 10;
@@ -61,7 +62,7 @@ export function RWNode({ id, data, selected }: NodeProps<RWNodeType>) {
       style={{ width: "max-content", minWidth: g.w, maxWidth: g.w + 160 }}
     >
       {def.inputs.map((p, i) => {
-        const tone = portTone(p, results.inputs[`${id}:${p.id}`]);
+        const tone = portTone(p, results.inputs[pinKey(id, p.id)]);
         return (
           <Handle
             key={`in-${p.id}`}
@@ -76,7 +77,7 @@ export function RWNode({ id, data, selected }: NodeProps<RWNodeType>) {
         );
       })}
       {def.outputs.map((p, i) => {
-        const tone = portTone(p, results.outputs[`${id}:${p.id}`]);
+        const tone = portTone(p, results.outputs[pinKey(id, p.id)]);
         return (
           <Handle
             key={`out-${p.id}`}
@@ -125,14 +126,14 @@ export function RWNode({ id, data, selected }: NodeProps<RWNodeType>) {
         <div className="flex justify-between items-start gap-2" style={{ height: g.rows * ROW }}>
           <div className="flex flex-col min-w-0">
             {def.inputs.map((p) => {
-              const editing = p.editable && !results.connected[`${id}:${p.id}`];
+              const editing = p.editable && !results.connected[pinKey(id, p.id)];
               return (
                 <div key={p.id} className="relative flex items-center h-7 pl-[15px] pr-1 gap-1.5">
                   {editing ? (
                     <>
                       <span className="text-[10.5px] text-rw-dim shrink-0">{p.label}</span>
                       <div className="w-[104px] flex justify-start">
-                        <PinValueEditor compact value={def.values?.[p.id]} type={results.inputs[`${id}:${p.id}`]?.type ?? p.type} onChange={(v) => onSetValue(id, p.id, v)} />
+                        <PinValueEditor compact value={def.values?.[p.id]} type={results.inputs[pinKey(id, p.id)]?.type ?? p.type} onChange={(v) => onSetValue(id, p.id, v)} />
                       </div>
                     </>
                   ) : p.ghost ? (
@@ -162,7 +163,7 @@ export function RWNode({ id, data, selected }: NodeProps<RWNodeType>) {
                   <>
                     <span className={cn("text-[11px] whitespace-nowrap", p.ghost ? "text-rw-error" : "text-rw-dim")}>{p.label}</span>
                     {p.id === "state" && <DeviceClassIcon deviceClass={deviceClass} />}
-                    <ValueChip value={results.outputs[`${id}:${p.id}`]} unit={p.unit} />
+                    <ValueChip value={results.outputs[pinKey(id, p.id)]} unit={p.unit} />
                   </>
                 )}
               </div>

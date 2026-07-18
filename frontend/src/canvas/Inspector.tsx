@@ -14,6 +14,7 @@ import { NodeValueEditors } from "./NodeValueEditors.js";
 import { Sparkline, type Sample } from "../components/Sparkline.js";
 import { isMacroInstance, macroHasMemory, type MacroMap } from "../../../shared/macros.js";
 import { cn } from "../cn.js";
+import { pinKey } from "../../../shared/identity.js";
 
 /** Sink node types whose target is a Home Assistant entity, and the picker domains they allow. */
 const SINK_ENTITY_DOMAINS: Record<string, string[] | undefined> = {
@@ -40,7 +41,7 @@ function diagnosticsFor(node: NodeData, results: EvalResults): Diagnostic[] {
   const out: Diagnostic[] = [];
   for (const p of node.outputs) {
     const label = p.label || p.id;
-    const v = results.outputs[`${node.id}:${p.id}`];
+    const v = results.outputs[pinKey(node.id, p.id)];
     if (p.ghost) out.push({ severity: "error", text: `Output '${label}' is a missing entity attribute.` });
     else if (v?.status === "error") out.push({ severity: "error", text: v.msg ? `Output '${label}' error: ${v.msg}` : `Output '${label}' is in an error state.` });
     else if (v?.status === "unavailable") out.push({ severity: "warn", text: `Output '${label}' is unavailable.` });
@@ -48,7 +49,7 @@ function diagnosticsFor(node: NodeData, results: EvalResults): Diagnostic[] {
   }
   for (const p of node.inputs) {
     const label = p.label || p.id;
-    const v = results.inputs[`${node.id}:${p.id}`];
+    const v = results.inputs[pinKey(node.id, p.id)];
     if (v?.status === "error") out.push({ severity: "error", text: v.msg ? `Input '${label}' error: ${v.msg}` : `Input '${label}' is in an error state.` });
     else if (v?.status === "unavailable") out.push({ severity: "warn", text: `Input '${label}' is unavailable.` });
     else if (v?.status === "stale") out.push({ severity: "warn", text: `Input '${label}' is stale; showing the last known value.` });
@@ -231,7 +232,7 @@ export function Inspector({
                     <span>{p.label || p.id}</span>
                     <TypeChip type={p.type} />
                   </div>
-                  <BigValue value={results.outputs[`${node.id}:${p.id}`]} unit={p.unit} deviceClass={p.id === "state" ? deviceClass : undefined} />
+                  <BigValue value={results.outputs[pinKey(node.id, p.id)]} unit={p.unit} deviceClass={p.id === "state" ? deviceClass : undefined} />
                 </div>
               ))}
             </div>
@@ -241,7 +242,7 @@ export function Inspector({
               {node.outputs.map((p) => (
                 <div key={p.id} className="rw-insp-spark-block">
                   {node.outputs.length > 1 && <span className="rw-pinlist-h">{p.label || p.id}</span>}
-                  <Sparkline history={history[`${node.id}:${p.id}`] ?? []} />
+                  <Sparkline history={history[pinKey(node.id, p.id)] ?? []} />
                 </div>
               ))}
             </div>

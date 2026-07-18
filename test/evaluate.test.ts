@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { evaluate, sinkCalls, type Memory, type ViewEdge } from "../shared/engine/evaluate.js";
 import type { NodeData } from "../shared/node-types.js";
 import type { EntityMap } from "../shared/entities.js";
+import { pinKey } from "../shared/identity.js";
 
 // The canonical graph: sun down AND present -> light red, else off.
 const nodes: NodeData[] = [
@@ -40,6 +41,21 @@ describe("evaluate (single engine) — canonical example", () => {
     expect(Object.hasOwn(memory, "__proto__")).toBe(true);
     expect((Object.prototype as { seeded?: boolean }).seeded).toBeUndefined();
     expect((Object.prototype as { prevVal?: unknown }).prevVal).toBeUndefined();
+  });
+
+  it("keeps delimiter-containing node and pin identities distinct", () => {
+    const directNodes: NodeData[] = [
+      { id: "a:b", type: "const-number", title: "", subtitle: "", icon: "const", x: 0, y: 0, values: { c: 1 }, inputs: [], outputs: [{ id: "c", label: "", type: "num" }] },
+      { id: "a", type: "const-number", title: "", subtitle: "", icon: "const", x: 0, y: 0, values: { "b:c": 2 }, inputs: [], outputs: [{ id: "b:c", label: "", type: "num" }] },
+    ];
+
+    const result = evaluate(directNodes, [], {}, {});
+
+    expect(pinKey("a:b", "c")).toBe("a%3Ab:c");
+    expect(pinKey("a", "b:c")).toBe("a:b%3Ac");
+    expect(pinKey("light", "on")).toBe("light:on");
+    expect(result.outputs[pinKey("a:b", "c")]?.v).toBe(1);
+    expect(result.outputs[pinKey("a", "b:c")]?.v).toBe(2);
   });
 
   it("turns the light red when the sun is down and someone is present", () => {

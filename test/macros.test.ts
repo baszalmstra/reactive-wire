@@ -111,7 +111,7 @@ describe("macro expansion", () => {
     // The placement is gone, replaced by a namespaced copy of the toggle and a passthrough.
     expect(flat.nodes.some((n) => n.type === "macro")).toBe(false);
     expect(flat.nodes.some((n) => n.id === "a/tg")).toBe(true);
-    expect(flat.instances["a"]?.outputs["state"]).toBe("a/tg:state");
+    expect(flat.instances["a"]?.outputs["state"]).toEqual({ node: "a/tg", pin: "state" });
   });
 });
 

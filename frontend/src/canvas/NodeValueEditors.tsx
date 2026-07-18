@@ -2,6 +2,7 @@ import type { NodeData } from "../../../shared/node-types.js";
 import type { EvalResults } from "../../../shared/results.js";
 import { cn } from "../cn.js";
 import { PinValueEditor, OpSelect } from "../components/Widgets.js";
+import { pinKey } from "../../../shared/identity.js";
 
 /**
  * Inline editors for a node's editable pins: constant outputs (always), input defaults
@@ -23,12 +24,12 @@ export function NodeValueEditors({
 }) {
   const id = node.id;
   const outs = node.outputs.filter((p) => p.editable);
-  const ins = node.inputs.filter((p) => p.editable && !results.connected[`${id}:${p.id}`]);
+  const ins = node.inputs.filter((p) => p.editable && !results.connected[pinKey(id, p.id)]);
   const isCompare = node.type === "compare";
   if (!isCompare && outs.length === 0 && ins.length === 0) return null;
 
   // For a generic pin, prefer the resolved type from the live value.
-  const typeOf = (pinId: string, fallback: string) => results.inputs[`${id}:${pinId}`]?.type ?? fallback;
+  const typeOf = (pinId: string, fallback: string) => results.inputs[pinKey(id, pinId)]?.type ?? fallback;
 
   return (
     <div className={cn("flex flex-col gap-[9px]", !inset && "mx-3 mt-[9px]")}>

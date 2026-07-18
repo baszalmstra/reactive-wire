@@ -8,11 +8,12 @@ import type { ValueType } from "../theme.js";
 import type { EntityMap } from "../entities.js";
 import { UN, ER, parseEntityValue, type RWValue } from "../value.js";
 import type { EvalResults, SinkAction, ServiceCall } from "../results.js";
-import { expandMacros } from "./expand.js";
+import { expandMacros, joinPath } from "./expand.js";
 import { isMacroInstance, type MacroMap } from "../macros.js";
 import { REGISTRY } from "./nodes/index.js";
 import type { EvalCtx, NodeDef, SinkCtx } from "./node-def.js";
 import { copyRecord, createRecord, ownValue, setOwn } from "../record.js";
+import { isDescendantPath, pinKey } from "../identity.js";
 import {
   ensureMemoryValue,
   inputHelperType,
@@ -84,7 +85,7 @@ function sinkCommandStatus(n: NodeData, results: EvalResults): SinkAction | null
   }
   const cmdPin = REGISTRY[n.type]?.sinkGatePin ?? null;
   if (!cmdPin) return null;
-  const cmd = results.inputs[`${n.id}:${cmdPin}`] ?? null;
+  const cmd = results.inputs[pinKey(n.id, cmdPin)] ?? null;
   if (!cmd || cmd.status === "unavailable") return { call: null, note: `${cmdPin} = unavailable — no call`, status: "unavailable" };
   if (cmd.status === "error") return { call: null, note: `${cmdPin} = error — no call`, status: "error" };
   return null;
@@ -92,7 +93,7 @@ function sinkCommandStatus(n: NodeData, results: EvalResults): SinkAction | null
 
 /** An input pin's ok value, or null if it is unset / non-ok. Used to read a desired dimension. */
 function okInput(results: EvalResults, nodeId: string, pinId: string): RWValue | null {
-  const v = ownValue(results.inputs, `${nodeId}:${pinId}`);
+  const v = ownValue(results.inputs, pinKey(nodeId, pinId));
   return v && v.status === "ok" ? v : null;
 }
 
@@ -154,14 +155,14 @@ export function evaluate(
   for (const n of nodes) setOwn(byId, n.id, n);
   const incoming = createRecord<{ node: string; pin: string }>();
   edges.forEach((e) => {
-    setOwn(incoming, `${e.to.node}:${e.to.pin}`, e.from);
+    setOwn(incoming, pinKey(e.to.node, e.to.pin), e.from);
   });
   const outCache = createRecord<RWValue>();
   const inCache = createRecord<RWValue | null>();
   const visiting = createRecord<boolean>();
 
   function outVal(nodeId: string, pinId: string): RWValue {
-    const key = `${nodeId}:${pinId}`;
+    const key = pinKey(nodeId, pinId);
     if (key in outCache) return outCache[key]!;
     if (visiting[key]) return ER("any", "cycle");
     visiting[key] = true;
@@ -173,7 +174,7 @@ export function evaluate(
   }
 
   function inVal(nodeId: string, pinId: string): RWValue | null {
-    const key = `${nodeId}:${pinId}`;
+    const key = pinKey(nodeId, pinId);
     if (key in inCache) return inCache[key]!;
     const src = incoming[key];
     const v = src ? outVal(src.node, src.pin) : null;
@@ -193,7 +194,7 @@ export function evaluate(
   // The shared type of a node's generic pins, taken from whichever group pin is connected.
   function resolveGroupType(n: NodeData, fallback: ValueType): ValueType {
     for (const pid of n.typeGroup ?? []) {
-      const src = incoming[`${n.id}:${pid}`];
+      const src = incoming[pinKey(n.id, pid)];
       if (src) {
         const v = outVal(src.node, src.pin);
         if (v.type !== "any") return v.type;
@@ -212,7 +213,7 @@ export function evaluate(
   function inEff(n: NodeData, pinId: string): RWValue | null {
     const pin = n.inputs.find((p) => p.id === pinId);
     if (!pin) return null;
-    if (incoming[`${n.id}:${pinId}`]) return inVal(n.id, pinId);
+    if (incoming[pinKey(n.id, pinId)]) return inVal(n.id, pinId);
     if (pin.editable) {
       // An unset editable default is "not provided" (null), not unavailable — so it neither
       // actuates nor counts against the node's health.
@@ -256,7 +257,7 @@ export function evaluate(
       n,
       pinId,
       cfg,
-      conn: n.inputs.filter((p) => incoming[`${n.id}:${p.id}`]),
+      conn: n.inputs.filter((p) => incoming[pinKey(n.id, p.id)]),
       inVal: (pid) => inVal(n.id, pid),
       inEff: (pid) => inEff(n, pid),
       resolveType: (declared, fallbackPins) => resolveType(n, declared, fallbackPins),
@@ -274,10 +275,11 @@ export function evaluate(
   const inputs = createRecord<RWValue | null>();
   const connected = createRecord<boolean>();
   nodes.forEach((n) => {
-    n.outputs.forEach((p) => { outputs[`${n.id}:${p.id}`] = outVal(n.id, p.id); });
+    n.outputs.forEach((p) => { outputs[pinKey(n.id, p.id)] = outVal(n.id, p.id); });
     n.inputs.forEach((p) => {
-      inputs[`${n.id}:${p.id}`] = inEff(n, p.id);
-      connected[`${n.id}:${p.id}`] = !!incoming[`${n.id}:${p.id}`];
+      const key = pinKey(n.id, p.id);
+      inputs[key] = inEff(n, p.id);
+      connected[key] = !!incoming[key];
     });
   });
 
@@ -285,12 +287,12 @@ export function evaluate(
   nodes.forEach((n) => {
     let h: "ok" | "warn" | "error" = "ok";
     n.outputs.forEach((p) => {
-      const v = outputs[`${n.id}:${p.id}`];
+      const v = outputs[pinKey(n.id, p.id)];
       if (p.ghost || (v && v.status === "error")) h = "error";
       else if (h !== "error" && v && (v.status === "unavailable" || v.status === "stale")) h = "warn";
     });
     n.inputs.forEach((p) => {
-      const v = inputs[`${n.id}:${p.id}`];
+      const v = inputs[pinKey(n.id, p.id)];
       if (v && v.status === "error") h = "error";
       else if (h === "ok" && v && (v.status === "unavailable" || v.status === "stale")) h = "warn";
     });
@@ -349,25 +351,41 @@ function evaluateWithMacros(
 
   // Whether an input pin has an incoming edge, taken from the original graph (the placement's
   // own wiring), since the flat graph routes inputs through passthrough nodes.
-  const incoming = new Set(edges.map((e) => `${e.to.node}:${e.to.pin}`));
+  const incoming = new Set(edges.map((e) => pinKey(e.to.node, e.to.pin)));
 
   for (const n of nodes) {
-    if (!isMacroInstance(n.type)) continue;
-    const binding = flat.instances[n.id];
+    const expandedId = joinPath("", n.id);
+    if (!isMacroInstance(n.type)) {
+      // Expansion encodes every top-level path segment. Project ordinary nodes back onto their raw
+      // public ids too, so raw `a/b` cannot alias the inner node `b` of placement `a`.
+      n.outputs.forEach((p) => {
+        outputs[pinKey(n.id, p.id)] = inner.outputs[pinKey(expandedId, p.id)] ?? UN(p.type);
+      });
+      n.inputs.forEach((p) => {
+        const publicKey = pinKey(n.id, p.id);
+        inputs[publicKey] = inner.inputs[pinKey(expandedId, p.id)] ?? null;
+        connected[publicKey] = incoming.has(publicKey);
+      });
+      health[n.id] = inner.health[expandedId] ?? "warn";
+      if (inner.actions[expandedId]) actions[n.id] = inner.actions[expandedId]!;
+      if (expandedId in inner.sinks) sinks[n.id] = inner.sinks[expandedId] ?? null;
+      continue;
+    }
+    const binding = flat.instances[expandedId];
     n.outputs.forEach((p) => {
       const src = binding?.outputs[p.id] ?? null;
-      outputs[`${n.id}:${p.id}`] = src ? inner.outputs[src] ?? UN(p.type) : UN(p.type);
+      outputs[pinKey(n.id, p.id)] = src ? inner.outputs[pinKey(src.node, src.pin)] ?? UN(p.type) : UN(p.type);
     });
     n.inputs.forEach((p) => {
       const pass = binding?.inputs[p.id] ?? null;
-      inputs[`${n.id}:${p.id}`] = pass ? inner.inputs[pass] ?? null : null;
-      connected[`${n.id}:${p.id}`] = incoming.has(`${n.id}:${p.id}`);
+      const publicKey = pinKey(n.id, p.id);
+      inputs[publicKey] = pass ? inner.inputs[pinKey(pass.node, pass.pin)] ?? null : null;
+      connected[publicKey] = incoming.has(publicKey);
     });
     // The placement's health is the worst health of any node inside its expansion.
-    const prefix = `${n.id}/`;
     let h: "ok" | "warn" | "error" = "ok";
     for (const id in inner.health) {
-      if (id !== n.id && !id.startsWith(prefix)) continue;
+      if (!isDescendantPath(expandedId, id)) continue;
       const ih = inner.health[id]!;
       if (ih === "error") h = "error";
       else if (ih === "warn" && h === "ok") h = "warn";

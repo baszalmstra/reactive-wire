@@ -6,6 +6,7 @@ import type { Health, NodeData } from "../../shared/node-types.js";
 import type { EntityMap } from "../../shared/entities.js";
 import type { EvalResults, ServiceCall } from "../../shared/results.js";
 import type { RWValue } from "../../shared/value.js";
+import { pinKey } from "../../shared/identity.js";
 import { type EntityFeed, type HAClient } from "../ha/client.js";
 import { log } from "./log.js";
 import { Poller, type FetchFn } from "./poller.js";
@@ -188,7 +189,7 @@ export class Deployer {
    * ids. When `actuate` is true sinks call services; otherwise they dry-run.
    */
   deploy(nodes: NodeData[], edges: ViewEdge[], actuate: boolean, macros: MacroMap = {}): void {
-    const flat = expandMacros(nodes, edges, macros);
+    const flat = expandMacros(nodes, edges, macros, undefined, true);
     this.generation += 1;
     this.inFlight.clear();
     this.lastNonReconciling.clear();
@@ -235,7 +236,7 @@ export class Deployer {
       for (const n of graph.nodes) {
         const outputs: Record<string, DebugValue> = {};
         for (const p of n.outputs) {
-          const v = results.outputs[`${n.id}:${p.id}`];
+          const v = results.outputs[pinKey(n.id, p.id)];
           if (v) outputs[p.id] = debugValue(v);
         }
         const failure = isSink(n.type) ? this.callFailures.get(n.id) : undefined;

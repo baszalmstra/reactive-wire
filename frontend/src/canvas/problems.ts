@@ -1,5 +1,6 @@
 import type { NodeData } from "../../../shared/node-types.js";
 import type { EvalResults } from "../../../shared/results.js";
+import { pinKey } from "../../../shared/identity.js";
 
 export type Severity = "error" | "warn";
 export type Scope = "structural" | "runtime";
@@ -28,7 +29,7 @@ export function deriveProblems(
 
   for (const n of nodes) {
     for (const p of n.outputs) {
-      const v = results.outputs[`${n.id}:${p.id}`];
+      const v = results.outputs[pinKey(n.id, p.id)];
       if (p.ghost) {
         out.push({
           id: `g-${n.id}-${p.id}`,
@@ -69,7 +70,7 @@ export function deriveProblems(
     }
 
     if (n.type === "select") {
-      const unwired = ["cond", "a", "b"].filter((pid) => !results.connected[`${n.id}:${pid}`]);
+      const unwired = ["cond", "a", "b"].filter((pid) => !results.connected[pinKey(n.id, pid)]);
       if (unwired.length) {
         // The output type is fixed by either branch, so it is only still 'any' when neither a nor b is wired.
         const typeUnresolved = !results.connected[`${n.id}:a`] && !results.connected[`${n.id}:b`];
@@ -88,7 +89,7 @@ export function deriveProblems(
 
   for (const n of nodes) {
     for (const p of n.inputs) {
-      const v = results.inputs[`${n.id}:${p.id}`];
+      const v = results.inputs[pinKey(n.id, p.id)];
       if (v && v.status === "error") {
         out.push({
           id: `ei-${n.id}-${p.id}`,

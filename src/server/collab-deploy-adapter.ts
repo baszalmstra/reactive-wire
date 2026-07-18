@@ -6,6 +6,7 @@ import type { CollabEdge, CollabNode, EditorDocumentSnapshot } from "../../share
 import { currentNodeTemplates, reconcileDefs } from "../../shared/engine/reconcile-defs.js";
 import { sanitizeDeployRequest, type DeployRequest } from "./deploy-validation.js";
 import { log } from "./log.js";
+import { pinKey } from "../../shared/identity.js";
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);
@@ -35,11 +36,11 @@ function graphFromCollabFlow(flow: EditorDocumentSnapshot["flows"][number]): Run
   // as a ghost (kept while wired) and an added pin appears, rather than meeting the engine stale.
   const wired = new Set<string>();
   for (const edge of edges) {
-    wired.add(`${edge.from.node}\0${edge.from.pin}`);
-    wired.add(`${edge.to.node}\0${edge.to.pin}`);
+    wired.add(pinKey(edge.from.node, edge.from.pin));
+    wired.add(pinKey(edge.to.node, edge.to.pin));
   }
   const nodes = reconcileDefs(rawNodes, currentNodeTemplates(), {
-    isWired: (nodeId, pinId) => wired.has(`${nodeId}\0${pinId}`),
+    isWired: (nodeId, pinId) => wired.has(pinKey(nodeId, pinId)),
   });
   return { flowId: flow.id, nodes, edges };
 }

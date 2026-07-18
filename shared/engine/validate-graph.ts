@@ -2,6 +2,7 @@ import type { MacroMap } from "../macros.js";
 import type { NodeData, PinDef } from "../node-types.js";
 import type { ValueType } from "../theme.js";
 import { ownValue } from "../record.js";
+import { pinKey } from "../identity.js";
 import type { ViewEdge } from "./evaluate.js";
 import { REGISTRY } from "./nodes/index.js";
 
@@ -201,7 +202,13 @@ export function validateReachableMacros(nodes: NodeData[], macros: MacroMap): Gr
 
 /** Validate a fully expanded graph before it may reach evaluation or actuation. */
 export function validateExpandedGraph(nodes: NodeData[], edges: ViewEdge[]): GraphSemanticValidation {
-  const byId = new Map(nodes.map((node) => [node.id, node]));
+  const byId = new Map<string, NodeData>();
+  for (const node of nodes) {
+    if (byId.has(node.id)) {
+      return error({ code: "invalid-node-shape", nodeId: node.id, message: `Expanded graph has duplicate node id ${JSON.stringify(node.id)}` });
+    }
+    byId.set(node.id, node);
+  }
   for (const node of nodes) {
     const shape = validateNodeShape(node);
     if (!shape.ok) return shape;
@@ -220,7 +227,7 @@ export function validateExpandedGraph(nodes: NodeData[], edges: ViewEdge[]): Gra
     if (!source || !target || !sourcePin || !targetPin) {
       return error({ code: "invalid-edge", edgeId: edge.id, message: `Edge ${JSON.stringify(edge.id)} does not connect an existing output to an existing input` });
     }
-    const targetKey = `${edge.to.node}\0${edge.to.pin}`;
+    const targetKey = pinKey(edge.to.node, edge.to.pin);
     if (incoming.has(targetKey)) {
       return error({ code: "duplicate-input-source", edgeId: edge.id, nodeId: edge.to.node, message: `Input ${JSON.stringify(`${edge.to.node}:${edge.to.pin}`)} has more than one source` });
     }

@@ -184,7 +184,7 @@ export function sanitizeDeployRequest(raw: unknown): DeployValidation {
     if (!macroValidation.ok) throw new Error(macroValidation.error.message);
     // Validate the fully inlined resource footprint and semantics before the graph reaches the
     // always-on runtime. Expansion is bounded, then the canonical flat graph must be a typed DAG.
-    const flat = expandMacros(nodes, edges, macros ?? {});
+    const flat = expandMacros(nodes, edges, macros ?? {}, undefined, true);
     const semanticValidation = validateExpandedGraph(flat.nodes, flat.edges);
     if (!semanticValidation.ok) throw new Error(semanticValidation.error.message);
     return { ok: true, graph };

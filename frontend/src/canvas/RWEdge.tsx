@@ -4,6 +4,7 @@ import { TYPE_VAR, type ValueType } from "../../../shared/theme.js";
 import { UN, formatValue, type RWValue, type Status } from "../../../shared/value.js";
 import type { EvalResults } from "../../../shared/results.js";
 import type { RWNodeType } from "./validation.js";
+import { pinKey } from "../../../shared/identity.js";
 
 export type RWEdgeData = Record<string, unknown> & {
   valueType?: ValueType;
@@ -21,7 +22,7 @@ function sourcePinType(nodes: RWNodeType[], edge: Edge): ValueType {
 export function withRWEdgeData(edges: Edge[], nodes: RWNodeType[], results: EvalResults): RWEdgeType[] {
   return edges.map((edge) => {
     const fallbackType = sourcePinType(nodes, edge);
-    const value = edge.sourceHandle ? results.outputs[`${edge.source}:${edge.sourceHandle}`] ?? null : null;
+    const value = edge.sourceHandle ? results.outputs[pinKey(edge.source, edge.sourceHandle)] ?? null : null;
     const valueType = value?.type ?? fallbackType;
     return {
       ...edge,

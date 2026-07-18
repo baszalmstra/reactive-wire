@@ -1,6 +1,7 @@
 import type { NodeData, PinDef } from "../../../shared/node-types.js";
 import type { ViewEdge } from "../../../shared/engine/evaluate.js";
 import { MACRO_IN, MACRO_OUT, makeMacroInstance, macroHasMemory, newMacroId, type MacroDef, type MacroMap } from "../../../shared/macros.js";
+import { pinKey } from "../../../shared/identity.js";
 
 export interface GroupResult {
   /** The new macro definition built from the selection. */
@@ -57,7 +58,7 @@ export function groupSelection(
   let inSeq = 0;
   let inY = minY(selected);
   for (const e of incoming) {
-    const key = `${e.from.node}:${e.from.pin}`;
+    const key = pinKey(e.from.node, e.from.pin);
     let pinId = inputKeyToPin.get(key);
     if (!pinId) {
       pinId = `in${inSeq++}`;
@@ -85,7 +86,7 @@ export function groupSelection(
   let outSeq = 0;
   let outY = minY(selected);
   for (const e of outgoing) {
-    const key = `${e.from.node}:${e.from.pin}`;
+    const key = pinKey(e.from.node, e.from.pin);
     let pinId = outputKeyToPin.get(key);
     if (!pinId) {
       pinId = `out${outSeq++}`;
@@ -122,15 +123,15 @@ export function groupSelection(
   // outputs now feed the external consumers. Internal and crossing edges are removed.
   const newEdges: ViewEdge[] = [];
   for (const e of incoming) {
-    const pinId = inputKeyToPin.get(`${e.from.node}:${e.from.pin}`)!;
+    const pinId = inputKeyToPin.get(pinKey(e.from.node, e.from.pin))!;
     newEdges.push({ id: `ng-${e.id}`, from: { node: e.from.node, pin: e.from.pin }, to: { node: instance.id, pin: pinId } });
   }
   for (const e of outgoing) {
-    const pinId = outputKeyToPin.get(`${e.from.node}:${e.from.pin}`)!;
+    const pinId = outputKeyToPin.get(pinKey(e.from.node, e.from.pin))!;
     newEdges.push({ id: `ng-${e.id}`, from: { node: instance.id, pin: pinId }, to: { node: e.to.node, pin: e.to.pin } });
   }
   // Drop duplicate parent edges that map to the same (placement-output -> consumer) pair.
-  const dedup = new Map(newEdges.map((e) => [`${e.from.node}:${e.from.pin}->${e.to.node}:${e.to.pin}`, e]));
+  const dedup = new Map(newEdges.map((e) => [JSON.stringify([e.from.node, e.from.pin, e.to.node, e.to.pin]), e]));
 
   return {
     def: draft,

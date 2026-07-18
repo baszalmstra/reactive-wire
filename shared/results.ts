@@ -24,13 +24,13 @@ export interface ServiceCall {
   target?: { entity_id: string };
 }
 
-/** Resolved runtime values for every pin, keyed `${nodeId}:${pinId}`, plus per-node health. */
+/** Resolved runtime values for every pin, keyed with `pinKey(nodeId, pinId)`, plus per-node health. */
 export interface EvalResults {
   outputs: Record<string, RWValue>;
   inputs: Record<string, RWValue | null>;
   health: Record<string, Health>;
   actions: Record<string, SinkAction>;
-  /** Whether each input pin has an incoming edge, keyed `${nodeId}:${pinId}`. */
+  /** Whether each input pin has an incoming edge, keyed with `pinKey(nodeId, pinId)`. */
   connected: Record<string, boolean>;
   /**
    * The service call each sink node wants to make right now, keyed by node id; null when the

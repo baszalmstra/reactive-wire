@@ -1,5 +1,6 @@
 import { TYPE_VAR, TYPE_LABEL, type ValueType } from "../../../shared/theme.js";
 import { Icon } from "../components/Icon.js";
+import { pinKey } from "../../../shared/identity.js";
 
 /** One editable boundary pin, surfaced from a macro-in / macro-out boundary node. */
 export interface BoundaryPin {
@@ -95,7 +96,7 @@ export function MacroBoundaryPanel({
           {inputs.length === 0 && <p className="text-[11px] text-rw-faint italic">No inputs yet.</p>}
           {inputs.map((p) => (
             <PinRow
-              key={`${p.nodeId}:${p.pinId}`}
+              key={pinKey(p.nodeId, p.pinId)}
               pin={p}
               onRename={(label) => onRename(p.nodeId, p.pinId, label)}
               onRetype={(type) => onRetype(p.nodeId, p.pinId, type)}
@@ -118,7 +119,7 @@ export function MacroBoundaryPanel({
           {outputs.length === 0 && <p className="text-[11px] text-rw-faint italic">No outputs yet.</p>}
           {outputs.map((p) => (
             <PinRow
-              key={`${p.nodeId}:${p.pinId}`}
+              key={pinKey(p.nodeId, p.pinId)}
               pin={p}
               onRename={(label) => onRename(p.nodeId, p.pinId, label)}
               onRetype={(type) => onRetype(p.nodeId, p.pinId, type)}

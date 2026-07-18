@@ -15,7 +15,7 @@ export interface RuntimeGraph {
 
 /** The runtime node id for a node that belongs to one editor flow. */
 export function flowRuntimeNodeId(flowId: string, nodeId: string): string {
-  return joinPath(flowId, nodeId);
+  return joinPath(joinPath("", flowId), nodeId);
 }
 
 /**
