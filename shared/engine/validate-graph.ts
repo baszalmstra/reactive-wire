@@ -127,6 +127,8 @@ function validateNodeShape(node: RuntimeNode): GraphSemanticValidation {
       ["color", "color"],
       ["temperature", "num"],
       ["brightness", "num"],
+      ["transition_on", "duration"],
+      ["transition_off", "duration"],
     ]);
     if (outputs.size) return error({ code: "invalid-node-shape", nodeId: node.id, message: `Light sink ${JSON.stringify(node.id)} cannot have outputs` });
     for (const pin of inputs.values()) {

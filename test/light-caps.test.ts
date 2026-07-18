@@ -11,7 +11,14 @@ describe("lightCaps", () => {
   });
 
   it("treats an onoff-only light as supporting no dimensions", () => {
-    expect(lightCaps({ supported_color_modes: ["onoff"] })).toEqual({ brightness: false, rgb: false, colorTemp: false });
+    expect(lightCaps({ supported_color_modes: ["onoff"] })).toEqual({ brightness: false, rgb: false, colorTemp: false, transition: false });
+  });
+
+  it("reads transition support from the Home Assistant feature bit alongside modern color modes", () => {
+    expect(lightCaps({ supported_color_modes: ["rgb"], supported_features: 32 }))
+      .toMatchObject({ brightness: true, rgb: true, colorTemp: false, transition: true });
+    expect(lightCaps({ supported_color_modes: ["rgb"], supported_features: 0 }))
+      .toMatchObject({ transition: false });
   });
 
   it("carries the kelvin bounds when the light reports them", () => {
@@ -37,9 +44,11 @@ describe("lightSinkPins", () => {
   const ids = (pins: PinDef[]) => pins.map((p) => p.id);
 
   it("exposes only the supported dimensions", () => {
-    expect(ids(lightSinkPins({ brightness: true, rgb: true, colorTemp: true }))).toEqual(["on", "color", "temperature", "brightness"]);
-    expect(ids(lightSinkPins({ brightness: true, rgb: false, colorTemp: true }))).toEqual(["on", "temperature", "brightness"]);
-    expect(ids(lightSinkPins({ brightness: false, rgb: false, colorTemp: false }))).toEqual(["on"]);
+    expect(ids(lightSinkPins({ brightness: true, rgb: true, colorTemp: true, transition: true }))).toEqual([
+      "on", "color", "temperature", "brightness", "transition_on", "transition_off",
+    ]);
+    expect(ids(lightSinkPins({ brightness: true, rgb: false, colorTemp: true, transition: false }))).toEqual(["on", "temperature", "brightness"]);
+    expect(ids(lightSinkPins({ brightness: false, rgb: false, colorTemp: false, transition: false }))).toEqual(["on"]);
   });
 
   it("keeps a permissive color + brightness default when capabilities are unknown", () => {
@@ -55,20 +64,42 @@ describe("reconcileLightSinkPins", () => {
   ];
 
   it("adds newly supported pins and removes unsupported, unwired ones", () => {
-    const next = reconcileLightSinkPins(stored, { brightness: true, rgb: false, colorTemp: true }, () => false);
-    expect(next.map((p) => p.id)).toEqual(["on", "temperature", "brightness"]);
+    const next = reconcileLightSinkPins(stored, { brightness: true, rgb: false, colorTemp: true, transition: true }, () => false);
+    expect(next.map((p) => p.id)).toEqual(["on", "temperature", "brightness", "transition_on", "transition_off"]);
+    expect(next.find((p) => p.id === "transition_on")).toMatchObject({ type: "duration", editable: true });
   });
 
   it("ghosts an unsupported pin that still carries a wire", () => {
-    const next = reconcileLightSinkPins(stored, { brightness: true, rgb: false, colorTemp: false }, (id) => id === "color");
+    const next = reconcileLightSinkPins(stored, { brightness: true, rgb: false, colorTemp: false, transition: false }, (id) => id === "color");
     const color = next.find((p) => p.id === "color");
     expect(color).toMatchObject({ ghost: true, missing: "color" });
     expect(next.map((p) => p.id)).toEqual(["on", "brightness", "color"]);
   });
 
+  it("returns the stored list by identity when capabilities have not changed", () => {
+    const shaped = lightSinkPins({ brightness: true, rgb: true, colorTemp: false, transition: true });
+    expect(reconcileLightSinkPins(shaped, { brightness: true, rgb: true, colorTemp: false, transition: true }, () => false)).toBe(shaped);
+  });
+
+  it("ghosts wired transition pins when support disappears", () => {
+    const withTransitions = lightSinkPins({ brightness: true, rgb: true, colorTemp: false, transition: true });
+    const next = reconcileLightSinkPins(
+      withTransitions,
+      { brightness: true, rgb: true, colorTemp: false, transition: false },
+      (id) => id === "transition_on",
+    );
+    expect(next.find((p) => p.id === "transition_on")).toMatchObject({ ghost: true, missing: "on transition" });
+    expect(next.some((p) => p.id === "transition_off")).toBe(false);
+    expect(reconcileLightSinkPins(
+      next,
+      { brightness: true, rgb: true, colorTemp: false, transition: false },
+      (id) => id === "transition_on",
+    )).toBe(next);
+  });
+
   it("clears a stale ghost when the light supports the pin again", () => {
     const ghosted: PinDef[] = [...stored, { id: "temperature", label: "temperature", type: "num", ghost: true, missing: "temperature" }];
-    const next = reconcileLightSinkPins(ghosted, { brightness: true, rgb: true, colorTemp: true }, () => true);
+    const next = reconcileLightSinkPins(ghosted, { brightness: true, rgb: true, colorTemp: true, transition: true }, () => true);
     const temp = next.find((p) => p.id === "temperature");
     expect(temp?.ghost).toBeUndefined();
   });

@@ -4,7 +4,7 @@ import { base } from "./template-base.js";
 
 export const sinkLight: NodeDef<"sink-light"> = {
   type: "sink-light",
-  description: "Drives a light to the desired on/color/temperature/brightness, acting only on a change. Its inputs follow the target light's supported capabilities.",
+  description: "Drives a light to the desired on/color/temperature/brightness, acting only on a change. Lights that support transitions gain separate optional, wireable on/off duration inputs.",
   sinkGatePin: "on",
   template: {
     type: "sink-light", category: "Sinks", label: "Light", icon: "bulb",
@@ -30,5 +30,7 @@ export const sinkLight: NodeDef<"sink-light"> = {
     color: okInput("color"),
     temperature: okInput("temperature"),
     brightness: okInput("brightness"),
+    transitionOn: okInput("transition_on"),
+    transitionOff: okInput("transition_off"),
   }, entities)),
 };

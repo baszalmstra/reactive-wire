@@ -59,9 +59,9 @@ function LightNode({
   );
 }
 
-const FULL: LightCaps = { brightness: true, rgb: true, colorTemp: true };
-const TUNABLE: LightCaps = { brightness: true, rgb: false, colorTemp: true };
-const ONOFF: LightCaps = { brightness: false, rgb: false, colorTemp: false };
+const FULL: LightCaps = { brightness: true, rgb: true, colorTemp: true, transition: true };
+const TUNABLE: LightCaps = { brightness: true, rgb: false, colorTemp: true, transition: true };
+const ONOFF: LightCaps = { brightness: false, rgb: false, colorTemp: false, transition: false };
 
 const meta: Meta<typeof LightNode> = {
   title: "Nodes/LightSink",

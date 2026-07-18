@@ -252,6 +252,26 @@ export function App() {
     from: { node: e.source, pin: e.sourceHandle ?? "" },
     to: { node: e.target, pin: e.targetHandle ?? "" },
   })), [edges]);
+
+  // Capability-shaped light inputs also reconcile when the entity feed first arrives or changes,
+  // so existing sinks gain transition pins without requiring the user to re-pick their target.
+  useEffect(() => {
+    setNodes((current) => {
+      let changed = false;
+      const next = current.map((node) => {
+        if (!isRWNode(node) || node.data.def.type !== "sink-light") return node;
+        const def = node.data.def;
+        const caps = lightCaps(entities[String(def.config?.entity_id ?? "")]?.attributes);
+        const isWired = (pinId: string) => edges.some((edge) => edge.target === node.id && edge.targetHandle === pinId);
+        const inputs = reconcileLightSinkPins(def.inputs, caps, isWired);
+        if (inputs === def.inputs) return node;
+        changed = true;
+        return { ...node, data: { def: { ...def, inputs } } };
+      });
+      return changed ? next : current;
+    });
+  }, [edges, entities, setNodes]);
+
   const nodeDefs = useMemo(() => rwNodes.map((n) => n.data.def), [rwNodes]);
   const [liveResults, setLiveResults] = useState<EvalResults>(() => createEmptyResults());
   const sinkTriggerRecords = useRef<Record<string, SinkTriggerRecord>>({});

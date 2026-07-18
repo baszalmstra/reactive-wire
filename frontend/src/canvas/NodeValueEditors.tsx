@@ -42,14 +42,24 @@ export function NodeValueEditors({
       {outs.map((p) => (
         <PinValueEditor key={`o-${p.id}`} value={node.values?.[p.id]} type={p.type} onChange={(v) => onSetValue(id, p.id, v)} />
       ))}
-      {ins.map((p) => (
-        <div key={`i-${p.id}`} className="flex items-center gap-2">
-          <span className="text-[10.5px] text-rw-dim w-12 shrink-0">{p.label || p.id}</span>
-          <div className="flex-1">
-            <PinValueEditor value={node.values?.[p.id]} type={typeOf(p.id, p.type)} onChange={(v) => onSetValue(id, p.id, v)} />
+      {ins.map((p) => {
+        const lightTransition = node.type === "sink-light" && (p.id === "transition_on" || p.id === "transition_off");
+        return (
+          <div key={`i-${p.id}`} className="flex items-center gap-2">
+            <span className="text-[10.5px] text-rw-dim w-20 shrink-0">{p.label || p.id}</span>
+            <div className="flex-1">
+              <PinValueEditor
+                value={node.values?.[p.id]}
+                type={typeOf(p.id, p.type)}
+                ariaLabel={p.label || p.id}
+                defaultDurationUnit={lightTransition ? "sec" : undefined}
+                minDurationSeconds={lightTransition ? 0 : undefined}
+                onChange={(v) => onSetValue(id, p.id, v)}
+              />
+            </div>
           </div>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
