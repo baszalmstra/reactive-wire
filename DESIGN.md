@@ -412,8 +412,11 @@ the sinks `sink-light`/`sink-call`/`sink-climate`/`sink-cover`/`sink-input`/`sin
   and sink retries. Graphs without clock-dependent nodes have no clock timer. Debug state exposes
   transaction cause and evaluated-node counts. Each sink owns a serialized delivery channel:
   reconciling/command work coalesces to the latest desired call, while transient work uses a
-  bounded FIFO with visible overflow state. Thus Home Assistant never receives overlapping calls
-  from one sink. Delivery tracks observed, enqueued, attempted, and acknowledged states separately;
+  bounded FIFO with visible overflow state. Physical lanes survive redeployment, so a replacement
+  call for the same sink waits for an already accepted HA call; an unchanged transient sink keeps
+  its accepted FIFO, while removing/changing a sink discards queued work but lets its active call
+  settle. Thus Home Assistant never receives overlapping calls from one sink. Delivery tracks
+  observed, enqueued, attempted, and acknowledged states separately;
   failures retry on a capped exponential timer rather than incidental graph ticks. Retries pause
   while HA is not ready, reconciling work is revalidated before replay, and transient work remains
   queued until acknowledgement (at-least-once within a running process). Preview remains dry-run

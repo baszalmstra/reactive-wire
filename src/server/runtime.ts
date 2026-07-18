@@ -100,6 +100,7 @@ type SinkMode = "reconciling" | "command" | "transient";
 interface Delivery {
   generation: number;
   connectionEpoch: number;
+  mode: SinkMode;
   sequence: number;
   key: string;
   failureKey: string;
@@ -112,6 +113,8 @@ interface Delivery {
 interface SinkChannel {
   nodeId: string;
   mode: SinkMode;
+  /** Removed sinks retain their physical lane only until an accepted call settles. */
+  retired: boolean;
   active: Delivery | null;
   /** Reconciling/command sinks keep only the most recent desired work while active. */
   pendingLatest: Delivery | null;
@@ -269,7 +272,7 @@ export class Deployer {
     if (this.stopped) throw new Error("Deployer has been stopped");
     const compiled = compileGraph(nodes, edges, macros);
     this.generation += 1;
-    this.resetChannels();
+    this.prepareChannelsForDeploy(compiled);
     this.lastNonReconciling.clear();
     this.lastReconcilingAttempt.clear();
     this.callFailures.clear();
@@ -291,6 +294,10 @@ export class Deployer {
     this.lastEvaluatedNodeCount = 0;
     this.lastResults = null;
     this.run({ kind: "deploy" });
+    for (const channel of this.channels.values()) {
+      if (channel.retryDelivery && !channel.retryTimer) this.scheduleRetry(channel, 0);
+      this.pumpChannel(channel);
+    }
   }
 
   /**
@@ -394,6 +401,43 @@ export class Deployer {
     this.channels.clear();
   }
 
+  /**
+   * Preserve the physical lane for an accepted service call across graph generations. An unchanged
+   * transient sink also keeps its accepted FIFO; removed/changed sinks finish only the call already
+   * handed to HA and discard work that had not started.
+   */
+  private prepareChannelsForDeploy(graph: CompiledGraph): void {
+    const nextModes = new Map<string, SinkMode>();
+    for (const nodeId of graph.sinkIds) {
+      const type = graph.nodeById.get(nodeId)?.type ?? "";
+      nextModes.set(nodeId, isTransientSink(type) ? "transient" : type === "sink-call" ? "command" : "reconciling");
+    }
+    for (const [nodeId, channel] of this.channels) {
+      const nextMode = nextModes.get(nodeId);
+      const unchangedTransient = channel.mode === "transient" && nextMode === "transient";
+      if (channel.retryTimer) clearTimeout(channel.retryTimer);
+      channel.retryTimer = null;
+      channel.nextRetryAt = null;
+      if (!unchangedTransient) {
+        channel.queue = [];
+        channel.pendingLatest = null;
+        channel.retryDelivery = null;
+      }
+      if (!nextMode) {
+        channel.retired = true;
+        if (!channel.active) this.channels.delete(nodeId);
+        continue;
+      }
+      channel.retired = false;
+      channel.mode = nextMode;
+      // Accepted transient entries are generation-independent physical work once enqueued.
+      if (unchangedTransient) {
+        for (const delivery of channel.queue) delivery.generation = this.generation;
+        if (channel.retryDelivery) channel.retryDelivery.generation = this.generation;
+      }
+    }
+  }
+
   private recordTriggered(nodeId: string, call: ServiceCall): void {
     this.lastTriggeredAt.set(nodeId, Date.now());
     this.lastTriggeredCall.set(nodeId, call);
@@ -483,7 +527,7 @@ export class Deployer {
     let channel = this.channels.get(nodeId);
     if (!channel) {
       channel = {
-        nodeId, mode, active: null, pendingLatest: null, queue: [], nextSequence: 1,
+        nodeId, mode, retired: false, active: null, pendingLatest: null, queue: [], nextSequence: 1,
         overflowed: false, observedKey: null, enqueuedKey: null, attemptedKey: null,
         acknowledgedKey: null, failures: 0, retryDelivery: null, retryTimer: null, nextRetryAt: null,
       };
@@ -515,6 +559,7 @@ export class Deployer {
     const delivery: Delivery = {
       generation: this.generation,
       connectionEpoch: status.epoch,
+      mode,
       sequence: channel.nextSequence++,
       key,
       failureKey,
@@ -543,17 +588,16 @@ export class Deployer {
   }
 
   private pumpChannel(channel: SinkChannel): void {
-    if (this.stopped || channel.active || channel.retryDelivery || this.channels.get(channel.nodeId) !== channel) return;
+    if (this.stopped || channel.retired || channel.active || channel.retryDelivery || this.channels.get(channel.nodeId) !== channel) return;
     if (this.ha.connectionStatus().phase !== "ready") return;
     const delivery = channel.mode === "transient" ? channel.queue.shift() ?? null : channel.pendingLatest;
     if (!delivery) return;
     if (channel.mode !== "transient") channel.pendingLatest = null;
-    if (delivery.generation !== this.generation) return;
     delivery.connectionEpoch = this.ha.connectionStatus().epoch;
     channel.active = delivery;
     delivery.attempts += 1;
     channel.attemptedKey = delivery.key;
-    if (channel.mode === "reconciling") this.lastReconcilingAttempt.set(channel.nodeId, delivery.failureKey);
+    if (delivery.mode === "reconciling") this.lastReconcilingAttempt.set(channel.nodeId, delivery.failureKey);
     this.callFailures.delete(channel.nodeId);
     this.recordTriggered(channel.nodeId, delivery.call);
     if (!this.actuate) {
@@ -575,8 +619,8 @@ export class Deployer {
     channel.acknowledgedKey = delivery.key;
     channel.failures = 0;
     this.callFailures.delete(channel.nodeId);
-    if (channel.mode === "command") this.lastNonReconciling.set(channel.nodeId, delivery.key);
-    if (channel.mode === "transient" && delivery.transientValue) {
+    if (delivery.mode === "command") this.lastNonReconciling.set(channel.nodeId, delivery.key);
+    if (delivery.mode === "transient" && delivery.transientValue) {
       const previous = memoryValue(this.mem, channel.nodeId) ?? {};
       setMemoryValue(this.mem, channel.nodeId, { ...previous, prevVal: delivery.transientValue, seeded: true });
     }
@@ -591,20 +635,20 @@ export class Deployer {
 
   private scheduleRetry(channel: SinkChannel, delay?: number): void {
     const delivery = channel.retryDelivery;
-    if (!delivery || channel.retryTimer || delivery.generation !== this.generation) return;
+    if (!delivery || channel.retryTimer || channel.retired) return;
     const wait = delay ?? Math.min(RETRY_MAX_MS, RETRY_BASE_MS * (2 ** Math.max(0, channel.failures - 1)));
     channel.nextRetryAt = Date.now() + wait;
     channel.retryTimer = setTimeout(() => {
       channel.retryTimer = null;
       channel.nextRetryAt = null;
-      if (this.stopped || this.channels.get(channel.nodeId) !== channel || delivery.generation !== this.generation) return;
+      if (this.stopped || channel.retired || this.channels.get(channel.nodeId) !== channel) return;
       if (this.ha.connectionStatus().phase !== "ready") return;
       // Re-evaluation may cancel a stale command/correction or replace it with newer desired work.
-      if (channel.mode !== "transient") this.run({ kind: "sink-retry", nodeId: channel.nodeId });
+      if (delivery.mode !== "transient") this.run({ kind: "sink-retry", nodeId: channel.nodeId });
       if (channel.retryDelivery !== delivery) return;
       channel.retryDelivery = null;
       delivery.connectionEpoch = this.ha.connectionStatus().epoch;
-      if (channel.mode === "transient") channel.queue.unshift(delivery);
+      if (delivery.mode === "transient") channel.queue.unshift(delivery);
       else channel.pendingLatest = delivery;
       this.pumpChannel(channel);
     }, wait);
@@ -612,9 +656,9 @@ export class Deployer {
 
   private async executeDelivery(channel: SinkChannel, delivery: Delivery): Promise<void> {
     const targetId = delivery.call.target?.entity_id ?? "";
-    const isCurrent = () => delivery.generation === this.generation
-      && this.channels.get(channel.nodeId) === channel
-      && channel.active === delivery;
+    // Generation changes replace logical graph state, not the physical HA call already accepted by
+    // this lane. The lane remains authoritative until that promise settles.
+    const isCurrent = () => this.channels.get(channel.nodeId) === channel && channel.active === delivery;
     const readyForEpoch = () => {
       const status = this.ha.connectionStatus();
       return status.phase === "ready" && status.epoch === delivery.connectionEpoch;
@@ -650,7 +694,10 @@ export class Deployer {
       }
       channel.active = null;
       if (acknowledged && channel.pendingLatest?.key === delivery.key) channel.pendingLatest = null;
-      if (channel.retryDelivery === delivery) this.scheduleRetry(channel);
+      if (channel.retired) {
+        this.cancelRetry(channel);
+        this.channels.delete(channel.nodeId);
+      } else if (channel.retryDelivery === delivery) this.scheduleRetry(channel);
       else this.pumpChannel(channel);
     }
   }

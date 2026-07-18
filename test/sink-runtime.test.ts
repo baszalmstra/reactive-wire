@@ -174,6 +174,79 @@ describe("Deployer — acknowledged transient delivery", () => {
 });
 
 describe("Deployer — serialized sink channels", () => {
+  it("keeps the physical lane across redeploy and runs replacement work only after the old call settles", async () => {
+    const ha = new MockHA();
+    const resolvers: Array<() => void> = [];
+    let active = 0;
+    let maxActive = 0;
+    ha.callService = (call) => {
+      ha.calls.push(call);
+      active += 1;
+      maxActive = Math.max(maxActive, active);
+      return new Promise<void>((resolve) => resolvers.push(() => { active -= 1; resolve(); }));
+    };
+    ha.setState("binary_sensor.x", "on");
+    const deployer = new Deployer(ha, 100_000);
+    const { nodes, edges } = callGraph();
+    deployer.deploy(nodes, edges, true);
+    ha.setState("binary_sensor.x", "off");
+    deployer.deploy(nodes, edges, true);
+
+    expect(ha.calls.map((call) => call.service)).toEqual(["turn_on"]);
+    resolvers.shift()?.();
+    await flushPromises();
+    expect(ha.calls.map((call) => call.service)).toEqual(["turn_on", "turn_off"]);
+    expect(maxActive).toBe(1);
+    resolvers.shift()?.();
+    await flushPromises();
+    deployer.stop();
+  });
+
+  it("preserves accepted transient FIFO work for an unchanged sink across redeploy", async () => {
+    const ha = new MockHA();
+    const resolvers: Array<() => void> = [];
+    ha.callService = (call) => {
+      ha.calls.push(call);
+      return new Promise<void>((resolve) => resolvers.push(resolve));
+    };
+    ha.setState("sensor.msg", "A");
+    const deployer = new Deployer(ha, 100_000);
+    const { nodes, edges } = notifyGraph();
+    deployer.deploy(nodes, edges, true);
+    ha.setState("sensor.msg", "B");
+    ha.setState("sensor.msg", "C");
+    deployer.deploy(nodes, edges, true);
+
+    expect(ha.calls.map((call) => call.data.message)).toEqual(["B"]);
+    resolvers.shift()?.();
+    await flushPromises();
+    expect(ha.calls.map((call) => call.data.message)).toEqual(["B", "C"]);
+    resolvers.shift()?.();
+    await flushPromises();
+    deployer.stop();
+  });
+
+  it("finishes an accepted call but discards queued work when its sink is removed", async () => {
+    const ha = new MockHA();
+    const resolvers: Array<() => void> = [];
+    ha.callService = (call) => {
+      ha.calls.push(call);
+      return new Promise<void>((resolve) => resolvers.push(resolve));
+    };
+    ha.setState("sensor.msg", "A");
+    const deployer = new Deployer(ha, 100_000);
+    const { nodes, edges } = notifyGraph();
+    deployer.deploy(nodes, edges, true);
+    ha.setState("sensor.msg", "B");
+    ha.setState("sensor.msg", "C");
+    deployer.deploy([], [], true);
+    resolvers.shift()?.();
+    await flushPromises();
+
+    expect(ha.calls.map((call) => call.data.message)).toEqual(["B"]);
+    deployer.stop();
+  });
+
   it("never overlaps command calls and runs the latest pending desired call next", async () => {
     const ha = new MockHA();
     const resolvers: Array<() => void> = [];
