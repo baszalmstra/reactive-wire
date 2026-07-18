@@ -7,6 +7,29 @@ function parseInstant(iso: unknown): number | undefined {
   return Number.isFinite(ms) ? ms : undefined;
 }
 
+/**
+ * Ordering key that preserves HA's sub-millisecond timestamp precision. Runtime values remain
+ * epoch milliseconds for compatibility, but reconnect synchronization must not collapse two
+ * transport events that happened within the same millisecond.
+ */
+export interface InstantOrderKey {
+  milliseconds: number;
+  fraction: string;
+}
+
+export function instantOrderKey(iso: unknown): InstantOrderKey | undefined {
+  if (typeof iso !== "string") return undefined;
+  const milliseconds = Date.parse(iso);
+  if (!Number.isFinite(milliseconds)) return undefined;
+  const fraction = /\.(\d+)(?:Z|[+-]\d\d:\d\d)$/.exec(iso)?.[1] ?? "";
+  return { milliseconds, fraction: fraction.padEnd(9, "0").slice(0, 9) };
+}
+
+export function compareInstantOrder(a: InstantOrderKey, b: InstantOrderKey): number {
+  if (a.milliseconds !== b.milliseconds) return a.milliseconds - b.milliseconds;
+  return a.fraction.localeCompare(b.fraction);
+}
+
 /** Translate one HA state without retaining the HA client's mutable transport object. */
 export function translateEntity(raw: HassEntity): EntityState {
   const lc = parseInstant(raw.last_changed);
