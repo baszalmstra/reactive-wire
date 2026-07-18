@@ -173,19 +173,27 @@ export class RealHA implements HAClient, EntityFeed {
     this.applyEvent(event);
   }
 
+  /**
+   * HA state timestamps order add/update events, but a deletion has no new state. Its old state's
+   * last_updated describes the removed value rather than the removal, so use the event timestamp.
+   */
+  private eventOrder(event: StateChangedEvent): InstantOrderKey | undefined {
+    return event.data.new_state === null
+      ? instantOrderKey(event.time_fired)
+      : instantOrderKey(event.data.new_state?.last_updated);
+  }
+
   private applyEvent(event: StateChangedEvent): void {
     const applied = applyEntityEvent(this.latest, event);
     if (!applied) return;
-    const raw = event.data.new_state ?? event.data.old_state;
-    const order = instantOrderKey(raw?.last_updated);
+    const order = this.eventOrder(event);
     if (order) this.latestUpdated.set(event.data.entity_id, order);
     this.emit({ kind: "delta", version: ++this.version, ...applied });
   }
 
   /** Ignore a buffered event already represented by the full snapshot or a newer buffered event. */
   private eventIsNewer(event: StateChangedEvent): boolean {
-    const raw = event.data.new_state ?? event.data.old_state;
-    const eventUpdated = instantOrderKey(raw?.last_updated);
+    const eventUpdated = this.eventOrder(event);
     const currentUpdated = this.latestUpdated.get(event.data.entity_id);
     return !eventUpdated || !currentUpdated || compareInstantOrder(eventUpdated, currentUpdated) > 0;
   }

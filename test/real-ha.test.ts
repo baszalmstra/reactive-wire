@@ -34,11 +34,16 @@ const raw = (entity_id: string, state: string, lastUpdated = "2026-01-01T00:00:0
   context: { id: "ctx", parent_id: null, user_id: null },
 });
 
-const changed = (entity_id: string, oldState: ReturnType<typeof raw> | null, newState: ReturnType<typeof raw> | null) => ({
+const changed = (
+  entity_id: string,
+  oldState: ReturnType<typeof raw> | null,
+  newState: ReturnType<typeof raw> | null,
+  timeFired = newState?.last_updated ?? oldState?.last_updated ?? "2026-01-01T00:00:00Z",
+) => ({
   event_type: "state_changed",
   data: { entity_id, old_state: oldState, new_state: newState },
   origin: "LOCAL",
-  time_fired: newState?.last_updated ?? oldState?.last_updated ?? "2026-01-01T00:00:00Z",
+  time_fired: timeFired,
   context: { id: "event", parent_id: null, user_id: null },
 });
 
@@ -91,6 +96,59 @@ describe("RealHA connection readiness", () => {
     await vi.waitFor(() => expect(ha.connectionStatus().phase).toBe("ready"));
     expect(ha.entitiesSnapshot().entities["light.a"]?.state).toBe("on");
     expect(ha.connectionStatus().snapshotVersion).toBe(ha.entitiesSnapshot().version);
+  });
+
+  it("replays a buffered removal by its event time before announcing readiness", async () => {
+    harness.getStates.mockReset();
+    const present = raw("light.a", "on", "2026-01-01T00:00:00.123100Z");
+    harness.getStates.mockResolvedValueOnce([present]);
+    const ha = await RealHA.connect("http://ha.local", "token");
+    harness.listeners.get("disconnected")?.();
+
+    let resolveReconnect!: (states: unknown[]) => void;
+    harness.getStates.mockImplementationOnce(() => new Promise((resolve) => { resolveReconnect = resolve; }));
+    const readySnapshots: Array<string | undefined> = [];
+    ha.onConnection((status) => {
+      if (status.phase === "ready") readySnapshots.push(ha.entitiesSnapshot().entities["light.a"]?.state);
+    });
+    harness.listeners.get("ready")?.();
+    await flushPromises();
+    harness.stateListener()?.(changed("light.a", present, null, "2026-01-01T00:00:01.000000Z"));
+    resolveReconnect([present]);
+
+    await vi.waitFor(() => expect(ha.connectionStatus().phase).toBe("ready"));
+    expect(ha.entitiesSnapshot().entities["light.a"]).toBeUndefined();
+    expect(readySnapshots).toEqual([undefined]);
+    expect(ha.connectionStatus().snapshotVersion).toBe(ha.entitiesSnapshot().version);
+  });
+
+  it("replays buffered add then remove events in order before readiness", async () => {
+    harness.getStates.mockReset();
+    harness.getStates.mockResolvedValueOnce([]);
+    const ha = await RealHA.connect("http://ha.local", "token");
+    harness.listeners.get("disconnected")?.();
+
+    let resolveReconnect!: (states: unknown[]) => void;
+    harness.getStates.mockImplementationOnce(() => new Promise((resolve) => { resolveReconnect = resolve; }));
+    const updates: string[] = [];
+    ha.onEntities((update) => {
+      if (update.kind === "delta") updates.push(update.removed.length ? "removed" : "added");
+    });
+    const readySnapshots: Array<string | undefined> = [];
+    ha.onConnection((status) => {
+      if (status.phase === "ready") readySnapshots.push(ha.entitiesSnapshot().entities["light.a"]?.state);
+    });
+    harness.listeners.get("ready")?.();
+    await flushPromises();
+    const added = raw("light.a", "on", "2026-01-01T00:00:00.500000Z");
+    harness.stateListener()?.(changed("light.a", null, added));
+    harness.stateListener()?.(changed("light.a", added, null, "2026-01-01T00:00:01.000000Z"));
+    resolveReconnect([]);
+
+    await vi.waitFor(() => expect(ha.connectionStatus().phase).toBe("ready"));
+    expect(updates).toEqual(["added", "removed"]);
+    expect(ha.entitiesSnapshot().entities["light.a"]).toBeUndefined();
+    expect(readySnapshots).toEqual([undefined]);
   });
 
   it("retries a failed reconnect snapshot without another transport-ready event", async () => {
