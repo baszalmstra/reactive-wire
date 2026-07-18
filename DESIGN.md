@@ -417,8 +417,10 @@ the sinks `sink-light`/`sink-call`/`sink-climate`/`sink-cover`/`sink-input`/`sin
   its accepted FIFO, while removing/changing a sink discards queued work but lets its active call
   settle. Thus Home Assistant never receives overlapping calls from one sink. Delivery tracks
   observed, enqueued, attempted, and acknowledged states separately;
-  failures retry on a capped exponential timer rather than incidental graph ticks. Retries pause
-  while HA is not ready, reconciling work is revalidated before replay, and transient work remains
+  failures retry on a capped exponential timer with stable per-sink jitter rather than incidental
+  graph ticks; a shared executor bounds aggregate Home Assistant concurrency. Retry identity includes
+  only world fields read by the reconciler, so unrelated target metadata cannot cancel backoff.
+  Retries pause while HA is not ready, reconciling work is revalidated before replay, and transient work remains
   queued until acknowledgement (at-least-once within a running process). Preview remains dry-run
   and the non-`Ok` safety gate remains in the engine. Delivery queues are currently memory-only:
   a process crash after HA accepts a transient call but before its acknowledgement is observed has

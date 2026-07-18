@@ -53,6 +53,19 @@ function callGraph(): { nodes: NodeData[]; edges: ViewEdge[] } {
   return { nodes, edges };
 }
 
+function multiCallGraph(count: number): { nodes: NodeData[]; edges: ViewEdge[] } {
+  const source: NodeData = { id: "src", type: "entity", title: "", subtitle: "", icon: "bulb", x: 0, y: 0, config: { entity_id: "binary_sensor.x" }, inputs: [], outputs: [{ id: "state", label: "", type: "bool" }] };
+  const sinks = Array.from({ length: count }, (_, i): NodeData => ({
+    id: `snk-${i}`, type: "sink-call", title: "", subtitle: "", icon: "const", x: 0, y: 0,
+    config: { entity_id: `switch.${i}`, domain: "switch", service: "turn_on", service_off: "turn_off" },
+    inputs: [{ id: "on", label: "", type: "bool" }], outputs: [],
+  }));
+  return {
+    nodes: [source, ...sinks],
+    edges: sinks.map((sink, i) => ({ id: `e-${i}`, from: { node: source.id, pin: "state" }, to: { node: sink.id, pin: "on" } })),
+  };
+}
+
 const flushPromises = async () => {
   await Promise.resolve();
   await Promise.resolve();
@@ -121,7 +134,8 @@ describe("Deployer — acknowledged transient delivery", () => {
       ha.setState("sensor.noise", "unrelated");
       await flushPromises();
       expect(ha.calls).toHaveLength(1);
-      vi.advanceTimersByTime(1_000);
+      const transientRetryAt = deployer.inspect().sinks.snk?.nextRetryAt ?? Date.now();
+      vi.advanceTimersByTime(transientRetryAt - Date.now());
       await flushPromises();
       expect(ha.calls.map((call) => call.data.message)).toEqual(["B", "B"]);
       expect(deployer.inspect().sinks.snk).toMatchObject({ failures: 0, acknowledgedKey: expect.any(String) });
@@ -369,7 +383,8 @@ describe("Deployer — generic call-service sink", () => {
       ha.setState("sensor.noise", "not-a-retry-trigger");
       await flushPromises();
       expect(ha.calls).toHaveLength(1);
-      vi.advanceTimersByTime(999);
+      const retryAt = deployer.inspect().sinks.snk?.nextRetryAt ?? Date.now();
+      vi.advanceTimersByTime(Math.max(0, retryAt - Date.now() - 1));
       await flushPromises();
       expect(ha.calls).toHaveLength(1);
       vi.advanceTimersByTime(1);
@@ -377,6 +392,67 @@ describe("Deployer — generic call-service sink", () => {
       expect(ha.calls).toHaveLength(2);
       expect(ha.lastCall()?.service).toBe("turn_on");
       expect(deployer.inspect().sinks.snk).toMatchObject({ failures: 0, acknowledgedKey: expect.any(String) });
+    } finally {
+      deployer?.stop();
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe("Deployer — aggregate delivery bounds", () => {
+  it("caps aggregate service-call starts in each one-second window", async () => {
+    vi.useFakeTimers();
+    const ha = new MockHA();
+    ha.callService = (call) => {
+      ha.calls.push(call);
+      return Promise.resolve();
+    };
+    let deployer: Deployer | undefined;
+    try {
+      ha.setState("binary_sensor.x", "on");
+      deployer = new Deployer(ha, 100_000);
+      const { nodes, edges } = multiCallGraph(24);
+      deployer.deploy(nodes, edges, true);
+      for (let i = 0; i < 10; i += 1) await flushPromises();
+      expect(ha.calls).toHaveLength(16);
+
+      vi.advanceTimersByTime(1_000);
+      for (let i = 0; i < 10; i += 1) await flushPromises();
+      expect(ha.calls).toHaveLength(24);
+    } finally {
+      deployer?.stop();
+      vi.useRealTimers();
+    }
+  });
+
+  it("bounds cross-sink HA concurrency and deterministically staggers retry waves", async () => {
+    vi.useFakeTimers();
+    const ha = new MockHA();
+    let active = 0;
+    let maxActive = 0;
+    ha.callService = (call) => {
+      ha.calls.push(call);
+      active += 1;
+      maxActive = Math.max(maxActive, active);
+      return Promise.reject(new Error("temporary")).finally(() => { active -= 1; });
+    };
+    let deployer: Deployer | undefined;
+    try {
+      ha.setState("binary_sensor.x", "on");
+      deployer = new Deployer(ha, 100_000);
+      const { nodes, edges } = multiCallGraph(8);
+      deployer.deploy(nodes, edges, true);
+      await flushPromises();
+      await flushPromises();
+      await flushPromises();
+
+      expect(ha.calls).toHaveLength(8);
+      expect(maxActive).toBeLessThanOrEqual(4);
+      const retryTimes = nodes
+        .filter((node) => node.type === "sink-call")
+        .map((node) => deployer!.inspect().sinks[node.id]?.nextRetryAt);
+      expect(retryTimes.every((value): value is number => typeof value === "number")).toBe(true);
+      expect(new Set(retryTimes).size).toBeGreaterThan(1);
     } finally {
       deployer?.stop();
       vi.useRealTimers();
@@ -413,6 +489,36 @@ describe("Deployer — reconciling light sink", () => {
     expect(ha.lastCall()?.service).toBe("turn_off");
 
     deployer.stop();
+  });
+
+  it("does not let unrelated target metadata bypass a correction's retry backoff", async () => {
+    vi.useFakeTimers();
+    const ha = new MockHA();
+    ha.callService = (call) => {
+      ha.calls.push(call);
+      return Promise.reject(new Error("temporary"));
+    };
+    let deployer: Deployer | undefined;
+    try {
+      ha.setState("light.lr", "on", { marker: 0 });
+      ha.setState("binary_sensor.x", "off");
+      deployer = new Deployer(ha, 100_000);
+      const { nodes, edges } = lightGraph();
+      deployer.deploy(nodes, edges, true);
+      await flushPromises();
+      expect(ha.calls).toHaveLength(1);
+      const retryAt = deployer.inspect().sinks.snk?.nextRetryAt;
+
+      for (let marker = 1; marker <= 3; marker += 1) {
+        ha.setState("light.lr", "on", { marker });
+        await flushPromises();
+      }
+      expect(ha.calls).toHaveLength(1);
+      expect(deployer.inspect().sinks.snk?.nextRetryAt).toBe(retryAt);
+    } finally {
+      deployer?.stop();
+      vi.useRealTimers();
+    }
   });
 
   it("revalidates reconciling retries and cancels them when the target already matches", async () => {

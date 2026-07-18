@@ -133,8 +133,25 @@ interface SinkChannel {
 }
 
 const MAX_TRANSIENT_QUEUE = 100;
+const MAX_CONCURRENT_HA_CALLS = 4;
+const MAX_HA_CALL_STARTS_PER_SECOND = 16;
 const RETRY_BASE_MS = 1_000;
 const RETRY_MAX_MS = 60_000;
+const RETRY_JITTER_MS = 250;
+
+function stableHash(value: string): number {
+  let hash = 2166136261;
+  for (let i = 0; i < value.length; i += 1) {
+    hash ^= value.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
+}
+
+function retryDelay(nodeId: string, failures: number): number {
+  const base = Math.min(RETRY_MAX_MS - RETRY_JITTER_MS, RETRY_BASE_MS * (2 ** Math.max(0, failures - 1)));
+  return Math.min(RETRY_MAX_MS, base + (stableHash(`${nodeId}:${failures}`) % RETRY_JITTER_MS));
+}
 
 /** A value that survives JSON serialization, or its string form when it would throw (circular, BigInt). */
 function jsonSafe(value: unknown): unknown {
@@ -190,11 +207,38 @@ function isReconcilingSinkType(type: string): boolean {
   return type !== "sink-call" && !isTransientSink(type);
 }
 
-/** The target entity state the current correction was based on, folded into de-dupe keys. */
+/**
+ * Only the observed fields the reconciler actually reads belong in retry identity. HA updates
+ * `last_updated` and unrelated attributes frequently; including them would let telemetry bypass
+ * backoff for an unchanged desired correction.
+ */
 function observedTargetState(call: ServiceCall, entities: EntityMap): unknown {
   const entityId = call.target?.entity_id;
   if (!entityId) return null;
-  return entities[entityId] ?? null;
+  const entity = entities[entityId];
+  if (!entity) return null;
+  const attributes = entity.attributes;
+  switch (call.domain) {
+    case "light":
+      return {
+        state: entity.state,
+        ...(Object.hasOwn(call.data, "rgb_color") ? { rgb_color: attributes.rgb_color } : {}),
+        ...(Object.hasOwn(call.data, "color_temp_kelvin")
+          ? { color_temp_kelvin: attributes.color_temp_kelvin, color_temp: attributes.color_temp }
+          : {}),
+        ...(Object.hasOwn(call.data, "brightness") ? { brightness: attributes.brightness } : {}),
+      };
+    case "climate":
+      return call.service === "set_hvac_mode"
+        ? { state: entity.state }
+        : { temperature: attributes.temperature };
+    case "cover":
+      return call.service === "set_cover_position"
+        ? { current_position: attributes.current_position }
+        : { state: entity.state };
+    default:
+      return { state: entity.state };
+  }
 }
 
 function reconcilingAttemptKey(call: ServiceCall, entities: EntityMap): string {
@@ -250,6 +294,11 @@ export class Deployer {
   private transactionCount = 0;
   private lastCause: EvaluationCause["kind"] | null = null;
   private lastEvaluatedNodeCount = 0;
+  private activeServiceCalls = 0;
+  private readonly serviceSlotWaiters: Array<(release: () => void) => void> = [];
+  private serviceWindowStartedAt = Date.now();
+  private serviceStartsInWindow = 0;
+  private serviceRateTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(
     private readonly ha: HAClient & EntityFeed,
@@ -317,6 +366,11 @@ export class Deployer {
       this.tick = null;
     }
     this.poller.stop();
+    if (this.serviceRateTimer) {
+      clearTimeout(this.serviceRateTimer);
+      this.serviceRateTimer = null;
+    }
+    while (this.serviceSlotWaiters.length > 0) this.serviceSlotWaiters.shift()!(() => {});
     this.resetChannels();
     this.lastNonReconciling.clear();
     this.lastReconcilingAttempt.clear();
@@ -633,10 +687,53 @@ export class Deployer {
     channel.retryDelivery = null;
   }
 
+  private refreshServiceWindow(now = Date.now()): void {
+    if (now - this.serviceWindowStartedAt < 1_000) return;
+    this.serviceWindowStartedAt = now;
+    this.serviceStartsInWindow = 0;
+  }
+
+  private canStartServiceCall(): boolean {
+    this.refreshServiceWindow();
+    return this.activeServiceCalls < MAX_CONCURRENT_HA_CALLS
+      && this.serviceStartsInWindow < MAX_HA_CALL_STARTS_PER_SECOND;
+  }
+
+  private reserveServiceSlot(): () => void {
+    this.activeServiceCalls += 1;
+    this.serviceStartsInWindow += 1;
+    return () => this.releaseServiceSlot();
+  }
+
+  private acquireServiceSlot(): (() => void) | Promise<() => void> {
+    if (this.canStartServiceCall()) return this.reserveServiceSlot();
+    const pending = new Promise<() => void>((resolve) => this.serviceSlotWaiters.push(resolve));
+    this.drainServiceWaiters();
+    return pending;
+  }
+
+  private releaseServiceSlot(): void {
+    this.activeServiceCalls = Math.max(0, this.activeServiceCalls - 1);
+    this.drainServiceWaiters();
+  }
+
+  private drainServiceWaiters(): void {
+    this.refreshServiceWindow();
+    while (this.serviceSlotWaiters.length > 0 && this.canStartServiceCall()) {
+      this.serviceSlotWaiters.shift()!(this.reserveServiceSlot());
+    }
+    if (this.serviceSlotWaiters.length === 0 || this.serviceRateTimer) return;
+    const wait = Math.max(1, this.serviceWindowStartedAt + 1_000 - Date.now());
+    this.serviceRateTimer = setTimeout(() => {
+      this.serviceRateTimer = null;
+      this.drainServiceWaiters();
+    }, wait);
+  }
+
   private scheduleRetry(channel: SinkChannel, delay?: number): void {
     const delivery = channel.retryDelivery;
     if (!delivery || channel.retryTimer || channel.retired) return;
-    const wait = delay ?? Math.min(RETRY_MAX_MS, RETRY_BASE_MS * (2 ** Math.max(0, channel.failures - 1)));
+    const wait = delay ?? retryDelay(channel.nodeId, channel.failures);
     channel.nextRetryAt = Date.now() + wait;
     channel.retryTimer = setTimeout(() => {
       channel.retryTimer = null;
@@ -664,7 +761,11 @@ export class Deployer {
       return status.phase === "ready" && status.epoch === delivery.connectionEpoch;
     };
     let acknowledged = false;
+    let releaseSlot: (() => void) | null = null;
     try {
+      if (!isCurrent() || !readyForEpoch()) return;
+      const acquired = this.acquireServiceSlot();
+      releaseSlot = acquired instanceof Promise ? await acquired : acquired;
       if (!isCurrent() || !readyForEpoch()) return;
       const response = this.ha.callService(delivery.call);
       if (response && typeof response.then === "function") await response;
@@ -686,6 +787,7 @@ export class Deployer {
       }
       log("error", "deployer", "sink call failed", { mode: "live", service: delivery.call.service, entity: targetId, error: msg });
     } finally {
+      releaseSlot?.();
       if (!isCurrent()) return;
       if (!acknowledged && !channel.retryDelivery) {
         channel.failures += 1;
