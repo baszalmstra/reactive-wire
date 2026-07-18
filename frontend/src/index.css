@@ -281,7 +281,6 @@
 
 /* React Flow: let our node card own its look (no default node box or focus ring). */
 .react-flow__node { font-family: var(--font-sans); cursor: default; }
-.rw-root .react-flow__node:focus,
 .rw-root .react-flow__node:focus-visible {
   outline: 2px solid var(--rw-sel);
   outline-offset: 3px;
@@ -448,6 +447,11 @@
   .rw-edge-main.doomed { animation: none; }
   .rw-port-bool-on { animation: none; }
   .rw-port-bool-on::after { animation: none; opacity: .26; transform: scale(1.1); }
+}
+
+/* Keep the persistent multi-node interaction rectangle without drawing a second selection border. */
+.rw-root .react-flow__nodesselection-rect {
+  border-color: transparent;
 }
 
 /* The rubber-band selection box drawn while drag-selecting on the pane. */
