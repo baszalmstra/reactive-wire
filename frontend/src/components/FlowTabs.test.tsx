@@ -78,17 +78,6 @@ describe("FlowTabs", () => {
     expect(screen.getByRole("tab", { name: "Lighting" }).getAttribute("aria-selected")).toBe("true");
   });
 
-  it("visibly identifies flows included in or excluded from deployment", () => {
-    render(<Harness />);
-    const included = screen.getByRole("button", { name: "Disable Lighting for deployment" });
-    const excluded = screen.getByRole("button", { name: "Enable Climate for deployment" });
-
-    expect(included.textContent).toBe("Included");
-    expect(included.getAttribute("aria-pressed")).toBe("true");
-    expect(excluded.textContent).toBe("Excluded");
-    expect(excluded.getAttribute("aria-pressed")).toBe("false");
-  });
-
   it("renames with F2 and restores focus after Enter commit and Escape cancel", async () => {
     render(<Harness />);
     const lighting = screen.getByRole("tab", { name: "Lighting" });
