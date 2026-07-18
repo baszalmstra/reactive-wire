@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { clearCanvas } from "./canvas-utils.js";
+import { resetWorkspace } from "./collab-utils.js";
 import { addNode, connect, connectUntilEdge, edges, inPin, moveNodeTo, nodes, outPin, selectWire } from "./wiring-utils.js";
 
 /**
@@ -7,13 +7,13 @@ import { addNode, connect, connectUntilEdge, edges, inPin, moveNodeTo, nodes, ou
  * wires, connection validation (type mismatch + cycle rejection), deleting wires and nodes, and
  * undo/redo. The editor evaluates the graph live, so a downstream node's value chip is the observable
  * signal that a wire took effect. The mock server's collaborative document is shared and persisted,
- * so each test starts from an empty canvas via clearCanvas.
+ * so each test starts from a fully persisted canonical workspace via resetWorkspace.
  */
 test.describe.serial("Graph building against the mock server", () => {
   test.beforeEach(async ({ page }) => {
     await page.goto("/");
     await expect(page.getByLabel("Home Assistant connected")).toBeVisible();
-    await clearCanvas(page);
+    await resetWorkspace(page);
   });
 
   // Spread positions: source node on the left, sink node lower-right, so their handles never overlap.
