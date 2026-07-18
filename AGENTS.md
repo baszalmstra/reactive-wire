@@ -1,40 +1,42 @@
 # AGENTS.md
 
-Operational guide for any AI coding agent (or new human) working in this repo. Everything here is
-tool-agnostic; `CLAUDE.md` carries the same operational content for Claude Code and defers to the
-guides below.
+Operational guide for AI coding agents and contributors working in this repository.
 
-**What this is:** Reactive Wire — a node-based reactive automation system for Home Assistant. A
+**What this is:** Reactive Wire is a node-based reactive automation system for Home Assistant. A
 typed graph derives an entity's desired state from other entities; one engine
-(`shared/engine/evaluate.ts`) powers both the editor's live preview and the server's actuation.
-Design rationale lives in [DESIGN.md](./DESIGN.md); code comments describe behavior only.
+(`shared/engine/evaluate.ts`) powers both the editor's preview and server actuation. Design
+rationale lives in [DESIGN.md](./DESIGN.md); code comments describe behavior only.
 
-**Run with zero external dependencies:** `pixi run start` (server; with `HA_URL`/`HA_TOKEN` unset
-it uses a built-in mock HA + simulator, feed on `ws://127.0.0.1:7420`) and `pixi run fe-dev`
-(editor on `http://localhost:5173`). Never run bare `npm install`/`npm ci` — dependencies come
-through `pixi` (`pixi run install-all`).
+**Run without external services:** `pixi run start` starts the server. With `HA_URL` and `HA_TOKEN`
+unset it uses the built-in mock Home Assistant client and simulator. `pixi run fe-dev` starts the
+editor at `http://localhost:5173`; the feed defaults to `ws://127.0.0.1:7420`.
 
-**Safety invariant:** the server actuates nothing unless a graph is deployed **live**; sinks
-dry-run (log instead of call) until an explicit Deploy or enabled auto-deploy, and never actuate on
-a non-`ok` value. `RW_DEPLOY_TOKEN`, when set, gates deploys.
+**Safety invariant:** the server actuates nothing unless a graph is deployed **live**. Sinks dry-run
+until an explicit Deploy or enabled auto-deploy, and never actuate on a non-`ok` value.
+`RW_DEPLOY_TOKEN`, when set, gates WebSocket access and deploys.
 
-**Module map:** `shared/engine/` pure evaluation (one NodeDef per node) · `shared/collab.ts` Yjs
-editor-document model · `src/server/` deployer/feed/security · `src/ha/` real + mock HA clients ·
-`frontend/src/` React Flow editor.
+**Module map:** `shared/engine/` contains pure evaluation and one NodeDef per node;
+`shared/collab.ts` defines the Yjs editor document; `src/server/` contains deployment, feed, and
+security; `src/ha/` contains real and mock Home Assistant clients; `frontend/src/` contains the
+React Flow editor.
 
-## Guides
+## Working in the repository
 
-- [docs/agents/verify-change.md](./docs/agents/verify-change.md) — the verification ladder:
-  what to run for which kind of change, and the unit-test rule.
-- [docs/agents/debug-live.md](./docs/agents/debug-live.md) — inspect a running server:
-  mock-mode startup, the `debugState` introspection message (`node scripts/query-state.mjs`),
-  decoding the persisted editor document (`npx tsx scripts/decode-doc.mjs`).
-- [docs/agents/review-rounds.md](./docs/agents/review-rounds.md) — multi-round review process
-  for large or cross-cutting diffs.
+- Dependencies and tools come through [Pixi](https://pixi.sh). Never run bare `npm install` or
+  `npm ci`; use `pixi run install-all`.
+- Run `pixi run check` for every change. It type-checks the core and editor, lints the frontend, and
+  runs unit tests.
+- Changes to `shared/engine/` or `src/server/` require a matching unit test in `test/`.
+- Use `pixi run storybook` to inspect isolated frontend components and `pixi run e2e` for
+  cross-cutting editor/server or canvas interaction changes.
+- Version control is [jj](https://github.com/jj-vcs/jj), colocated with git. Jj auto-snapshots the
+  working copy, so there is no staging step.
 
-## Repo mechanics
+## Repository skills
 
-Version control is [jj](https://github.com/jj-vcs/jj), colocated with git (jj auto-snapshots; no
-staging step). Server logs are structured single lines on stdout (`src/server/log.ts`,
-`RW_LOG_LEVEL` filters). The editor document persists to `RW_DATA_DIR/editor-doc.ydoc` (default
-`.rw-data`, git-ignored).
+- `.agents/skills/reactive-wire-debug/` — inspect a running server and decode persisted editor state.
+- `.agents/skills/reactive-wire-release/` — prepare and ship Home Assistant add-on releases.
+
+Server logs are structured single lines on stdout (`src/server/log.ts`); `RW_LOG_LEVEL` controls
+filtering. The editor document persists to `RW_DATA_DIR/editor-doc.ydoc` (default `.rw-data`,
+git-ignored).

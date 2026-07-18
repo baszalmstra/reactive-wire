@@ -4,13 +4,10 @@
 !.gitignore
 !.env.example
 !.github/
-!.claude/
 !.storybook/
-# Repository-shared Agent Skills are loaded by Pi and other Agent Skills-compatible tools.
+# Repository-shared Agent Skills are loaded by Agent Skills-compatible tools.
 !.agents/
-!.agents/skills/
-!.agents/skills/reactive-wire-release/
-!.agents/skills/reactive-wire-release/SKILL.md
+!.agents/**
 
 node_modules/
 dist/

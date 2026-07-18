@@ -20,45 +20,53 @@ Works end to end: build a typed reactive graph in the editor, point nodes at you
 entities, and deploy it to a server that actuates Home Assistant live.
 
 - **One engine** (`shared/engine/evaluate.ts`) powers both the editor's live preview and
-  the server's actuation. Every value is `ok` / `unavailable` / `error`, propagating with
-  Kleene 3-valued logic so an offline sensor never silently reads `false` and actuates wrong.
+  the server's actuation. Values carry `ok`, `unavailable`, `error`, or `stale` status, and
+  boolean logic uses three-valued semantics so an offline sensor never silently becomes `false`.
 - **Reconciling sinks** call a service only when actual state differs from desired state, and
-  never on a non-`Ok` value (safety).
+  never on a non-`ok` value.
 - **Editor** (React Flow): drag nodes from a palette, connect typed pins (type + cycle
   validated), edit values inline, autocomplete real entities, live values on every pin.
-- **Server**: long-lived-token HA WebSocket — streams a live entity feed, synchronizes the
-  collaborative editor document, and actuates on deploy (dry-run preview by default). In-memory
-  mock + simulator when no HA is configured.
+- **Server**: a Home Assistant WebSocket client streams a live entity feed, synchronizes the
+  collaborative editor document, and actuates on deploy (dry-run preview by default). An in-memory
+  mock client and simulator run when Home Assistant is not configured.
 - **Collaborative persistence**: editor flows/macros sync live between connected browsers and are
   saved to disk so the document survives server restarts.
 - **Editable pin values**: input defaults, constants, and compare operands via one mechanism.
 
 See [DESIGN.md §9](./DESIGN.md) for the roadmap.
 
-## Prerequisites
+## Quick start
 
-[pixi](https://pixi.sh) manages the Node toolchain and every task — core and editor.
-From the project root:
+[pixi](https://pixi.sh) manages the pinned Node toolchain and every project task. No Home Assistant
+instance is required for local development:
 
 ```sh
-pixi run install-all     # install core + editor dependencies (cached; re-runs only on manifest/lockfile change)
+pixi run install-all     # install core + editor dependencies
+pixi run start           # mock HA server and feed at ws://127.0.0.1:7420
+# in another terminal
+pixi run fe-dev          # editor at http://localhost:5173
 ```
+
+The editor automatically connects to the local feed. Configure `HA_URL` and `HA_TOKEN` only when
+you want to use a real Home Assistant instance.
 
 ## Commands
 
 Everything runs through pixi. Core (engine + server):
 
 ```sh
-pixi run test            # run the engine/unit test suite
-pixi run typecheck       # type-check the core
-pixi run start           # run the server against a live Home Assistant
+pixi run test            # run all unit tests
+pixi run typecheck       # type-check the core, configs, scripts, and e2e tests
+pixi run start           # run the server (real HA when configured, mock otherwise)
 pixi run check           # typecheck, lint the editor, and run the unit tests
 pixi run e2e             # Playwright browser smoke tests with the mock server + Vite
 ```
 
-The Playwright suite starts its own mock server and frontend via `e2e/start-app.ts` on isolated default ports (`7421`/`5175`); install the browser once with `npx playwright install chromium` if Playwright asks for it.
+The Playwright suite starts its own mock server and frontend via `e2e/start-app.ts` on isolated
+ports (`7421`/`5175`). Install Chromium once with `pixi run playwright-install` if Playwright asks
+for it.
 
-Editor frontend (run in ./frontend automatically; auto-installs if needed):
+Editor frontend (commands run in `./frontend` automatically):
 
 ```sh
 pixi run storybook       # explore the component library
@@ -133,10 +141,10 @@ file. In the default manual mode, the server starts with **no graph deployed** a
 not actuated until you Deploy. Enabling **auto-deploy** is durable authorization: that setting is saved
 with the document, and a valid enabled graph resumes live actuation after a server restart.
 
-**Safety:** just running the server with a manual-mode document (and the editor's live preview)
-**never changes your home** — the auto-started demo graph runs in dry-run. Sinks actuate only after
-you **Deploy** or enable **auto-deploy** from the editor. Both are explicit, intentional acts; disable
-auto-deploy before shutdown if the graph must not resume after restart.
+**Safety:** running the server with a manual-mode document or using the editor preview never
+changes your home. Manual-mode startup is undeployed, and previews remain dry-run. Sinks actuate
+only after you **Deploy** or enable **auto-deploy** from the editor. Both are explicit,
+intentional acts; disable auto-deploy before shutdown if the graph must not resume after restart.
 
 ## Connecting the editor to live Home Assistant
 
@@ -147,10 +155,11 @@ pixi run start     # server: connects to HA (or mock), serves a live entity feed
 pixi run fe-dev    # editor: http://localhost:5173
 ```
 
-The editor connects to the feed automatically. When connected it shows **LIVE** and its
-entity nodes reflect your real Home Assistant state; with no server it shows **DEMO** and runs
-a built-in simulation. The example reads `sun.sun`, `binary_sensor.room_presence`, and
-`light.bedroom` — entities you don't have simply read as unavailable.
+The editor connects to the feed automatically. A connected but undeployed graph shows **DRAFT**;
+**LIVE** means a deployed graph is actuating. Without a server, the status is **DISCONNECTED** and
+the built-in simulation continues to drive preview values. The example reads `sun.sun`,
+`binary_sensor.room_presence`, and `light.bedroom` — entities you don't have simply read as
+unavailable.
 
 ### Editing and deploying
 
@@ -168,16 +177,16 @@ undeployed and edits remain a draft until the next explicit Deploy.
 ## Layout
 
 ```
-shared/               neutral engine + types, imported by both editor and server
-  engine/evaluate.ts   the single reactive engine (dispatcher)
-  engine/nodes/        one self-contained NodeDef per node type (registry)
-  value.ts results.ts node-types.ts entities.ts theme.ts macros.ts   shared model
-src/                  server + Home Assistant adapters
-  ha/                 HAClient/EntityFeed, MockHA, RealHA (subscribeEntities + callService)
-  server/             index (boot), feed (WebSocket), runtime (Deployer), sim
-frontend/             the editor (Vite + React + Tailwind v4 + React Flow)
-  src/canvas/         React Flow node, validation, palette, inspector, entity picker, popups
-  src/components/     ValueChip, Pin, Widgets (value editors), Badges, Icon, NodeView
-  src/canvas/node-templates.ts   registry-derived palette catalog
-test/                 engine, stateful, time, variadic, fetch, sinks, macros, poller tests
+shared/               neutral engine, collaboration model, protocol, and shared types
+  engine/evaluate.ts   the single reactive engine dispatcher
+  engine/nodes/        one self-contained NodeDef per node type
+src/                  server and Home Assistant adapters
+  ha/                 real and mock Home Assistant clients
+  server/             boot, WebSocket feed, persistence, deployment, and simulation
+frontend/             Vite + React + Tailwind v4 + React Flow editor
+  src/canvas/         nodes, wires, validation, palette, inspector, macros, and comments
+  src/components/     reusable editor UI components
+  src/state/          collaborative document, flows, undo/redo, and comment frames
+test/                 engine, server, persistence, protocol, and Home Assistant unit tests
+e2e/                  Playwright editor, collaboration, deployment, and accessibility tests
 ```
