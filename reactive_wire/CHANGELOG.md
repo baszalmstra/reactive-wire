@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.1 - 2026-07-18
+
+- Add optional, capability-aware transition durations to light sinks.
+- Fix duplicate node selection outlines while preserving keyboard accessibility.
+
 ## 0.3.0 - 2026-07-18
 
 - Harden graph deployment, evaluation, and effect delivery with stronger validation, atomic incremental execution, and safer retries.
