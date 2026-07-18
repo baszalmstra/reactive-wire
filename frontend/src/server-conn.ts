@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { EntityMap } from "../../shared/entities.js";
 import type { HAConnectionStatus } from "../../shared/ha-status.js";
-import type { DocErrorMessage, DocStateMessage, DocUpdateMessage } from "../../shared/collab.js";
+import type { DocErrorMessage, DocResetAckMessage, DocResetMessage, DocStateMessage, DocUpdateMessage } from "../../shared/collab.js";
 
 export interface DeployResult {
   ok: boolean;
@@ -23,6 +23,11 @@ export interface DocPacket {
   nonce: number;
 }
 
+export interface DocResetPacket extends DocPacket {
+  generation: number;
+  error: string;
+}
+
 export interface Server {
   connected: boolean;
   /** Server-to-Home-Assistant readiness, separate from this editor's WebSocket. */
@@ -31,9 +36,11 @@ export interface Server {
   lastResult: DeployResult | null;
   docState: DocPacket | null;
   docUpdate: DocPacket | null;
+  docReset: DocResetPacket | null;
   docError: string | null;
   deploy: (graph: DeployGraph) => boolean;
   sendDocUpdate: (update: Uint8Array) => boolean;
+  acknowledgeDocReset: (generation: number) => boolean;
 }
 
 function runtimeParam(name: string): string | undefined {
@@ -85,6 +92,7 @@ export function useServer(url: string = DEFAULT_URL): Server {
   const [lastResult, setLastResult] = useState<DeployResult | null>(null);
   const [docState, setDocState] = useState<DocPacket | null>(null);
   const [docUpdate, setDocUpdate] = useState<DocPacket | null>(null);
+  const [docReset, setDocReset] = useState<DocResetPacket | null>(null);
   const [docError, setDocError] = useState<string | null>(null);
   const nonceRef = useRef(0);
   const entityVersionRef = useRef<number | null>(null);
@@ -147,7 +155,11 @@ export function useServer(url: string = DEFAULT_URL): Server {
           } else if (msg.type === "deployResult") setLastResult(msg as DeployResult);
           else if (msg.type === "docState" && typeof msg.update === "string") setDocState({ update: (msg as DocStateMessage).update, nonce: ++nonceRef.current });
           else if (msg.type === "docUpdate" && typeof msg.update === "string") setDocUpdate({ update: (msg as DocUpdateMessage).update, nonce: ++nonceRef.current });
-          else if (msg.type === "docError" && typeof msg.error === "string") setDocError((msg as DocErrorMessage).error);
+          else if (msg.type === "docReset" && typeof msg.update === "string" && Number.isSafeInteger(msg.generation) && typeof msg.error === "string") {
+            const reset = msg as DocResetMessage;
+            setDocReset({ update: reset.update, generation: reset.generation, error: reset.error, nonce: ++nonceRef.current });
+            setDocError(reset.error);
+          } else if (msg.type === "docError" && typeof msg.error === "string") setDocError((msg as DocErrorMessage).error);
         } catch {
           /* ignore malformed frames */
         }
@@ -194,5 +206,13 @@ export function useServer(url: string = DEFAULT_URL): Server {
     return true;
   }, []);
 
-  return { connected, haStatus, entities, lastResult, docState, docUpdate, docError, deploy, sendDocUpdate };
+  const acknowledgeDocReset = useCallback((generation: number): boolean => {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return false;
+    const frame: DocResetAckMessage = { type: "docResetAck", token: DEPLOY_TOKEN || undefined, generation };
+    ws.send(JSON.stringify(frame));
+    return true;
+  }, []);
+
+  return { connected, haStatus, entities, lastResult, docState, docUpdate, docReset, docError, deploy, sendDocUpdate, acknowledgeDocReset };
 }

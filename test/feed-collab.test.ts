@@ -154,16 +154,29 @@ describe("feed collaborative document sync", () => {
       Y.applyUpdate(failedDoc, Buffer.from(String(state.update), "base64"));
       const before = snapshotFromEditorDoc(failedDoc);
       applyEditorSnapshotDiff(failedDoc, before, { ...before, flows: [{ ...before.flows[0]!, nodes: [node("failed")], edges: [] }] }, "client");
-      const error = nextMessage(sender, "docError");
+      const reset = nextMessage(sender, "docReset");
       sender.send(JSON.stringify({ type: "docUpdate", update: encodeUpdateBase64(Y.encodeStateAsUpdate(failedDoc, Y.encodeStateVector(store.doc))) }));
 
-      expect((await error).error).toContain("disk full");
+      const resetFrame = await reset;
+      expect(resetFrame.error).toContain("disk full");
       await new Promise((resolve) => setTimeout(resolve, 20));
       expect(store.snapshot().flows[0]!.nodes).toEqual([]);
       expect(documentChanges).toEqual([]);
 
+      // The failed sender still contains rejected A. An edit B made before replacing that Y.Doc is
+      // explicitly rejected while the reset boundary is pending; it cannot create a clock-gap loss
+      // or later resurrect A.
+      const failedSnapshot = snapshotFromEditorDoc(failedDoc);
+      applyEditorSnapshotDiff(failedDoc, failedSnapshot, { ...failedSnapshot, flows: [{ ...failedSnapshot.flows[0]!, nodes: [node("failed"), node("second")], edges: [] }] }, "client");
+      const repeatedReset = nextMessage(sender, "docReset");
+      sender.send(JSON.stringify({ type: "docUpdate", update: encodeUpdateBase64(Y.encodeStateAsUpdate(failedDoc, Y.encodeStateVector(store.doc))) }));
+      expect((await repeatedReset).generation).toBe(resetFrame.generation);
+      expect(store.snapshot().flows[0]!.nodes).toEqual([]);
+
+      // Replace, do not merge, from the authoritative reset and acknowledge before resubmitting B.
       const secondDoc = new Y.Doc();
-      Y.applyUpdate(secondDoc, store.encodeState());
+      Y.applyUpdate(secondDoc, Buffer.from(String(resetFrame.update), "base64"));
+      sender.send(JSON.stringify({ type: "docResetAck", generation: resetFrame.generation }));
       const secondBefore = snapshotFromEditorDoc(secondDoc);
       applyEditorSnapshotDiff(secondDoc, secondBefore, { ...secondBefore, flows: [{ ...secondBefore.flows[0]!, nodes: [node("second")], edges: [] }] }, "client");
       const receiverUpdate = nextMessage(receiver, "docUpdate");

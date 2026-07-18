@@ -50,7 +50,10 @@ export interface EditorDocumentSnapshot {
 export type DocStateMessage = { type: "docState"; update: string };
 export type DocUpdateMessage = { type: "docUpdate"; update: string; token?: string };
 export type DocErrorMessage = { type: "docError"; error: string };
-export type CollabProtocolMessage = DocStateMessage | DocUpdateMessage | DocErrorMessage;
+/** Authoritative replacement after a rejected persistence batch; contaminated client history must not be merged. */
+export type DocResetMessage = { type: "docReset"; update: string; generation: number; error: string };
+export type DocResetAckMessage = { type: "docResetAck"; generation: number; token?: string };
+export type CollabProtocolMessage = DocStateMessage | DocUpdateMessage | DocErrorMessage | DocResetMessage | DocResetAckMessage;
 
 const VERSION = 1;
 /** The editor document schema version this build reads and writes. */
@@ -503,6 +506,41 @@ export function readEditorDocumentSnapshotUnchecked(doc: Y.Doc): EditorDocumentS
 export function snapshotFromEditorDoc(doc: Y.Doc): EditorDocumentSnapshot {
   ensureEditorDocInitialized(doc);
   return readEditorDocSnapshot(doc);
+}
+
+/**
+ * Strict server-side structural guard for persisted/update candidates. The editor projection is
+ * deliberately tolerant so damaged comments can remain editable, but runtime `rw` entries must
+ * never disappear during sanitization and turn into a smaller, valid deployment.
+ */
+export function assertEditorDocumentRawIntegrity(doc: Y.Doc): void {
+  ensureEditorDocInitialized(doc);
+  const { flows } = rootMaps(doc);
+  for (const [flowKey, rawFlow] of flows.entries()) {
+    if (!isSafeIdentifier(flowKey) || !(rawFlow instanceof Y.Map)) {
+      throw new Error(`Invalid collaborative flow entry ${JSON.stringify(flowKey)}`);
+    }
+    const flowId = safeIdentifier(rawFlow.get("id"));
+    if (!flowId || flowId !== flowKey) {
+      throw new Error(`Collaborative flow key/id mismatch for ${JSON.stringify(flowKey)}`);
+    }
+    const rawNodes = rawFlow.get("nodes");
+    if (!(rawNodes instanceof Y.Map)) throw new Error(`Flow ${JSON.stringify(flowKey)} has an invalid node map`);
+    for (const [nodeKey, rawNode] of rawNodes.entries()) {
+      const node = asRecord(rawNode);
+      const nodeId = safeIdentifier(node?.id);
+      if (!isSafeIdentifier(nodeKey) || !node || !nodeId || nodeId !== nodeKey) {
+        throw new Error(`Collaborative node key/id mismatch for ${JSON.stringify(nodeKey)}`);
+      }
+      if (node.type !== "rw") continue;
+      const data = asRecord(node.data);
+      const def = asRecord(data?.def);
+      const defId = safeIdentifier(def?.id);
+      if (!data || !def || defId !== nodeId || !safeIdentifier(def.type)) {
+        throw new Error(`Runtime node ${JSON.stringify(nodeId)} has an invalid definition identity`);
+      }
+    }
+  }
 }
 
 export interface EditorDocumentProjectionStats {

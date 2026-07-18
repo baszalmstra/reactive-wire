@@ -8,6 +8,7 @@ import {
   decodeUpdateBase64,
   encodeUpdateBase64,
   type DocErrorMessage,
+  type DocResetMessage,
   type DocStateMessage,
   type DocUpdateMessage,
   type EditorDocumentSnapshot,
@@ -19,6 +20,7 @@ import {
   isClientCapabilitiesMessage,
   isDebugStateRequestMessage,
   isDeployClientMessage,
+  isDocResetAckMessage,
   isDocUpdateMessage,
 } from "../../shared/protocol.js";
 import { type EntityFeed, type HAClient } from "../ha/client.js";
@@ -81,6 +83,17 @@ function broadcastDeployResult(wss: WebSocketServer, result: { ok: boolean; unsu
 function sendDocError(ws: WebSocket, error: string): void {
   if (ws.readyState !== WebSocket.OPEN) return;
   const frame: DocErrorMessage = { type: "docError", error };
+  ws.send(JSON.stringify(frame));
+}
+
+function sendDocReset(ws: WebSocket, store: EditorDocSyncStore, generation: number, error: string): void {
+  if (ws.readyState !== WebSocket.OPEN) return;
+  const frame: DocResetMessage = {
+    type: "docReset",
+    update: encodeUpdateBase64(store.encodeState()),
+    generation,
+    error,
+  };
   ws.send(JSON.stringify(frame));
 }
 
@@ -165,6 +178,8 @@ export function startFeed(ha: EntityFeed & HAClient, portOrOptions: number | Fee
     : new WebSocketServer({ port: options.port, host: options.host, maxPayload, verifyClient });
 
   const deltaEntityClients = new Set<WebSocket>();
+  const resetPending = new WeakMap<WebSocket, number>();
+  let resetGeneration = 0;
 
   wss.on("connection", (ws, req) => {
     const connectionTokenOk = tokenMatches(requestToken(req), options.deployToken);
@@ -193,6 +208,12 @@ export function startFeed(ha: EntityFeed & HAClient, portOrOptions: number | Fee
         return;
       }
 
+      if (msg.type === "docResetAck") {
+        if (!isDocResetAckMessage(msg) || !tokenOk) return;
+        if (resetPending.get(ws) === msg.generation) resetPending.delete(ws);
+        return;
+      }
+
       if (msg.type === "docUpdate") {
         if (!handlers.documentStore) {
           sendDocError(ws, "Collaborative document sync is not enabled on this server");
@@ -204,6 +225,11 @@ export function startFeed(ha: EntityFeed & HAClient, portOrOptions: number | Fee
         }
         if (!isDocUpdateMessage(msg)) {
           sendDocError(ws, "Document update must be a base64 string");
+          return;
+        }
+        const pendingReset = resetPending.get(ws);
+        if (pendingReset !== undefined) {
+          sendDocReset(ws, handlers.documentStore, pendingReset, "Authoritative document reset is pending");
           return;
         }
         try {
@@ -227,7 +253,15 @@ export function startFeed(ha: EntityFeed & HAClient, portOrOptions: number | Fee
               if (result) broadcastDeployResult(wss, result);
             }
           }).catch((err) => {
-            sendDocError(ws, err instanceof Error ? err.message : String(err));
+            const error = err instanceof Error ? err.message : String(err);
+            let generation = resetPending.get(ws);
+            if (generation === undefined) {
+              generation = ++resetGeneration;
+              resetPending.set(ws, generation);
+            }
+            // A rejected Yjs update cannot be undone by merging another state vector. Replace the
+            // sender's document from this durable state and block its updates until it acknowledges.
+            sendDocReset(ws, handlers.documentStore!, generation, error);
           });
         } catch (err) {
           sendDocError(ws, err instanceof Error ? err.message : String(err));

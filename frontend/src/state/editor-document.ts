@@ -146,6 +146,57 @@ export function snapshotFromWorkingState(state: EditorWorkingState): EditorDocum
 }
 
 /**
+ * Baseline local diffs against the reconciled editor state without projecting the entire working
+ * document. Incremental snapshots retain unchanged item references, so only changed payloads need
+ * conversion (including any template-healed definition).
+ */
+export function reconciledSnapshotBaseline(
+  snapshot: EditorDocumentSnapshot,
+  applied: AppliedEditorDocumentState,
+  previous?: EditorDocumentSnapshot,
+): EditorDocumentSnapshot {
+  const previousFlows = new Map(previous?.flows.map((flow) => [flow.id, flow]) ?? []);
+  const appliedFlows = new Map(applied.flows.map((flow) => [flow.id, flow]));
+  let changed = false;
+  const flows = snapshot.flows.map((flow) => {
+    const prior = previousFlows.get(flow.id);
+    if (prior === flow) return flow;
+    const editorFlow = appliedFlows.get(flow.id);
+    if (!editorFlow) return flow;
+    const editorNodes = flow.id === applied.activeFlowId ? applied.activeNodes : editorFlow.nodes;
+    const editorEdges = flow.id === applied.activeFlowId ? applied.activeEdges : editorFlow.edges;
+    const priorNodes = new Map(prior?.nodes.map((node) => [node.id, node]) ?? []);
+    const priorEdges = new Map(prior?.edges.map((edge) => [edge.id, edge]) ?? []);
+    const editorNodeById = new Map(editorNodes.map((node) => [node.id, node]));
+    const editorEdgeById = new Map(editorEdges.map((edge) => [edge.id, edge]));
+    let nodesChanged = false;
+    const nodes = flow.nodes.map((node) => {
+      if (priorNodes.get(node.id) === node) return node;
+      const editor = editorNodeById.get(node.id);
+      if (!editor) return node;
+      const persisted = nodesForCollab([editor])[0]!;
+      if (samePersistedItem(persisted, node)) return node;
+      nodesChanged = true;
+      return persisted;
+    });
+    let edgesChanged = false;
+    const edges = flow.edges.map((edge) => {
+      if (priorEdges.get(edge.id) === edge) return edge;
+      const editor = editorEdgeById.get(edge.id);
+      if (!editor) return edge;
+      const persisted = edgesForCollab([editor])[0]!;
+      if (samePersistedItem(persisted, edge)) return edge;
+      edgesChanged = true;
+      return persisted;
+    });
+    if (!nodesChanged && !edgesChanged) return flow;
+    changed = true;
+    return { ...flow, nodes: nodesChanged ? nodes : flow.nodes, edges: edgesChanged ? edges : flow.edges };
+  });
+  return changed ? { ...snapshot, flows } : snapshot;
+}
+
+/**
  * Project a collaborative document snapshot back into local editor state. The caller's active
  * flow wins when it still exists so collaborators do not fight over tabs; the snapshot's
  * activeFlowId is only a fallback.

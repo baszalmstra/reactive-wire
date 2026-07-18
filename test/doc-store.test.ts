@@ -11,6 +11,22 @@ function node(id: string): CollabNode {
   return { id, type: "rw", position: { x: 0, y: 0 }, data: { def: { id, type: "const-number", title: "Number", subtitle: "", icon: "const", x: 0, y: 0, inputs: [], outputs: [{ id: "out", label: "out", type: "num" }] } } };
 }
 
+function flowNodeMap(doc: Y.Doc): Y.Map<unknown> {
+  const flows = doc.getMap("flows");
+  const flow = [...flows.values()][0];
+  if (!(flow instanceof Y.Map)) throw new Error("missing flow map");
+  const nodes = flow.get("nodes");
+  if (!(nodes instanceof Y.Map)) throw new Error("missing node map");
+  return nodes;
+}
+
+function corruptNodeUpdate(store: EditorDocumentStore, key: string, payload: unknown): Uint8Array {
+  const client = new Y.Doc();
+  Y.applyUpdate(client, store.encodeState());
+  flowNodeMap(client).set(key, payload);
+  return Y.encodeStateAsUpdate(client, Y.encodeStateVector(store.doc));
+}
+
 function addNodeUpdate(store: EditorDocumentStore, id: string): Uint8Array {
   const client = new Y.Doc();
   Y.applyUpdate(client, Y.encodeStateAsUpdate(store.doc));
@@ -79,6 +95,40 @@ describe("batched collaborative document persistence", () => {
 
       const restored = new EditorDocumentStore({ dataDir: dir });
       expect(restored.snapshot().flows[0]!.nodes.map((item) => item.id)).toEqual(["second"]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects malformed raw runtime identities before tolerant projection can drop them", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "rw-doc-raw-integrity-"));
+    try {
+      const store = new EditorDocumentStore({ dataDir: dir, persistDelayMs: 60_000 });
+      expect(() => store.applyUpdate(corruptNodeUpdate(store, "broken", { id: "", type: "rw", data: {} }))).toThrow(/key\/id mismatch/);
+      expect(() => store.applyUpdate(corruptNodeUpdate(store, "broken", { id: "broken", type: "rw", data: { def: { id: "other", type: "const-number" } } }))).toThrow(/definition identity/);
+      expect(store.snapshot().flows[0]!.nodes).toEqual([]);
+
+      // Comment entries have no runtime definition and remain valid/editor-tolerant.
+      const comment = store.applyUpdate(corruptNodeUpdate(store, "note", {
+        id: "note", type: "comment", position: { x: 0, y: 0 }, data: { title: "Note", w: 100, h: 80 },
+      }));
+      await store.flush();
+      await expect(comment).resolves.toBeDefined();
+      expect(store.snapshot().flows[0]!.nodes[0]?.id).toBe("note");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses startup from a persisted raw runtime node with mismatched identities", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "rw-doc-raw-startup-"));
+    try {
+      const seeded = new EditorDocumentStore({ dataDir: dir });
+      const corrupt = new Y.Doc();
+      Y.applyUpdate(corrupt, seeded.encodeState());
+      flowNodeMap(corrupt).set("broken", { id: "broken", type: "rw", data: { def: { id: "other", type: "const-number" } } });
+      await writeFile(seeded.filePath, Y.encodeStateAsUpdate(corrupt));
+      expect(() => new EditorDocumentStore({ dataDir: dir })).toThrow(/definition identity/);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

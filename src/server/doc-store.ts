@@ -12,6 +12,7 @@ import {
   readEditorDocumentVersion,
   snapshotFromEditorDoc,
   applyEditorSnapshot,
+  assertEditorDocumentRawIntegrity,
   type EditorDocumentSnapshot,
 } from "../../shared/collab.js";
 import {
@@ -111,6 +112,7 @@ export class EditorDocumentStore {
     let snapshot: EditorDocumentSnapshot;
     try {
       Y.applyUpdate(this.shadow, update, this);
+      assertEditorDocumentRawIntegrity(this.shadow);
       snapshot = snapshotFromEditorDoc(this.shadow);
       const estimate = this.estimatedStateBytes + update.byteLength + 64;
       if (estimate > this.maxStateBytes) {
@@ -230,6 +232,7 @@ export class EditorDocumentStore {
         Y.applyUpdate(this.doc, new Uint8Array(bytes), this);
         const version = readEditorDocumentVersion(this.doc);
         if (version === EDITOR_DOCUMENT_VERSION) {
+          assertEditorDocumentRawIntegrity(this.doc);
           snapshotFromEditorDoc(this.doc);
           return;
         }

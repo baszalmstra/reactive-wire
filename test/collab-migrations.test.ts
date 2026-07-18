@@ -17,7 +17,9 @@ function withFlowNodes(snapshot: EditorDocumentSnapshot, nodes: CollabNode[]): E
 }
 
 function markerNode(id: string): CollabNode {
-  return { id, type: "rw", position: { x: 0, y: 0 } };
+  // A non-runtime marker keeps migration effects observable without fabricating an invalid `rw`
+  // definition that the strict deployment boundary must now reject.
+  return { id, type: "comment", position: { x: 0, y: 0 }, data: { title: id, w: 100, h: 80 } };
 }
 
 /** Append a marker node so a test migration's effect is observable in the rebuilt document. */

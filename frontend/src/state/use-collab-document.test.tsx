@@ -51,14 +51,16 @@ function makeServer(docStateUpdate: string, sendDocUpdate: () => boolean): Serve
     lastResult: null,
     docState: { update: docStateUpdate, nonce: 1 },
     docUpdate: null,
+    docReset: null,
     docError: null,
     deploy: () => false,
     sendDocUpdate,
+    acknowledgeDocReset: () => true,
   } as unknown as Server;
 }
 
 /** Drives useCollabDocument with real React state, exposing what a host component would hold. */
-function useHarness(server: Server) {
+function useHarness(server: Server, projectionStats?: { localSnapshots: number }) {
   const [flows, setFlows] = useState<Flow[]>([{ id: "flow-1", name: "Flow 1", nodes: [], edges: [] }]);
   const [activeFlowId, setActiveFlowId] = useState("flow-1");
   const [nodes, setNodes] = useState<EditorNode[]>([]);
@@ -77,9 +79,9 @@ function useHarness(server: Server) {
   useCollabDocument({
     server, flows, setFlows, activeFlowId, setActiveFlowId, nodes, edges, nodesRef, edgesRef,
     macros, replaceMacros: setMacros, autoDeploy, setAutoDeploy, deployedFlowIds, setDeployedFlowIds, setNodes, setEdges,
-    setSelected, setSelectedIds, setPast, setFuture, showToast: () => {},
+    setSelected, setSelectedIds, setPast, setFuture, showToast: () => {}, projectionStats,
   });
-  return { nodes, setFlows, selected, selectedIds, setSelected, setSelectedIds, past, future, setPast, setFuture };
+  return { nodes, setNodes, setFlows, selected, selectedIds, setSelected, setSelectedIds, past, future, setPast, setFuture };
 }
 
 function outputIds(node: EditorNode): string[] {
@@ -132,6 +134,53 @@ describe("useCollabDocument remote reconciliation", () => {
     expect(result.current.nodes[0]!.selected).toBe(true);
     expect(result.current.past).toHaveLength(1);
     expect(result.current.future).toHaveLength(1);
+  });
+});
+
+describe("useCollabDocument reset and incremental baselines", () => {
+  it("replaces contaminated local state and acknowledges an authoritative reset", async () => {
+    const ack = vi.fn(() => true);
+    const emptyState = serverStateWith([]);
+    const server = { ...makeServer(emptyState, () => true), acknowledgeDocReset: ack } as Server;
+    const { result, rerender } = renderHook(({ value }) => useHarness(value), { initialProps: { value: server } });
+    await act(async () => {
+      result.current.setNodes([driftedNode("rejected") as unknown as EditorNode]);
+    });
+    expect(result.current.nodes).toHaveLength(1);
+
+    await act(async () => {
+      rerender({ value: {
+        ...server,
+        docReset: { update: emptyState, generation: 7, error: "disk full", nonce: 2 },
+      } as Server });
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    });
+
+    expect(result.current.nodes).toEqual([]);
+    expect(ack).toHaveBeenCalledWith(7);
+  });
+
+  it("does not project the complete working state after a one-item remote update", async () => {
+    const doc = new Y.Doc();
+    const base = emptyEditorDocumentSnapshot();
+    const nodes = Array.from({ length: 160 }, (_, index) => driftedNode(`n${index}`));
+    const initial: EditorDocumentSnapshot = { ...base, flows: [{ ...base.flows[0]!, nodes, edges: [] }] };
+    applyEditorSnapshotDiff(doc, base, initial, "server");
+    const state = Y.encodeStateAsUpdate(doc);
+    const vector = Y.encodeStateVector(doc);
+    const changedNode = { ...nodes[0]!, position: { x: 10, y: 20 } };
+    applyEditorSnapshotDiff(doc, initial, { ...initial, flows: [{ ...initial.flows[0]!, nodes: [changedNode, ...nodes.slice(1)], edges: [] }] }, "server");
+    const update = encodeUpdateBase64(Y.encodeStateAsUpdate(doc, vector));
+    const stats = { localSnapshots: 0 };
+    const server = makeServer(encodeUpdateBase64(state), () => true);
+    const { rerender } = renderHook(({ value }) => useHarness(value, stats), { initialProps: { value: server } });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 250)); });
+    const before = stats.localSnapshots;
+
+    rerender({ value: { ...server, docUpdate: { update, nonce: 2 } } as Server });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
+
+    expect(stats.localSnapshots).toBe(before);
   });
 });
 

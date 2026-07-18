@@ -185,6 +185,13 @@ describe("useServer", () => {
     act(() => latest().emit({ type: "docUpdate", update: "dXBkYXRl" }));
     expect(result.current.docUpdate?.update).toBe("dXBkYXRl");
     expect(result.current.docUpdate!.nonce).toBeGreaterThan(stateNonce);
+
+    // A persistence failure carries an authoritative replacement generation that the document
+    // hook acknowledges only after replacing its local Y.Doc.
+    act(() => latest().emit({ type: "docReset", update: "cmVzZXQ=", generation: 4, error: "disk full" }));
+    expect(result.current.docReset).toMatchObject({ update: "cmVzZXQ=", generation: 4, error: "disk full" });
+    act(() => { result.current.acknowledgeDocReset(4); });
+    expect(latest().lastSentFrame()).toMatchObject({ type: "docResetAck", generation: 4 });
   });
 
   it("reconnects with a backoff after the socket closes", () => {

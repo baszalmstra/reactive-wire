@@ -1,4 +1,4 @@
-import type { DocErrorMessage, DocStateMessage, DocUpdateMessage } from "./collab.js";
+import type { DocErrorMessage, DocResetAckMessage, DocResetMessage, DocStateMessage, DocUpdateMessage } from "./collab.js";
 import type { EntityMap, EntityState } from "./entities.js";
 import type { HAConnectionStatus } from "./ha-status.js";
 import { isRecord, parseJsonRecord } from "./json.js";
@@ -34,7 +34,7 @@ export interface DeployResultFrame {
   error?: string;
 }
 
-export type ServerFrame = EntitiesFrame | LegacyEntitiesFrame | EntityDeltaFrame | HAStatusFrame | DeployResultFrame | DocStateMessage | DocUpdateMessage | DocErrorMessage;
+export type ServerFrame = EntitiesFrame | LegacyEntitiesFrame | EntityDeltaFrame | HAStatusFrame | DeployResultFrame | DocStateMessage | DocUpdateMessage | DocErrorMessage | DocResetMessage;
 
 export interface DeployClientMessage {
   type: "deploy";
@@ -52,7 +52,7 @@ export interface ClientCapabilitiesMessage {
   entityFeed: "delta-v1";
 }
 
-export type ClientFrame = DeployClientMessage | DocUpdateMessage | DebugStateRequestMessage | ClientCapabilitiesMessage;
+export type ClientFrame = DeployClientMessage | DocUpdateMessage | DocResetAckMessage | DebugStateRequestMessage | ClientCapabilitiesMessage;
 
 function optionalString(value: unknown): string | undefined {
   return typeof value === "string" ? value : undefined;
@@ -79,6 +79,17 @@ export function isDocUpdateMessage(value: unknown): value is DocUpdateMessage {
 
 export function isDocErrorMessage(value: unknown): value is DocErrorMessage {
   return isRecord(value) && value.type === "docError" && typeof value.error === "string";
+}
+
+export function isDocResetMessage(value: unknown): value is DocResetMessage {
+  return isRecord(value) && value.type === "docReset" && typeof value.update === "string"
+    && Number.isSafeInteger(value.generation) && (value.generation as number) >= 0 && typeof value.error === "string";
+}
+
+export function isDocResetAckMessage(value: unknown): value is DocResetAckMessage {
+  return isRecord(value) && value.type === "docResetAck"
+    && Number.isSafeInteger(value.generation) && (value.generation as number) >= 0
+    && (value.token === undefined || typeof value.token === "string");
 }
 
 export function isDeployResultFrame(value: unknown): value is DeployResultFrame {
@@ -119,7 +130,7 @@ export function isEntityDeltaFrame(value: unknown): value is EntityDeltaFrame {
 export function decodeServerFrame(raw: string): ServerFrame | null {
   const value = parseJsonRecord(raw);
   if (!value) return null;
-  if (isEntitiesFrame(value) || isEntityDeltaFrame(value) || isHAStatusFrame(value) || isDeployResultFrame(value) || isDocStateMessage(value) || isDocUpdateMessage(value) || isDocErrorMessage(value)) return value;
+  if (isEntitiesFrame(value) || isEntityDeltaFrame(value) || isHAStatusFrame(value) || isDeployResultFrame(value) || isDocStateMessage(value) || isDocUpdateMessage(value) || isDocErrorMessage(value) || isDocResetMessage(value)) return value;
   return null;
 }
 
@@ -138,7 +149,7 @@ export function isClientCapabilitiesMessage(value: unknown): value is ClientCapa
 export function decodeClientFrame(raw: string): ClientFrame | null {
   const value = parseJsonRecord(raw);
   if (!value) return null;
-  if (isDeployClientMessage(value) || isDocUpdateMessage(value) || isDebugStateRequestMessage(value) || isClientCapabilitiesMessage(value)) return value;
+  if (isDeployClientMessage(value) || isDocUpdateMessage(value) || isDocResetAckMessage(value) || isDebugStateRequestMessage(value) || isClientCapabilitiesMessage(value)) return value;
   return null;
 }
 
