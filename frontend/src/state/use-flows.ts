@@ -42,26 +42,34 @@ export function useFlows(options: {
   const switchFlow = useCallback(
     (id: string) => {
       if (id === activeFlowId) return;
-      setFlows((fs) => {
-        const target = fs.find((f) => f.id === id);
-        if (!target) return fs;
-        const stashed = fs.map((f) => (f.id === activeFlowId ? { ...f, nodes: nodesRef.current, edges: edgesRef.current } : f));
-        setNodes(target.nodes);
-        setEdges(target.edges);
-        return stashed;
-      });
+      const target = flows.find((flow) => flow.id === id);
+      if (!target) return;
+      // Capture before queueing any store clears. React may render the node store update before it
+      // runs the flow-state updater, so reading refs from inside that updater can otherwise stash
+      // the newly loaded/cleared canvas instead of the flow the user is leaving.
+      const activeNodes = nodesRef.current;
+      const activeEdges = edgesRef.current;
+      setFlows((fs) => fs.map((flow) => (
+        flow.id === activeFlowId ? { ...flow, nodes: activeNodes, edges: activeEdges } : flow
+      )));
+      setNodes(target.nodes);
+      setEdges(target.edges);
       setActiveFlowId(id);
       setSelected(null);
       setSelectedIds([]);
       setPast([]);
       setFuture([]);
     },
-    [activeFlowId, nodesRef, edgesRef, setNodes, setEdges, setSelected, setSelectedIds, setPast, setFuture],
+    [flows, activeFlowId, nodesRef, edgesRef, setNodes, setEdges, setSelected, setSelectedIds, setPast, setFuture],
   );
 
   const addFlow = useCallback(() => {
     const f = emptyFlow(`Flow ${flows.length + 1}`);
-    setFlows((fs) => fs.map((x) => (x.id === activeFlowId ? { ...x, nodes: nodesRef.current, edges: edgesRef.current } : x)).concat(f));
+    const activeNodes = nodesRef.current;
+    const activeEdges = edgesRef.current;
+    setFlows((fs) => fs
+      .map((flow) => (flow.id === activeFlowId ? { ...flow, nodes: activeNodes, edges: activeEdges } : flow))
+      .concat(f));
     setNodes([]);
     setEdges([]);
     setActiveFlowId(f.id);
@@ -77,27 +85,27 @@ export function useFlows(options: {
 
   const closeFlow = useCallback(
     (id: string) => {
-      setFlows((fs) => {
-        if (fs.length <= 1) return fs;
-        const idx = fs.findIndex((f) => f.id === id);
-        const rest = fs.filter((f) => f.id !== id);
-        delete memories.current[id];
-        // When closing the active flow, fall to a neighbour and load its store.
-        if (id === activeFlowId) {
-          const next = rest[Math.max(0, idx - 1)];
-          if (!next) return rest;
-          setNodes(next.nodes);
-          setEdges(next.edges);
-          setActiveFlowId(next.id);
-          setSelected(null);
-          setSelectedIds([]);
-          setPast([]);
-          setFuture([]);
-        }
-        return rest;
-      });
+      if (flows.length <= 1) return;
+      const idx = flows.findIndex((flow) => flow.id === id);
+      if (idx < 0) return;
+      const rest = flows.filter((flow) => flow.id !== id);
+      delete memories.current[id];
+      setFlows((fs) => fs.filter((flow) => flow.id !== id));
+      // When closing the active flow, fall to a neighbour and load its store. Keep these state
+      // changes outside the functional updater so the updater stays pure under Strict Mode.
+      if (id === activeFlowId) {
+        const next = rest[Math.max(0, idx - 1)];
+        if (!next) return;
+        setNodes(next.nodes);
+        setEdges(next.edges);
+        setActiveFlowId(next.id);
+        setSelected(null);
+        setSelectedIds([]);
+        setPast([]);
+        setFuture([]);
+      }
     },
-    [activeFlowId, memories, setNodes, setEdges, setSelected, setSelectedIds, setPast, setFuture],
+    [flows, activeFlowId, memories, setNodes, setEdges, setSelected, setSelectedIds, setPast, setFuture],
   );
 
   return { flows, setFlows, activeFlowId, setActiveFlowId, flowTabs, switchFlow, addFlow, renameFlow, closeFlow };

@@ -6,10 +6,8 @@ import { addNumberNode, resetWorkspace } from "./collab-utils.js";
  * across a reload) plus comment frames (create, rename, sync to a second client, survive a reload).
  * Every test starts from and restores a single empty flow so the shared server document does not
  * carry flows or nodes into the next test.
- *
- * Two multi-flow content tests are marked test.fixme: they reproduce a documented collaborative-
- * document data-loss gap (DESIGN.md §9) where creating a second flow drops the first flow's
- * freshly-added node. See the comments on those tests for the exact reproduction.
+ * Multi-flow content tests cover the React batching regression where creating a flow used to
+ * clear the active store before its flow-state updater captured that store.
  */
 test.describe.serial("Reactive Wire workspace: flows and comments", () => {
   test.beforeEach(async ({ page }) => {
@@ -108,15 +106,8 @@ test.describe.serial("Reactive Wire workspace: flows and comments", () => {
     await expect(page.locator(".rw-comment-title")).toHaveText("Persisted", { timeout: 10_000 });
   });
 
-  // KNOWN COLLAB GAP — DESIGN.md §9 "collaborative document data loss". Creating a second flow
-  // drops the first flow's freshly-added node. Reproduction (deterministic against the mock server):
-  // add a Number node to Flow 1, click New flow, then switch back to Flow 1 — its canvas is empty.
-  // The node is stashed into the flow entry locally, but the collab round-trip rebuilds the whole
-  // document snapshot and loses the stashed node (a single-flow node, with no New-flow in between,
-  // round-trips and reloads fine — see the passing comment/reload tests above). Marked fixme so the
-  // reproduction is recorded without failing the suite; unskip once nested-collection identity
-  // survives document rebuilds.
-  test.fixme("preserves each flow's contents when switching tabs", async ({ page }) => {
+  // Regression: creating the second flow must stash Flow 1 before React clears the live canvas.
+  test("preserves each flow's contents when switching tabs", async ({ page }) => {
     const { id: id1 } = await addNumberNode(page);
 
     await newFlow(page).click();
@@ -132,12 +123,7 @@ test.describe.serial("Reactive Wire workspace: flows and comments", () => {
     await expect(page.locator(`.react-flow__node[data-id="${id1}"]`)).toHaveCount(0);
   });
 
-  // KNOWN COLLAB GAP — DESIGN.md §9, same root cause as above but observed after a reload: nodes
-  // added to two different flows do not both survive a reload, because creating the second flow
-  // already dropped the first flow's node from the persisted document (verified: after reload the
-  // first flow's canvas is empty while its tab remains). Flow *structure* does persist — see the
-  // passing "restores the open flows after a reload" test.
-  test.fixme("persists every flow's nodes across a reload", async ({ page }) => {
+  test("persists every flow's nodes across a reload", async ({ page }) => {
     const { id: id1 } = await addNumberNode(page);
     await newFlow(page).click();
     const { id: id2 } = await addNumberNode(page);
