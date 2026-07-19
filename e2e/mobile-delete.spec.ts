@@ -4,7 +4,7 @@ import { addNode, connectUntilEdge, edges, inPin, moveNodeTo, nodes, outPin, sel
 async function closeInspector(page: Page): Promise<void> {
   const app = page.locator(".rw-app-mobile");
   if (await app.evaluate((element) => element.classList.contains("sheet-open"))) {
-    await page.getByRole("button", { name: "Inspect" }).click();
+    await page.getByRole("button", { name: "Inspect", exact: true }).click();
   }
 }
 
@@ -35,9 +35,9 @@ async function addMobileNode(page: Page, label: string) {
 async function spreadNodesForPhone(page: Page, first: Awaited<ReturnType<typeof addMobileNode>>, second: Awaited<ReturnType<typeof addMobileNode>>): Promise<void> {
   // Keeping the nodes vertically separate leaves both pairs of handles tap-accessible at 320 px.
   await moveNodeTo(page, first, 120, 130);
-  await page.getByRole("button", { name: "Inspect" }).click();
+  await page.getByRole("button", { name: "Inspect", exact: true }).click();
   await moveNodeTo(page, second, 120, 330);
-  await page.getByRole("button", { name: "Inspect" }).click();
+  await page.getByRole("button", { name: "Inspect", exact: true }).click();
 }
 
 test.describe.serial("Mobile delete controls", () => {
