@@ -167,7 +167,7 @@
 .rw-flow-live-toggle:hover::before { border-color: var(--rw-accent); }
 .rw-flow-live-toggle.on { color: var(--rw-h-ok-fg); }
 .rw-flow-live-toggle.on::before { border-color: color-mix(in oklab, var(--rw-h-ok) 55%, transparent); background: color-mix(in oklab, var(--rw-h-ok) 13%, transparent); box-shadow: 0 0 0 2px color-mix(in oklab, var(--rw-h-ok) 7%, transparent); }
-.rw-flow-close { width: 24px; height: 24px; flex: none; display: inline-flex; align-items: center; justify-content: center; border-radius: 6px; }
+.rw-flow-rename, .rw-flow-close { width: 24px; height: 24px; flex: none; display: inline-flex; align-items: center; justify-content: center; border-radius: 6px; }
 
 /* ── Inspector ─────────────────────────────────────────────────────────── */
 .rw-inspector {
@@ -359,9 +359,9 @@
 .rw-knob-ghost { background: var(--rw-canvas); border: 2px dashed var(--rw-h-error); box-shadow: none; }
 @media (pointer: coarse) {
   .react-flow__handle.rw-port { width: 36px; height: 36px; }
-  .rw-flow-tabs { height: 42px; }
-  .rw-flow-live-toggle, .rw-flow-close { width: 32px; height: 32px; }
-  .rw-flow-live-toggle::before { inset: 8.5px; }
+  .rw-flow-tabs { height: 52px; }
+  .rw-flow-live-toggle, .rw-flow-rename, .rw-flow-close { width: 44px; height: 44px; }
+  .rw-flow-live-toggle::before { inset: 14.5px; }
 }
 .react-flow__handle.rw-port:hover .rw-knob {
   box-shadow: 0 0 0 1px var(--tc), 0 0 0 5px color-mix(in oklab, var(--tc) 28%, transparent);

@@ -120,6 +120,9 @@ test.describe.serial("Keyboard graph accessibility", () => {
 
     await page.getByRole("button", { name: "Close Kitchen" }).focus();
     await page.keyboard.press("Enter");
+    await expect(page.getByRole("dialog", { name: "Close Kitchen?" })).toBeVisible();
+    await page.keyboard.press("Tab");
+    await page.keyboard.press("Enter");
     await expect(second).toHaveAttribute("aria-selected", "true");
     await expect(second).toBeFocused();
 
@@ -153,8 +156,9 @@ test.describe.serial("Keyboard graph accessibility", () => {
     const cdp = await context.newCDPSession(page);
     await cdp.send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 1 });
     expect(await page.evaluate(() => matchMedia("(pointer: coarse)").matches)).toBe(true);
-    await expectMinimumTarget(page.getByRole("button", { name: /Flow 1 for deployment/ }), 32);
-    await expectMinimumTarget(closeFlow, 32);
+    await expectMinimumTarget(page.getByRole("button", { name: /Flow 1 for deployment/ }), 44);
+    await expectMinimumTarget(page.getByRole("button", { name: "Rename Flow 1" }), 44);
+    await expectMinimumTarget(closeFlow, 44);
     await expectMinimumTarget(deleteComment, 32);
     await cdp.send("Emulation.setTouchEmulationEnabled", { enabled: false });
 

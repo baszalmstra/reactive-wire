@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
 import { cn } from "../cn.js";
 import type { Flow } from "../canvas/flows.js";
+import { ModalDialog } from "./ModalDialog.js";
 
 /** Stable ARIA ids linking a flow tab to its canvas panel. */
 export function flowTabId(flowId: string): string {
@@ -38,6 +39,9 @@ export function FlowTabs({
   const tabRefs = useRef(new Map<string, HTMLButtonElement>());
   const pendingFocusRef = useRef<string | null>(null);
   const finishingEditRef = useRef(false);
+  const [closing, setClosing] = useState<{ id: string; name: string; liveEnabled: boolean } | null>(null);
+  const closeTitleId = useId();
+  const closeDescriptionId = useId();
   const deployed = new Set(deployedIds);
 
   useEffect(() => {
@@ -76,6 +80,12 @@ export function FlowTabs({
     pendingFocusRef.current = id === activeId ? adjacent ?? null : activeId;
     onClose(id);
   };
+  const confirmClose = () => {
+    if (!closing) return;
+    const { id } = closing;
+    setClosing(null);
+    closeAndRestoreFocus(id);
+  };
   const selectAndFocus = (id: string) => {
     onSelect(id);
     requestAnimationFrame(() => tabRefs.current.get(id)?.focus());
@@ -112,7 +122,7 @@ export function FlowTabs({
             key={flow.id}
             title={flow.name}
             className={cn(
-              "group flex items-center gap-1.5 px-2 my-1 rounded-md text-[11.5px] transition-colors whitespace-nowrap",
+              "flex items-center gap-1.5 px-2 my-1 rounded-md text-[11.5px] transition-colors whitespace-nowrap",
               active
                 ? "bg-rw-panel2 text-rw-text border border-rw-line"
                 : "text-rw-dim border border-transparent hover:bg-rw-panel2 hover:text-rw-text",
@@ -167,13 +177,24 @@ export function FlowTabs({
                 {flow.name}
               </button>
             )}
+            {editing !== flow.id && (
+              <button
+                type="button"
+                onClick={() => beginEdit(flow.id, flow.name)}
+                aria-label={`Rename ${flow.name}`}
+                title="Rename flow"
+                className="rw-flow-rename text-rw-faint hover:text-rw-text transition-colors text-[13px] leading-none"
+              >
+                <span aria-hidden="true">✎</span>
+              </button>
+            )}
             {flows.length > 1 && editing !== flow.id && (
               <button
                 type="button"
-                onClick={() => closeAndRestoreFocus(flow.id)}
+                onClick={() => setClosing({ id: flow.id, name: flow.name, liveEnabled })}
                 aria-label={`Close ${flow.name}`}
                 title="Close flow"
-                className="rw-flow-close ml-0.5 text-rw-faint hover:text-rw-error opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity text-[13px] leading-none"
+                className="rw-flow-close ml-0.5 text-rw-faint hover:text-rw-error transition-colors text-[13px] leading-none"
               >
                 ×
               </button>
@@ -190,6 +211,38 @@ export function FlowTabs({
       >
         +
       </button>
+      <ModalDialog
+        open={closing !== null}
+        onClose={() => setClosing(null)}
+        labelledBy={closeTitleId}
+        describedBy={closeDescriptionId}
+        className="w-[400px] max-w-[92vw] rounded-2xl shadow-rw"
+      >
+        <div className="rounded-2xl border border-rw-line bg-rw-panel text-rw-text overflow-hidden">
+          <div className="flex items-center gap-2 px-4 h-12 border-b border-rw-line-soft">
+            <h2 id={closeTitleId} className="font-bold text-[13px]">Close {closing?.name}?</h2>
+          </div>
+          <div id={closeDescriptionId} className="px-4 pt-3 text-[12px] text-rw-dim">
+            Closing this flow permanently deletes its nodes and connections. This cannot be undone.
+            {closing?.liveEnabled && " It is currently included in live deployment and will be disabled."}
+          </div>
+          <div className="flex items-center justify-end gap-2 px-4 py-3 mt-3 border-t border-rw-line-soft">
+            <button
+              onClick={() => setClosing(null)}
+              data-dialog-initial
+              className="h-8 px-3.5 rounded-lg text-[12px] border border-rw-line text-rw-dim hover:bg-rw-panel2 hover:text-rw-text cursor-pointer"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={confirmClose}
+              className="h-8 px-4 rounded-lg bg-rw-error-fill text-rw-health-on font-bold text-[12px] cursor-pointer hover:brightness-110"
+            >
+              Close flow
+            </button>
+          </div>
+        </div>
+      </ModalDialog>
     </div>
   );
 }
