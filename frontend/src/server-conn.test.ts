@@ -120,6 +120,20 @@ describe("useServer", () => {
     expect(result.current.runtimeState).toEqual(runtimeState);
   });
 
+  it("accepts authoritative location clears and ignores malformed non-null replacements", () => {
+    const { result } = renderHook(() => useServer("ws://test.local"));
+    expect(result.current.homeLocation).toBeNull();
+    const valid = { latitude: 52.3676, longitude: 4.9041, elevation: 0, timeZone: "Europe/Amsterdam" };
+    act(() => latest().emit({ type: "homeLocation", location: valid }));
+    expect(result.current.homeLocation).toEqual(valid);
+
+    act(() => latest().emit({ type: "homeLocation", location: { latitude: "secret", timeZone: "UTC" } }));
+    expect(result.current.homeLocation).toEqual(valid);
+
+    act(() => latest().emit({ type: "homeLocation", location: null }));
+    expect(result.current.homeLocation).toBeNull();
+  });
+
   it("negotiates deltas but remains compatible with an unversioned legacy server", () => {
     const { result } = renderHook(() => useServer("ws://test.local"));
     act(() => latest().emitOpen());

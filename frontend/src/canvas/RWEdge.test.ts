@@ -1,10 +1,12 @@
 import type { Edge } from "@xyflow/react";
+import { createElement } from "react";
+import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { emptyResults } from "../../../shared/results.js";
 import { pinKey } from "../../../shared/identity.js";
 import { V } from "../../../shared/value.js";
 import type { RWNodeType } from "./validation.js";
-import { withRWEdgeData } from "./RWEdge.js";
+import { EdgeValueBadge, withRWEdgeData } from "./RWEdge.js";
 
 const nodes: RWNodeType[] = ["a", "b"].map((id) => ({
   id,
@@ -62,5 +64,13 @@ describe("edge result decoration", () => {
     expect(second[0]!.data).not.toBe(first[0]!.data);
     expect(second[1]).toBe(first[1]);
     expect(second[1]!.data).toBe(first[1]!.data);
+  });
+
+  it("formats datetime badges in the explicit Home Assistant timezone", () => {
+    render(createElement(EdgeValueBadge, {
+      value: V("datetime", Date.parse("2026-06-15T12:00:00Z")),
+      timeZone: "Pacific/Kiritimati",
+    }));
+    expect(screen.getByText(/(?:Jun.*16|16.*Jun).*02:00/)).toBeTruthy();
   });
 });

@@ -324,6 +324,40 @@ export function OpSelect({ value, type, onChange }: { value: string; type: strin
   );
 }
 
+const BOUNDS_MODES = [
+  { value: "closed-open", includeMin: true, includeMax: false, label: "Include min, exclude max — [min, max)" },
+  { value: "closed-closed", includeMin: true, includeMax: true, label: "Include min and max — [min, max]" },
+  { value: "open-open", includeMin: false, includeMax: false, label: "Exclude min and max — (min, max)" },
+  { value: "open-closed", includeMin: false, includeMax: true, label: "Exclude min, include max — (min, max]" },
+] as const;
+
+/** Compact four-way bounds selector shared by Between's canvas and inspector settings. */
+export function BoundsModeSelect({
+  includeMin,
+  includeMax,
+  onChange,
+}: {
+  includeMin: boolean;
+  includeMax: boolean;
+  onChange: (mode: { includeMin: boolean; includeMax: boolean }) => void;
+}) {
+  const selected = BOUNDS_MODES.find((mode) => mode.includeMin === includeMin && mode.includeMax === includeMax) ?? BOUNDS_MODES[0];
+  return (
+    <select
+      aria-label="Bounds mode"
+      value={selected.value}
+      onChange={(event) => {
+        const mode = BOUNDS_MODES.find((candidate) => candidate.value === event.target.value) ?? BOUNDS_MODES[0];
+        onChange({ includeMin: mode.includeMin, includeMax: mode.includeMax });
+      }}
+      onPointerDown={stop}
+      className={cn(SEL, "min-w-0 w-full")}
+    >
+      {BOUNDS_MODES.map((mode) => <option key={mode.value} value={mode.value}>{mode.label}</option>)}
+    </select>
+  );
+}
+
 /** Unit dropdown for Duration controls (ms / sec / min / hr / day). */
 export function UnitSelect({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   return (

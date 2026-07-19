@@ -2,12 +2,14 @@ import {
   callService as haCallService,
   createConnection,
   createLongLivedTokenAuth,
+  getConfig,
   getStates,
   type Auth,
   type Connection,
   type StateChangedEvent,
 } from "home-assistant-js-websocket";
 import type { EntityMap, EntityUpdate } from "../../shared/entities.js";
+import { isHomeLocation, type HomeLocation } from "../../shared/home.js";
 import {
   applyEntityEvent,
   compareInstantOrder,
@@ -38,12 +40,19 @@ export const HA_SYNC_BUFFER_LIMIT = 512;
 export const HA_SYNC_RETRY_BASE_MS = 250;
 const HA_SYNC_RETRY_MAX_MS = 10_000;
 
+type CoreConfigUpdatedEvent = {
+  event_type: "core_config_updated";
+  data: Record<string, unknown>;
+};
+
 export class RealHA implements HAClient, EntityFeed {
   private latest: EntityMap = Object.create(null) as EntityMap;
   /** Full-precision ordering metadata is deliberately separate from millisecond UI values. */
   private latestUpdated = new Map<string, InstantOrderKey>();
   private readonly listeners = new Set<(update: EntityUpdate) => void>();
   private readonly connectionListeners = new Set<(status: HAConnectionStatus) => void>();
+  private readonly locationListeners = new Set<(location: HomeLocation | null) => void>();
+  private readonly subscriptions: Array<() => Promise<void>> = [];
   private version = 0;
   private syncing = true;
   private buffered: StateChangedEvent[] = [];
@@ -53,6 +62,10 @@ export class RealHA implements HAClient, EntityFeed {
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
   private resolveRetryWait: (() => void) | null = null;
   private status: HAConnectionStatus = { phase: "disconnected", epoch: 0, snapshotVersion: null };
+  private location: HomeLocation | null = null;
+  private stopped = false;
+  private readonly onDisconnected = () => this.markDisconnected();
+  private readonly onReady = () => { void this.markReadyAndSynchronize(); };
 
   private constructor(private readonly connection: Connection) {}
 
@@ -60,17 +73,36 @@ export class RealHA implements HAClient, EntityFeed {
     const auth = authFor(url, token);
     const connection = await createConnection({ auth });
     const ha = new RealHA(connection);
-    connection.addEventListener("disconnected", () => ha.markDisconnected());
-    connection.addEventListener("ready", () => { void ha.markReadyAndSynchronize(); });
-    // Subscribe before requesting the full state so changes racing the snapshot are buffered.
-    await connection.subscribeEvents<StateChangedEvent>((event) => ha.receive(event), "state_changed");
-    ha.transportReady = true;
-    await ha.beginSynchronization();
-    return ha;
+    // Install lifecycle listeners and both event subscriptions before any config/state command.
+    // A transient getConfig failure then belongs to the same recoverable synchronization loop as
+    // getStates instead of rejecting an otherwise healthy connection before reconnect handling.
+    connection.addEventListener("disconnected", ha.onDisconnected);
+    connection.addEventListener("ready", ha.onReady);
+    try {
+      const unsubscribeStates = await connection.subscribeEvents<StateChangedEvent>((event) => ha.receive(event), "state_changed");
+      ha.subscriptions.push(unsubscribeStates);
+      const unsubscribeConfig = await connection.subscribeEvents<CoreConfigUpdatedEvent>(() => ha.configurationChanged(), "core_config_updated");
+      ha.subscriptions.push(unsubscribeConfig);
+      ha.transportReady = true;
+      await ha.beginSynchronization();
+      return ha;
+    } catch (error) {
+      ha.stop();
+      throw error;
+    }
+  }
+
+  homeLocation(): HomeLocation | null {
+    return this.location ? { ...this.location } : null;
+  }
+
+  onLocation(cb: (location: HomeLocation | null) => void): () => void {
+    this.locationListeners.add(cb);
+    return () => this.locationListeners.delete(cb);
   }
 
   async callService(call: ServiceCall): Promise<void> {
-    if (this.status.phase !== "ready") throw new Error(`Home Assistant is ${this.status.phase}`);
+    if (this.stopped || this.status.phase !== "ready") throw new Error(`Home Assistant is ${this.stopped ? "stopped" : this.status.phase}`);
     await haCallService(this.connection, call.domain, call.service, call.data, call.target);
   }
 
@@ -92,6 +124,31 @@ export class RealHA implements HAClient, EntityFeed {
     return () => this.listeners.delete(cb);
   }
 
+  stop(): void {
+    if (this.stopped) return;
+    this.stopped = true;
+    this.transportReady = false;
+    this.status = { phase: "disconnected", epoch: this.status.epoch, snapshotVersion: null };
+    this.syncGeneration += 1;
+    this.cancelRetryWait();
+    for (const unsubscribe of this.subscriptions.splice(0)) {
+      try {
+        // The HA library rejects unsubscribe promises when its transport is already closing.
+        // Attach the handler before close() below can trigger that rejection.
+        void unsubscribe().catch(() => {});
+      } catch {
+        // A cleanup callback may also throw before returning its promise. Keep releasing the
+        // remaining listeners and transport resources synchronously.
+      }
+    }
+    this.connection.removeEventListener("disconnected", this.onDisconnected);
+    this.connection.removeEventListener("ready", this.onReady);
+    this.listeners.clear();
+    this.locationListeners.clear();
+    this.connectionListeners.clear();
+    this.connection.close();
+  }
+
   private emit(update: EntityUpdate): void {
     this.listeners.forEach((cb) => cb(update));
   }
@@ -102,6 +159,17 @@ export class RealHA implements HAClient, EntityFeed {
     this.connectionListeners.forEach((cb) => cb(snapshot));
   }
 
+  private emitLocation(location: HomeLocation): void {
+    this.location = { ...location };
+    const snapshot = this.homeLocation();
+    this.locationListeners.forEach((cb) => cb(snapshot));
+  }
+
+  private configurationChanged(): void {
+    if (this.stopped || !this.transportReady) return;
+    void this.beginSynchronization();
+  }
+
   private cancelRetryWait(): void {
     if (this.retryTimer) clearTimeout(this.retryTimer);
     this.retryTimer = null;
@@ -110,6 +178,7 @@ export class RealHA implements HAClient, EntityFeed {
   }
 
   private markDisconnected(): void {
+    if (this.stopped) return;
     this.transportReady = false;
     this.syncGeneration += 1;
     this.cancelRetryWait();
@@ -120,6 +189,7 @@ export class RealHA implements HAClient, EntityFeed {
   }
 
   private async markReadyAndSynchronize(): Promise<void> {
+    if (this.stopped) return;
     this.transportReady = true;
     await this.beginSynchronization();
   }
@@ -137,10 +207,13 @@ export class RealHA implements HAClient, EntityFeed {
   }
 
   private async beginSynchronization(): Promise<void> {
+    if (this.stopped) return;
     const epoch = this.status.epoch + 1;
     const generation = ++this.syncGeneration;
     this.cancelRetryWait();
     this.syncing = true;
+    this.buffered = [];
+    this.bufferOverflowed = false;
     this.emitConnection({ phase: "syncing", epoch, snapshotVersion: null });
     let attempt = 0;
     while (generation === this.syncGeneration && this.transportReady) {
@@ -148,7 +221,7 @@ export class RealHA implements HAClient, EntityFeed {
         const complete = await this.synchronize(generation, epoch);
         if (complete) return;
       } catch {
-        // The transport can stay connected after a command-level getStates failure. Retry below.
+        // The transport can stay connected after a command-level config/state failure. Retry below.
       }
       if (generation !== this.syncGeneration || !this.transportReady) return;
       // If the buffer overflowed during a failed attempt, the next full state is the new baseline.
@@ -198,10 +271,17 @@ export class RealHA implements HAClient, EntityFeed {
     return !eventUpdated || !currentUpdated || compareInstantOrder(eventUpdated, currentUpdated) > 0;
   }
 
-  /** Fetch and install one full state after initial connection and every reconnect. */
+  /** Fetch and atomically install authoritative config plus full state for one synchronization epoch. */
   private async synchronize(generation: number, epoch: number): Promise<boolean> {
-    const states = await getStates(this.connection);
-    if (generation !== this.syncGeneration || !this.transportReady) return true;
+    const [config, states] = await Promise.all([getConfig(this.connection), getStates(this.connection)]);
+    const location: HomeLocation = {
+      latitude: config.latitude,
+      longitude: config.longitude,
+      elevation: config.elevation,
+      timeZone: config.time_zone,
+    };
+    if (!isHomeLocation(location)) throw new Error("Home Assistant returned an invalid home location");
+    if (generation !== this.syncGeneration || !this.transportReady || this.stopped) return true;
     // Once events were dropped, this response cannot prove freshness. Start a later full request.
     if (this.bufferOverflowed) return false;
     this.latest = entityMapFromStates(states);
@@ -211,13 +291,17 @@ export class RealHA implements HAClient, EntityFeed {
         return order ? [[state.entity_id, order] as const] : [];
       }),
     );
+    // Install both snapshots while status is still syncing. Consumers cannot actuate or evaluate
+    // this epoch until the subsequent ready frame, but location/feed subscribers already observe
+    // one coherent authoritative replacement.
+    this.emitLocation(location);
     const fullVersion = ++this.version;
     this.emit({ kind: "full", version: fullVersion, entities: this.latest });
     const buffered = this.buffered;
     this.buffered = [];
     this.syncing = false;
     for (const event of buffered) if (this.eventIsNewer(event)) this.applyEvent(event);
-    if (generation === this.syncGeneration && this.transportReady) {
+    if (generation === this.syncGeneration && this.transportReady && !this.stopped) {
       this.emitConnection({ phase: "ready", epoch, snapshotVersion: this.version });
     }
     return true;

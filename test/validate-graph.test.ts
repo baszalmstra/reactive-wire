@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { NodeData } from "../shared/node-types.js";
 import type { ViewEdge } from "../shared/engine/evaluate.js";
 import { validateExpandedGraph, validateReachableMacros } from "../shared/engine/validate-graph.js";
+import { REGISTRY } from "../shared/engine/nodes/index.js";
 
 function numberNode(id: string): NodeData {
   return {
@@ -65,6 +66,38 @@ describe("shared graph semantics", () => {
     const mismatch = validateExpandedGraph([numberNode("n"), notNode("not")], [edge("e", "n", "not")]);
     expect(mismatch).toMatchObject({ ok: false });
     if (!mismatch.ok) expect(mismatch.error.code).toBe("type-mismatch");
+  });
+
+  it("enforces concrete equality within generic type groups", () => {
+    const number = REGISTRY["const-number"]!.template.make("number");
+    const duration = REGISTRY["const-duration"]!.template.make("duration");
+    const target = REGISTRY.between!.template.make("between");
+    const mixed = validateExpandedGraph([number, duration, target], [
+      { id: "number-value", from: { node: "number", pin: "out" }, to: { node: "between", pin: "value" } },
+      { id: "duration-min", from: { node: "duration", pin: "out" }, to: { node: "between", pin: "min" } },
+    ]);
+    expect(mixed).toMatchObject({ ok: false });
+    if (!mixed.ok) expect(mixed.error.code).toBe("type-mismatch");
+
+    const otherNumber = REGISTRY["const-number"]!.template.make("other-number");
+    expect(validateExpandedGraph([number, otherNumber, target], [
+      { id: "number-value", from: { node: "number", pin: "out" }, to: { node: "between", pin: "value" } },
+      { id: "number-min", from: { node: "other-number", pin: "out" }, to: { node: "between", pin: "min" } },
+    ])).toEqual({ ok: true });
+
+    const compare = REGISTRY.compare!.template.make("compare");
+    expect(validateExpandedGraph([number, otherNumber, compare], [
+      { id: "compare-a", from: { node: "number", pin: "out" }, to: { node: "compare", pin: "a" } },
+      { id: "compare-b", from: { node: "other-number", pin: "out" }, to: { node: "compare", pin: "b" } },
+    ])).toEqual({ ok: true });
+
+    const condition = REGISTRY["const-bool"]!.template.make("condition");
+    const select = REGISTRY.select!.template.make("select");
+    expect(validateExpandedGraph([number, duration, condition, select], [
+      { id: "select-condition", from: { node: "condition", pin: "out" }, to: { node: "select", pin: "cond" } },
+      { id: "select-number", from: { node: "number", pin: "out" }, to: { node: "select", pin: "a" } },
+      { id: "select-duration", from: { node: "duration", pin: "out" }, to: { node: "select", pin: "b" } },
+    ])).toEqual({ ok: true });
   });
 
   it("rejects duplicate input wiring regardless of edge order", () => {

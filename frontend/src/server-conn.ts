@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { EntityMap } from "../../shared/entities.js";
 import type { HAConnectionStatus } from "../../shared/ha-status.js";
+import { isHomeLocation, type HomeLocation } from "../../shared/home.js";
 import type { DocErrorMessage, DocResetAckMessage, DocResetMessage, DocStateMessage, DocUpdateMessage } from "../../shared/collab.js";
 import { isRuntimeStateFrame, type RuntimeStateFrame } from "../../shared/protocol.js";
 
@@ -33,6 +34,7 @@ export interface Server {
   connected: boolean;
   /** Server-to-Home-Assistant readiness, separate from this editor's WebSocket. */
   haStatus: HAConnectionStatus;
+  homeLocation: HomeLocation | null;
   entities: EntityMap;
   /** Authoritative deployed-runtime actions and output history pushed by the server. */
   runtimeState: RuntimeStateFrame | null;
@@ -92,6 +94,7 @@ export function useServer(url: string = DEFAULT_URL): Server {
   const [connected, setConnected] = useState(false);
   const [haStatus, setHAStatus] = useState<HAConnectionStatus>({ phase: "disconnected", epoch: 0, snapshotVersion: null });
   const [entities, setEntities] = useState<EntityMap>({});
+  const [homeLocation, setHomeLocation] = useState<HomeLocation | null>(null);
   const [runtimeState, setRuntimeState] = useState<RuntimeStateFrame | null>(null);
   const [lastResult, setLastResult] = useState<DeployResult | null>(null);
   const [docState, setDocState] = useState<DocPacket | null>(null);
@@ -108,6 +111,7 @@ export function useServer(url: string = DEFAULT_URL): Server {
 
     const connect = () => {
       entityVersionRef.current = null;
+      setHomeLocation(null);
       let seenHAStatus = false;
       const ws = new WebSocket(urlWithToken(url, DEPLOY_TOKEN));
       wsRef.current = ws;
@@ -125,6 +129,10 @@ export function useServer(url: string = DEFAULT_URL): Server {
             && Number.isSafeInteger(msg.status.epoch)) {
             seenHAStatus = true;
             setHAStatus(msg.status as HAConnectionStatus);
+          } else if (msg.type === "homeLocation") {
+            // Explicit null is an authoritative clear. Ignore malformed non-null frames rather
+            // than turning transport corruption into an invented location transition.
+            if (msg.location === null || isHomeLocation(msg.location)) setHomeLocation(msg.location);
           } else if (msg.type === "entities" && msg.entities && typeof msg.entities === "object") {
             if (Number.isSafeInteger(msg.version) && msg.version >= 0) {
               const current = entityVersionRef.current;
@@ -221,5 +229,5 @@ export function useServer(url: string = DEFAULT_URL): Server {
     return true;
   }, []);
 
-  return { connected, haStatus, entities, runtimeState, lastResult, docState, docUpdate, docReset, docError, deploy, sendDocUpdate, acknowledgeDocReset };
+  return { connected, haStatus, homeLocation, entities, runtimeState, lastResult, docState, docUpdate, docReset, docError, deploy, sendDocUpdate, acknowledgeDocReset };
 }

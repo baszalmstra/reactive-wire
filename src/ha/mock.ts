@@ -1,4 +1,5 @@
 import type { EntityMap, EntityUpdate } from "../../shared/entities.js";
+import { DEMO_HOME_LOCATION, type HomeLocation } from "../../shared/home.js";
 import { type EntityFeed, type EntityState, type HAClient, type HAConnectionStatus, type ServiceCall } from "./client.js";
 
 /**
@@ -9,9 +10,28 @@ export class MockHA implements HAClient, EntityFeed {
   private readonly entities: EntityMap = Object.create(null) as EntityMap;
   private readonly listeners = new Set<(update: EntityUpdate) => void>();
   private readonly connectionListeners = new Set<(status: HAConnectionStatus) => void>();
+  private readonly locationListeners = new Set<(location: HomeLocation | null) => void>();
   private version = 0;
   private status: HAConnectionStatus = { phase: "ready", epoch: 1, snapshotVersion: 0 };
   readonly calls: ServiceCall[] = [];
+
+  constructor(private location: HomeLocation | null = DEMO_HOME_LOCATION) {}
+
+  homeLocation(): HomeLocation | null {
+    return this.location ? { ...this.location } : null;
+  }
+
+  onLocation(cb: (location: HomeLocation | null) => void): () => void {
+    this.locationListeners.add(cb);
+    return () => this.locationListeners.delete(cb);
+  }
+
+  /** Replace Home Assistant's authoritative location, including a missing/unavailable snapshot. */
+  setHomeLocation(location: HomeLocation | null): void {
+    this.location = location ? { ...location } : null;
+    const snapshot = this.homeLocation();
+    this.locationListeners.forEach((cb) => cb(snapshot));
+  }
 
   callService(call: ServiceCall): void {
     if (this.status.phase !== "ready") throw new Error(`Home Assistant is ${this.status.phase}`);

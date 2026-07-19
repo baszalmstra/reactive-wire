@@ -31,6 +31,24 @@ export function typesCompatible(a: ValueType | undefined, b: ValueType | undefin
   return a === b || a === "any" || b === "any";
 }
 
+/**
+ * Whether a concrete source can join a node's generic type group. Unresolved `any` sources do not
+ * constrain the group; once one concrete source is present, every other concrete source must match.
+ */
+export function typeGroupConnectionCompatible(
+  node: Pick<RuntimeNode, "typeGroup">,
+  targetPinId: string,
+  sourceType: ValueType | undefined,
+  connected: Iterable<{ pinId: string; type: ValueType | undefined }>,
+): boolean {
+  if (!node.typeGroup?.includes(targetPinId) || !sourceType || sourceType === "any") return true;
+  for (const candidate of connected) {
+    if (!node.typeGroup.includes(candidate.pinId)) continue;
+    if (candidate.type && candidate.type !== "any" && candidate.type !== sourceType) return false;
+  }
+  return true;
+}
+
 /** Whether adding source -> target to a directed edge list would create a node-level cycle. */
 export function wouldCreateCycle(
   edges: Iterable<{ source: string; target: string }>,
@@ -241,6 +259,7 @@ function validateMacroDefinition(def: RuntimeMacroDef, macros: RuntimeMacroMap):
 
   const edgeIds = new Set<string>();
   const incoming = new Set<string>();
+  const groupTypes = new Map<string, ValueType>();
   for (const edge of def.edges) {
     if (edgeIds.has(edge.id)) return error({ code: "invalid-edge", edgeId: edge.id, message: `Macro ${JSON.stringify(def.id)} has duplicate edge id ${JSON.stringify(edge.id)}` });
     edgeIds.add(edge.id);
@@ -258,6 +277,13 @@ function validateMacroDefinition(def: RuntimeMacroDef, macros: RuntimeMacroMap):
     incoming.add(targetKey);
     if (!typesCompatible(sourcePin.type, targetPin.type)) {
       return error({ code: "type-mismatch", edgeId: edge.id, message: `Macro edge ${JSON.stringify(edge.id)} connects ${sourcePin.type} to ${targetPin.type}` });
+    }
+    if (target.typeGroup?.includes(edge.to.pin) && sourcePin.type !== "any") {
+      const groupType = groupTypes.get(target.id);
+      if (groupType && groupType !== sourcePin.type) {
+        return error({ code: "type-mismatch", edgeId: edge.id, nodeId: target.id, message: `Macro edge ${JSON.stringify(edge.id)} conflicts with the concrete type already connected to ${JSON.stringify(target.id)}'s generic group` });
+      }
+      groupTypes.set(target.id, sourcePin.type);
     }
   }
   return { ok: true };
@@ -313,6 +339,7 @@ export function validateExpandedGraph(nodes: RuntimeNode[], edges: ViewEdge[]): 
 
   const edgeIds = new Set<string>();
   const incoming = new Set<string>();
+  const groupTypes = new Map<string, ValueType>();
   const adjacency = new Map<string, string[]>();
   const indegree = new Map(nodes.map((node) => [node.id, 0]));
   for (const edge of edges) {
@@ -332,6 +359,13 @@ export function validateExpandedGraph(nodes: RuntimeNode[], edges: ViewEdge[]): 
     incoming.add(targetKey);
     if (!typesCompatible(sourcePin.type, targetPin.type)) {
       return error({ code: "type-mismatch", edgeId: edge.id, message: `Edge ${JSON.stringify(edge.id)} connects ${sourcePin.type} to ${targetPin.type}` });
+    }
+    if (target.typeGroup?.includes(edge.to.pin) && sourcePin.type !== "any") {
+      const groupType = groupTypes.get(target.id);
+      if (groupType && groupType !== sourcePin.type) {
+        return error({ code: "type-mismatch", edgeId: edge.id, nodeId: target.id, message: `Edge ${JSON.stringify(edge.id)} conflicts with the concrete type already connected to ${JSON.stringify(target.id)}'s generic group` });
+      }
+      groupTypes.set(target.id, sourcePin.type);
     }
     const outgoing = adjacency.get(source.id) ?? [];
     outgoing.push(target.id);

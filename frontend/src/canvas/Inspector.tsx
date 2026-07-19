@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 import type { NodeData } from "../../../shared/node-types.js";
 import type { EvalResults } from "../../../shared/results.js";
 import type { EntityMap } from "../../../shared/entities.js";
@@ -15,6 +15,8 @@ import { Sparkline, type Sample } from "../components/Sparkline.js";
 import { isMacroInstance, macroHasMemory, type MacroMap } from "../../../shared/macros.js";
 import { cn } from "../cn.js";
 import { pinKey } from "../../../shared/identity.js";
+import type { HomeLocation } from "../../../shared/home.js";
+import { TWILIGHT_BOUNDARIES, twilightBoundary, twilightBoundaryIndex } from "../../../shared/twilight.js";
 
 /** Sink node types whose target is a Home Assistant entity, and the picker domains they allow. */
 const SINK_ENTITY_DOMAINS: Record<string, string[] | undefined> = {
@@ -61,8 +63,8 @@ function diagnosticsFor(node: NodeData, results: EvalResults): Diagnostic[] {
   return out;
 }
 
-function BigValue({ value, unit, deviceClass }: { value: RWValue | undefined; unit?: string; deviceClass?: unknown }) {
-  const f = formatValue(value);
+function BigValue({ value, unit, deviceClass, timeZone }: { value: RWValue | undefined; unit?: string; deviceClass?: unknown; timeZone?: string }) {
+  const f = formatValue(value, timeZone);
   const typeColor = value && (value.status === "ok" || value.status === "stale") ? TYPE_VAR[value.type] : undefined;
   const cls = cn(
     "rw-bigval",
@@ -88,11 +90,107 @@ function BigValue({ value, unit, deviceClass }: { value: RWValue | undefined; un
   );
 }
 
+const TWILIGHT_POINTS = [
+  { x: 20, y: 112 }, { x: 39, y: 94 }, { x: 58, y: 76 }, { x: 78, y: 58 },
+  { x: 186, y: 58 }, { x: 206, y: 76 }, { x: 225, y: 94 }, { x: 244, y: 112 },
+] as const;
+
+// One idealized, symmetric category profile. Segment boundaries coincide with the eight factual
+// solar-elevation events; this is a guide to twilight geometry, not today's measured solar path.
+const TWILIGHT_COURSE_SEGMENTS = [
+  "M 8 126 Q 14 120 20 112",
+  "M 20 112 Q 30 103 39 94",
+  "M 39 94 Q 49 85 58 76",
+  "M 58 76 Q 68 66 78 58",
+  "M 78 58 C 101 35 119 25 132 24 C 145 25 163 35 186 58",
+  "M 186 58 Q 196 66 206 76",
+  "M 206 76 Q 215 85 225 94",
+  "M 225 94 Q 234 103 244 112",
+  "M 244 112 Q 250 120 256 126",
+] as const;
+
+function TwilightGuide({ start, end }: { start: unknown; end: unknown }) {
+  const headingId = useId();
+  const titleId = useId();
+  const descriptionId = useId();
+  const startIndex = twilightBoundaryIndex(start);
+  const endIndex = twilightBoundaryIndex(end);
+  const startInfo = twilightBoundary(start);
+  const endInfo = twilightBoundary(end);
+  const wrapped = startIndex >= 0 && endIndex >= 0 && endIndex <= startIndex;
+  const selectionPaths = startIndex < 0 || endIndex < 0
+    ? []
+    : wrapped
+      ? [TWILIGHT_COURSE_SEGMENTS.slice(startIndex + 1).join(" "), TWILIGHT_COURSE_SEGMENTS.slice(0, endIndex + 1).join(" ")]
+      : [TWILIGHT_COURSE_SEGMENTS.slice(startIndex + 1, endIndex + 1).join(" ")];
+  const title = startInfo && endInfo ? `Solar-angle twilight profile: ${startInfo.label} to ${endInfo.label}` : "Solar-angle twilight profile";
+  const description = startInfo && endInfo
+    ? `Idealized category guide with ${wrapped ? "a wrapped selection shown as two edge fragments continuing into the next day" : "one selected course fragment"}. Start is ${startInfo.label}; end is ${endInfo.label}. This is not today's measured solar path.`
+    : "Idealized category guide showing day and twilight thresholds; no valid range is selected. This is not today's measured solar path.";
+  const startPoint = startIndex >= 0 ? TWILIGHT_POINTS[startIndex] : undefined;
+  const endPoint = endIndex >= 0 ? TWILIGHT_POINTS[endIndex] : undefined;
+
+  return (
+    <section className="rw-twilight-guide" role="group" aria-labelledby={headingId}>
+      <h4 id={headingId} className="rw-twilight-heading">Twilight period guide</h4>
+      <svg className="rw-twilight-profile" viewBox="0 0 264 158" role="img" aria-labelledby={`${titleId} ${descriptionId}`}>
+        <title id={titleId}>{title}</title>
+        <desc id={descriptionId}>{description}</desc>
+        <rect className="rw-twilight-band day" x="0" y="8" width="264" height="50" />
+        <rect className="rw-twilight-band civil" x="0" y="58" width="264" height="18" />
+        <rect className="rw-twilight-band nautical" x="0" y="76" width="264" height="18" />
+        <rect className="rw-twilight-band astronomical" x="0" y="94" width="264" height="18" />
+        <rect className="rw-twilight-band night" x="0" y="112" width="264" height="40" />
+        {[{ y: 58, label: "horizon / 0°" }, { y: 76, label: "−6°" }, { y: 94, label: "−12°" }, { y: 112, label: "−18°" }].map((rule) => (
+          <g key={rule.label} className="rw-twilight-threshold">
+            <line x1="0" x2="264" y1={rule.y} y2={rule.y} />
+            <text x="5" y={rule.y - 5}>{rule.label}</text>
+          </g>
+        ))}
+        <g className="rw-twilight-phase-label">
+          <rect x="17" y="9" width="43" height="15" rx="3" />
+          <text className="rw-twilight-phase" x="24" y="20">dawn</text>
+        </g>
+        <g className="rw-twilight-phase-label">
+          <rect x="106" y="9" width="52" height="15" rx="3" />
+          <text className="rw-twilight-phase" x="132" y="20" textAnchor="middle">day sky</text>
+        </g>
+        <g className="rw-twilight-phase-label">
+          <rect x="204" y="9" width="43" height="15" rx="3" />
+          <text className="rw-twilight-phase" x="240" y="20" textAnchor="end">dusk</text>
+        </g>
+        <path className="rw-twilight-course" d={TWILIGHT_COURSE_SEGMENTS.join(" ")} />
+        {selectionPaths.map((path, index) => (
+          <g key={index} className="rw-twilight-selected-fragment" data-fragment={index + 1}>
+            <path className="rw-twilight-selection-outer" d={path} />
+            <path className="rw-twilight-selection-inner" d={path} />
+          </g>
+        ))}
+        {wrapped ? (
+          <g className="rw-twilight-continuation" aria-hidden="true">
+            <text x="8" y="148">← continues</text><text x="256" y="148" textAnchor="end">continues →</text>
+          </g>
+        ) : null}
+        {TWILIGHT_BOUNDARIES.map((boundary, index) => {
+          const point = TWILIGHT_POINTS[index]!;
+          return <circle key={boundary.id} className="rw-twilight-boundary-marker" data-boundary={boundary.id} cx={point.x} cy={point.y} r="2.7"><title>{boundary.label}, {boundary.elevation}</title></circle>;
+        })}
+        {startPoint ? <g className="rw-twilight-endpoint start"><polygon points={`${startPoint.x},${startPoint.y - 6} ${startPoint.x + 6},${startPoint.y} ${startPoint.x},${startPoint.y + 6} ${startPoint.x - 6},${startPoint.y}`} /><text x={startPoint.x} y={startPoint.y - 8} textAnchor="middle">S</text></g> : null}
+        {endPoint ? <g className="rw-twilight-endpoint end"><rect x={endPoint.x - 5} y={endPoint.y - 5} width="10" height="10" rx="1" /><text x={endPoint.x} y={endPoint.y + 15} textAnchor="middle">E</text></g> : null}
+      </svg>
+      <p className="rw-twilight-disclaimer">Idealized sun-angle guide — not today’s measured solar path</p>
+      <p className="rw-twilight-key"><b>Day</b> above horizon · <b>Civil</b> 0 to −6° · <b>Nautical</b> −6 to −12° · <b>Astronomical</b> −12 to −18° · <b>Night</b> below −18°.</p>
+      {startInfo && endInfo ? <p className="rw-twilight-summary">Selected range: <b>S</b> {startInfo.label} → <b>E</b> {endInfo.label}{wrapped ? " · wraps to next day in two continuing fragments" : " · one course fragment"}</p> : null}
+    </section>
+  );
+}
+
 /** The right-hand panel: live values and config editors for the selected node. */
 export function Inspector({
   node,
   results,
   entities,
+  homeLocation = null,
   history = {},
   macros = {},
   onConfig,
@@ -102,6 +200,7 @@ export function Inspector({
   node: NodeData | null;
   results: EvalResults;
   entities: EntityMap;
+  homeLocation?: HomeLocation | null;
   /** Recent value samples for the selected node's output pins, keyed by `nodeId:pinId`. */
   history?: Record<string, Sample[]>;
   /** The macro library, used to inspect a selected macro instance's definition. */
@@ -232,7 +331,7 @@ export function Inspector({
                     <span>{p.label || p.id}</span>
                     <TypeChip type={p.type} />
                   </div>
-                  <BigValue value={results.outputs[pinKey(node.id, p.id)]} unit={p.unit} deviceClass={p.id === "state" ? deviceClass : undefined} />
+                  <BigValue value={results.outputs[pinKey(node.id, p.id)]} unit={p.unit} deviceClass={p.id === "state" ? deviceClass : undefined} timeZone={homeLocation?.timeZone} />
                 </div>
               ))}
             </div>
@@ -242,7 +341,7 @@ export function Inspector({
               {node.outputs.map((p) => (
                 <div key={p.id} className="rw-insp-spark-block">
                   {node.outputs.length > 1 && <span className="rw-pinlist-h">{p.label || p.id}</span>}
-                  <Sparkline history={history[pinKey(node.id, p.id)] ?? []} />
+                  <Sparkline history={history[pinKey(node.id, p.id)] ?? []} timeZone={homeLocation?.timeZone} />
                 </div>
               ))}
             </div>
@@ -299,6 +398,36 @@ export function Inspector({
                 <input type="number" min={1} className="rw-input rw-num" value={Number(cfg.interval ?? 60)} onChange={(e) => set({ interval: Number(e.target.value) })} />
               </label>
               <p className="rw-cfg-note">Fetching runs on the server after deploy. The preview shows the value as loading until then.</p>
+            </>
+          )}
+
+          {node.type === "time-of-day" && (
+            <>
+              <label className="rw-cfg-field">
+                <span>Home-local time</span>
+                <input type="time" aria-label="Home-local time" className="rw-input" value={String(cfg.time ?? "")} onChange={(e) => set({ time: e.target.value })} />
+              </label>
+              <p className="rw-cfg-note">Resolves this wall-clock time on today’s Home Assistant calendar date.</p>
+              <p className="rw-home-location">{homeLocation ? `${homeLocation.timeZone} · ${homeLocation.latitude.toFixed(3)}, ${homeLocation.longitude.toFixed(3)}` : "Home Assistant location unavailable"}</p>
+            </>
+          )}
+
+          {node.type === "twilight" && (
+            <>
+              <label className="rw-cfg-field">
+                <span>Start boundary</span>
+                <select aria-label="Start boundary" className="rw-input" value={String(cfg.start ?? "")} onChange={(e) => set({ start: e.target.value })}>
+                  {TWILIGHT_BOUNDARIES.map((boundary) => <option key={boundary.id} value={boundary.id}>{boundary.label} ({boundary.elevation})</option>)}
+                </select>
+              </label>
+              <label className="rw-cfg-field">
+                <span>End boundary</span>
+                <select aria-label="End boundary" className="rw-input" value={String(cfg.end ?? "")} onChange={(e) => set({ end: e.target.value })}>
+                  {TWILIGHT_BOUNDARIES.map((boundary) => <option key={boundary.id} value={boundary.id}>{boundary.label} ({boundary.elevation})</option>)}
+                </select>
+              </label>
+              <TwilightGuide start={cfg.start} end={cfg.end} />
+              <p className="rw-home-location">Calculated for {homeLocation ? `${homeLocation.timeZone} · ${homeLocation.latitude.toFixed(3)}, ${homeLocation.longitude.toFixed(3)}` : "an unavailable Home Assistant location"}</p>
             </>
           )}
 

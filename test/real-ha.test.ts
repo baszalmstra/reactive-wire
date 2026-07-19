@@ -1,18 +1,34 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const harness = vi.hoisted(() => {
   const listeners = new Map<string, () => void>();
   let stateListener: ((event: unknown) => void) | undefined;
+  let configListener: ((event: unknown) => void) | undefined;
+  const unsubStates = vi.fn(async () => {});
+  const unsubConfig = vi.fn(async () => {});
   const connection = {
     addEventListener: vi.fn((name: string, cb: () => void) => listeners.set(name, cb)),
-    subscribeEvents: vi.fn(async (cb: (event: unknown) => void) => { stateListener = cb; return () => {}; }),
+    removeEventListener: vi.fn((name: string) => listeners.delete(name)),
+    close: vi.fn(),
+    subscribeEvents: vi.fn(async (cb: (event: unknown) => void, eventType?: string) => {
+      if (eventType === "state_changed") {
+        stateListener = cb;
+        return unsubStates;
+      }
+      configListener = cb;
+      return unsubConfig;
+    }),
   };
   return {
     connection,
     listeners,
     getStates: vi.fn(),
+    getConfig: vi.fn(async () => ({ latitude: 52.3676, longitude: 4.9041, elevation: 7, time_zone: "Europe/Amsterdam" })),
     callService: vi.fn(async () => {}),
     stateListener: () => stateListener,
+    configListener: () => configListener,
+    unsubStates,
+    unsubConfig,
   };
 });
 
@@ -20,6 +36,7 @@ vi.mock("home-assistant-js-websocket", () => ({
   createLongLivedTokenAuth: vi.fn(() => ({})),
   createConnection: vi.fn(async () => harness.connection),
   getStates: harness.getStates,
+  getConfig: harness.getConfig,
   callService: harness.callService,
 }));
 
@@ -53,12 +70,23 @@ async function flushPromises(): Promise<void> {
 }
 
 describe("RealHA connection readiness", () => {
+  beforeEach(() => {
+    harness.getConfig.mockReset();
+    harness.getConfig.mockResolvedValue({ latitude: 52.3676, longitude: 4.9041, elevation: 7, time_zone: "Europe/Amsterdam" });
+    harness.connection.subscribeEvents.mockClear();
+    harness.connection.addEventListener.mockClear();
+    harness.connection.removeEventListener.mockClear();
+    harness.connection.close.mockClear();
+    harness.unsubStates.mockClear();
+    harness.unsubConfig.mockClear();
+  });
   it("requires a reconnect full snapshot before becoming ready or calling services", async () => {
     harness.getStates.mockReset();
     harness.callService.mockClear();
     harness.getStates.mockResolvedValueOnce([raw("light.a", "off")]);
     const ha = await RealHA.connect("http://ha.local", "token");
     expect(ha.connectionStatus()).toEqual({ phase: "ready", epoch: 1, snapshotVersion: 1 });
+    expect(ha.homeLocation()).toEqual({ latitude: 52.3676, longitude: 4.9041, elevation: 7, timeZone: "Europe/Amsterdam" });
 
     harness.listeners.get("disconnected")?.();
     expect(ha.connectionStatus()).toEqual({ phase: "disconnected", epoch: 1, snapshotVersion: null });
@@ -149,6 +177,90 @@ describe("RealHA connection readiness", () => {
     expect(updates).toEqual(["added", "removed"]);
     expect(ha.entitiesSnapshot().entities["light.a"]).toBeUndefined();
     expect(readySnapshots).toEqual([undefined]);
+  });
+
+  it("installs lifecycle/config subscriptions before config and retries a transient initial config failure", async () => {
+    vi.useFakeTimers();
+    try {
+      harness.getStates.mockReset();
+      harness.getStates.mockResolvedValue([]);
+      harness.getConfig
+        .mockRejectedValueOnce(new Error("temporary getConfig failure"))
+        .mockResolvedValueOnce({ latitude: 64.1466, longitude: -21.9426, elevation: 10, time_zone: "Atlantic/Reykjavik" });
+
+      const connecting = RealHA.connect("http://ha.local", "token");
+      await flushPromises();
+      expect(harness.connection.addEventListener).toHaveBeenCalledTimes(2);
+      expect(harness.connection.subscribeEvents).toHaveBeenCalledWith(expect.any(Function), "state_changed");
+      expect(harness.connection.subscribeEvents).toHaveBeenCalledWith(expect.any(Function), "core_config_updated");
+      expect(harness.getConfig).toHaveBeenCalledTimes(1);
+
+      await vi.advanceTimersByTimeAsync(HA_SYNC_RETRY_BASE_MS);
+      const ha = await connecting;
+      expect(ha.connectionStatus().phase).toBe("ready");
+      expect(ha.homeLocation()).toEqual({ latitude: 64.1466, longitude: -21.9426, elevation: 10, timeZone: "Atlantic/Reykjavik" });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("resynchronizes config and entities before making a core config update ready", async () => {
+    harness.getStates.mockReset();
+    harness.getStates.mockResolvedValueOnce([raw("sensor.place", "old")]);
+    const ha = await RealHA.connect("http://ha.local", "token");
+    const locations: unknown[] = [];
+    ha.onLocation((location) => locations.push(location));
+
+    let resolveStates!: (states: unknown[]) => void;
+    harness.getStates.mockImplementationOnce(() => new Promise((resolve) => { resolveStates = resolve; }));
+    harness.getConfig.mockResolvedValueOnce({ latitude: -33.8688, longitude: 151.2093, elevation: 58, time_zone: "Australia/Sydney" });
+    harness.configListener()?.({ event_type: "core_config_updated", data: {} });
+    await flushPromises();
+    expect(ha.connectionStatus()).toMatchObject({ phase: "syncing", epoch: 2, snapshotVersion: null });
+    expect(ha.homeLocation()?.timeZone).toBe("Europe/Amsterdam");
+
+    resolveStates([raw("sensor.place", "new")]);
+    await vi.waitFor(() => expect(ha.connectionStatus().phase).toBe("ready"));
+    expect(ha.homeLocation()).toEqual({ latitude: -33.8688, longitude: 151.2093, elevation: 58, timeZone: "Australia/Sydney" });
+    expect(ha.entitiesSnapshot().entities["sensor.place"]?.state).toBe("new");
+    expect(locations).toEqual([{ latitude: -33.8688, longitude: 151.2093, elevation: 58, timeZone: "Australia/Sydney" }]);
+  });
+
+  it("keeps a malformed config epoch non-ready and cleans up subscriptions on stop", async () => {
+    vi.useFakeTimers();
+    try {
+      harness.getStates.mockReset();
+      harness.getStates.mockResolvedValue([]);
+      const ha = await RealHA.connect("http://ha.local", "token");
+      harness.getConfig.mockResolvedValue({ latitude: 200, longitude: 0, elevation: 0, time_zone: "UTC" });
+      harness.configListener()?.({ event_type: "core_config_updated", data: {} });
+      await flushPromises();
+      expect(ha.connectionStatus().phase).toBe("syncing");
+      await vi.advanceTimersByTimeAsync(HA_SYNC_RETRY_BASE_MS);
+      expect(ha.connectionStatus().phase).toBe("syncing");
+
+      ha.stop();
+      expect(harness.unsubStates).toHaveBeenCalledOnce();
+      expect(harness.unsubConfig).toHaveBeenCalledOnce();
+      expect(harness.connection.removeEventListener).toHaveBeenCalledTimes(2);
+      expect(harness.connection.close).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("closes synchronously while handling rejecting async unsubscribe callbacks", async () => {
+    harness.getStates.mockReset();
+    harness.getStates.mockResolvedValue([]);
+    const ha = await RealHA.connect("http://ha.local", "token");
+    harness.unsubStates.mockImplementationOnce(async () => { throw new Error("socket already closed"); });
+    harness.unsubConfig.mockImplementationOnce(async () => { throw new Error("socket already closed"); });
+
+    expect(() => ha.stop()).not.toThrow();
+    expect(harness.connection.close).toHaveBeenCalledOnce();
+    await flushPromises();
+    expect(harness.unsubStates).toHaveBeenCalledOnce();
+    expect(harness.unsubConfig).toHaveBeenCalledOnce();
   });
 
   it("retries a failed reconnect snapshot without another transport-ready event", async () => {

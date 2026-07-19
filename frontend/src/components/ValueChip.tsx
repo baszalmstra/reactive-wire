@@ -23,12 +23,14 @@ export function ValueChip({
   value,
   unit,
   anatomy = "chips",
+  timeZone,
 }: {
   value: RWValue | null | undefined;
   unit?: string;
   anatomy?: Anatomy;
+  timeZone?: string;
 }) {
-  const f = formatValue(value);
+  const f = formatValue(value, timeZone);
   const isTyped = value && (value.status === "ok" || value.status === "stale");
   const typeColor = isTyped ? TYPE_VAR[value.type] : undefined;
   const kindClass = f.kind === "error" ? ERR : f.kind === "unavail" || f.kind === "none" ? EMPTY : TINTED;

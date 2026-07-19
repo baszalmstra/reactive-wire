@@ -39,6 +39,19 @@ describe("macro preview evaluation", () => {
     expect(evaluateMacroPreview(high.nodes, high.edges, NO_MACROS).outputs[pinKey("rising", "out")]?.v).toBe(false);
   });
 
+  it("threads the Home Assistant environment into environmental node previews", () => {
+    const time = REGISTRY["time-of-day"]!.template.make("home-time");
+    time.config = { time: "12:00" };
+    const environment = { homeLocation: { latitude: 52.3676, longitude: 4.9041, elevation: 0, timeZone: "Europe/Amsterdam" } };
+    const result = evaluateMacroPreview([time], NO_EDGES, NO_MACROS, environment);
+    expect(result.outputs[pinKey("home-time", "time")]).toEqual({
+      type: "datetime",
+      status: "ok",
+      v: Date.parse("1970-01-01T11:00:00Z"),
+    });
+    expect(evaluateMacroPreview([time], NO_EDGES, NO_MACROS).outputs[pinKey("home-time", "time")]?.status).toBe("unavailable");
+  });
+
   it("does not recompute for unrelated StrictMode rerenders", async () => {
     const nodes = [boolSource(true)];
     const { result, rerender } = renderHook(

@@ -6,7 +6,7 @@ import { Icon } from "../components/Icon.js";
 import { DeviceClassIcon } from "../components/DeviceClassIcon.js";
 import { HealthDot, MemBadge } from "../components/Badges.js";
 import { ValueChip } from "../components/ValueChip.js";
-import { DirSelect, LightGlyph, OpSelect, PinValueEditor, SinkPanel, UnitSelect } from "../components/Widgets.js";
+import { BoundsModeSelect, DirSelect, LightGlyph, OpSelect, PinValueEditor, SinkPanel, UnitSelect } from "../components/Widgets.js";
 import { portTone } from "../components/port-style.js";
 import { useNodeResults } from "./results-context.js";
 import type { PinDef } from "../../../shared/node-types.js";
@@ -28,9 +28,18 @@ function knobClass(pin: PinDef, toneClass: string): string {
 /** A graph node rendered on the React Flow canvas, with a Handle per typed pin. */
 export function RWNode({ id, data, selected }: NodeProps<RWNodeType>) {
   const def = data.def;
-  const { results, actuating, entities, onConfig, onSetValue } = useNodeResults(id, def);
+  const { results, actuating, entities, homeLocation, onConfig, onSetValue } = useNodeResults(id, def);
   const g = nodeGeom(def);
   const health = results.health[id] ?? "ok";
+  const inputType = (pin: PinDef): string => {
+    const ownType = results.inputs[pinKey(id, pin.id)]?.type;
+    if (ownType && ownType !== "any") return ownType;
+    for (const groupedPin of def.typeGroup ?? []) {
+      const groupedType = results.inputs[pinKey(id, groupedPin)]?.type;
+      if (groupedType && groupedType !== "any") return groupedType;
+    }
+    return pin.type;
+  };
 
   // For an entity node, the device class of its live entity selects a small symbol shown next to
   // the state value. It is unknown for non-entity nodes and for entities the feed does not report.
@@ -157,7 +166,7 @@ export function RWNode({ id, data, selected }: NodeProps<RWNodeType>) {
                         <PinValueEditor
                           compact
                           value={def.values?.[p.id]}
-                          type={results.inputs[pinKey(id, p.id)]?.type ?? p.type}
+                          type={inputType(p)}
                           ariaLabel={p.label || p.id}
                           defaultDurationUnit={lightTransition ? "sec" : undefined}
                           minDurationSeconds={lightTransition ? 0 : undefined}
@@ -192,7 +201,7 @@ export function RWNode({ id, data, selected }: NodeProps<RWNodeType>) {
                   <>
                     <span className={cn("text-[11px] whitespace-nowrap", p.ghost ? "text-rw-error" : "text-rw-dim")}>{p.label}</span>
                     {p.id === "state" && <DeviceClassIcon deviceClass={deviceClass} />}
-                    <ValueChip value={results.outputs[pinKey(id, p.id)]} unit={p.unit} />
+                    <ValueChip value={results.outputs[pinKey(id, p.id)]} unit={p.unit} timeZone={homeLocation?.timeZone} />
                   </>
                 )}
               </div>
@@ -203,6 +212,16 @@ export function RWNode({ id, data, selected }: NodeProps<RWNodeType>) {
           <div className="mx-3 mt-2 flex items-center gap-1.5">
             <span className="text-[10px] text-rw-faint">op</span>
             <OpSelect value={String(def.config?.op ?? "<")} type={results.inputs[pinKey(id, "a")]?.type ?? "any"} onChange={(v) => onConfig(id, { op: v })} />
+          </div>
+        )}
+        {def.type === "between" && (
+          <div className="mx-3 mt-2 flex items-center gap-1.5">
+            <span className="text-[10px] text-rw-faint shrink-0">bounds</span>
+            <BoundsModeSelect
+              includeMin={def.config?.includeMin !== false}
+              includeMax={def.config?.includeMax === true}
+              onChange={(mode) => onConfig(id, mode)}
+            />
           </div>
         )}
         {def.type === "duration" && (

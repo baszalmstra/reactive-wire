@@ -2,6 +2,7 @@
 // snapshot map), so the HA layer produces that canonical type directly rather than a parallel one.
 import type { EntitySnapshot, EntityState, EntityUpdate } from "../../shared/entities.js";
 import type { HAConnectionStatus } from "../../shared/ha-status.js";
+import type { HomeLocation } from "../../shared/home.js";
 export type { EntitySnapshot, EntityState, EntityUpdate };
 export type { HAConnectionPhase, HAConnectionStatus } from "../../shared/ha-status.js";
 
@@ -16,10 +17,16 @@ export interface HAClient {
   callService(call: ServiceCall): void | Promise<void>;
   connectionStatus(): HAConnectionStatus;
   onConnection(cb: (status: HAConnectionStatus) => void): () => void;
+  /** Release transport resources when the process shuts down. */
+  stop?(): void;
 }
 
 /** A live, versioned feed backed by one canonical server-owned entity map. */
 export interface EntityFeed {
+  /** Latest authoritative site metadata from Home Assistant; null until it is synchronized. */
+  homeLocation(): HomeLocation | null;
+  /** Subscribe to authoritative location replacements; returns an unsubscribe function. */
+  onLocation(cb: (location: HomeLocation | null) => void): () => void;
   /** The current state and monotonic version. Callers must treat the returned map as immutable. */
   entitiesSnapshot(): EntitySnapshot;
   /** Subscribe to ordered full/delta updates; returns an unsubscribe function. */

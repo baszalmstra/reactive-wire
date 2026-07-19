@@ -1,3 +1,5 @@
+import type { TwilightBoundary } from "./twilight.js";
+
 /** Domain-level value kinds. This module has no presentation or DOM dependencies. */
 export type ValueType = "bool" | "num" | "str" | "color" | "duration" | "datetime" | "any";
 
@@ -29,7 +31,10 @@ export interface NodeConfigByType {
   entity: { entity_id: string };
   fetch: { url: string; interval?: number; path?: string; as: ValueType };
   compare: { op: string };
+  between: { includeMin: boolean; includeMax: boolean };
   "dt-shift": { dir: "plus" | "minus" };
+  "time-of-day": { time: string };
+  twilight: { start: TwilightBoundary; end: TwilightBoundary };
   duration: { unit: "ms" | "sec" | "min" | "hr" | "day" };
   "sink-call": { entity_id: string; domain: string; service: string; service_off?: string };
   "sink-light": { entity_id: string };

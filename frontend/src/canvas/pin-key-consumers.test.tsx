@@ -12,11 +12,11 @@ import type { RWNodeType } from "./validation.js";
 
 const noop = () => {};
 
-function renderNode(def: NodeData, results = emptyResults()) {
+function renderNode(def: NodeData, results = emptyResults(), timeZone?: string) {
   const props = { id: def.id, data: { def }, selected: false } as unknown as NodeProps<RWNodeType>;
   return render(
     <ReactFlowProvider>
-      <ResultsProvider value={{ results, actuating: false, entities: {}, onConfig: noop, onSetValue: noop }}>
+      <ResultsProvider value={{ results, actuating: false, entities: {}, homeLocation: timeZone ? { latitude: 0, longitude: 0, elevation: 0, timeZone } : null, onConfig: noop, onSetValue: noop }}>
         <RWNode {...props} />
       </ResultsProvider>
     </ReactFlowProvider>,
@@ -66,6 +66,17 @@ describe("collision-free frontend result consumers", () => {
     );
     expect(screen.getAllByText("on").length).toBeGreaterThan(0);
     expect(screen.getByText(/^#123456/)).toBeTruthy();
+  });
+
+  it("formats generic canvas datetime output chips in the Home Assistant timezone", () => {
+    const def: NodeData = {
+      id: "time", type: "now", title: "Time", subtitle: "Time", icon: "timestamp", x: 0, y: 0,
+      inputs: [], outputs: [{ id: "out", label: "out", type: "datetime" }],
+    };
+    const results = emptyResults();
+    results.outputs[pinKey(def.id, "out")] = V("datetime", Date.parse("2026-06-15T12:00:00Z"));
+    renderNode(def, results, "Pacific/Kiritimati");
+    expect(screen.getByText(/(?:Jun.*16|16.*Jun).*02:00/)).toBeTruthy();
   });
 
   it("resolves compare operator choices for a delimiter-containing node id", () => {

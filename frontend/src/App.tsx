@@ -48,6 +48,7 @@ import { isMacroInstance, makeMacroInstance, type MacroDef, type MacroMap } from
 import { MacroEditor } from "./canvas/MacroEditor.js";
 import { MacroList } from "./canvas/MacroList.js";
 import { useServer } from "./server-conn.js";
+import { DEMO_HOME_LOCATION, type HomeLocation } from "../../shared/home.js";
 import { deriveProblems, problemCounts } from "./canvas/problems.js";
 import { ProblemsPanel } from "./components/ProblemsPanel.js";
 import { Banner, HAStatusBanner } from "./components/Banner.js";
@@ -189,6 +190,8 @@ export function App() {
   // reconnect gap keeps the last server snapshot rather than restarting 90 ms canvas updates.
   const simEntities = useSimulatedEntities(!hasSeenServer);
   const entities = server.connected ? server.entities : hasSeenServer ? server.entities : simEntities;
+  const homeLocation = hasSeenServer ? server.homeLocation : DEMO_HOME_LOCATION;
+  const evaluationEnvironment = useMemo(() => ({ homeLocation }), [homeLocation]);
   const paletteTemplates = PALETTE;
 
   // A transient message bottom-right; the latest one replaces any earlier one.
@@ -246,6 +249,7 @@ export function App() {
     nodeDefs: NodeData[];
     viewEdges: ViewEdge[];
     entities: EntityMap;
+    homeLocation: HomeLocation | null;
     now: number;
     macros: MacroMap;
   } | null>(null);
@@ -257,15 +261,16 @@ export function App() {
       previous.nodeDefs === nodeDefs &&
       previous.viewEdges === viewEdges &&
       previous.entities === entities &&
+      previous.homeLocation === homeLocation &&
       previous.now === now &&
       previous.macros === macroLib.macros
     ) {
       return;
     }
-    previewCommit.current = { activeFlowId, nodeDefs, viewEdges, entities, now, macros: macroLib.macros };
+    previewCommit.current = { activeFlowId, nodeDefs, viewEdges, entities, homeLocation, now, macros: macroLib.macros };
     const flowMemory = (memories.current[activeFlowId] ??= createMemory());
-    setLiveResults(evaluate(nodeDefs, viewEdges, entities, flowMemory, now, {}, macroLib.macros));
-  }, [activeFlowId, nodeDefs, viewEdges, entities, now, macroLib.macros]);
+    setLiveResults(evaluate(nodeDefs, viewEdges, entities, flowMemory, now, {}, macroLib.macros, evaluationEnvironment));
+  }, [activeFlowId, nodeDefs, viewEdges, entities, homeLocation, now, macroLib.macros, evaluationEnvironment]);
   const deploy = server.deploy;
 
   useCollabDocument({
@@ -692,11 +697,11 @@ export function App() {
     if (!server.runtimeState || !runtimeMatchesDraft) return localValueHistory;
     return mergeServerHistory(localValueHistory, server.runtimeState, activeFlowId, observedPins);
   }, [activeFlowId, localValueHistory, observedPins, runtimeMatchesDraft, server.runtimeState]);
-  const displayEdges = useRWEdgeData(edges, rwNodes, results);
+  const displayEdges = useRWEdgeData(edges, rwNodes, results, homeLocation?.timeZone);
 
   const resultsContextValue = useMemo(
-    () => ({ results, actuating, entities, onConfig, onSetValue }),
-    [results, actuating, entities, onConfig, onSetValue],
+    () => ({ results, actuating, entities, homeLocation, onConfig, onSetValue }),
+    [results, actuating, entities, homeLocation, onConfig, onSetValue],
   );
 
   return (
@@ -912,7 +917,7 @@ export function App() {
           />
         </div>
         <div className="rw-inspector-wrap flex min-h-0">
-          <Inspector node={selectedDef} results={results} entities={entities} history={valueHistory} macros={macroLib.macros} onConfig={onConfig} onSetValue={onSetValue} onEditMacro={editMacroById} />
+          <Inspector node={selectedDef} results={results} entities={entities} homeLocation={homeLocation} history={valueHistory} macros={macroLib.macros} onConfig={onConfig} onSetValue={onSetValue} onEditMacro={editMacroById} />
         </div>
       </div>
 
@@ -963,6 +968,7 @@ export function App() {
           aesthetic={aesthetic}
           mode={mode}
           themeVars={themeVars}
+          environment={evaluationEnvironment}
           onSave={saveMacro}
           onClose={() => setEditingMacro(null)}
         />

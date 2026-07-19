@@ -1,7 +1,7 @@
 import type { NodeData } from "../../../shared/node-types.js";
 import type { EvalResults } from "../../../shared/results.js";
 import { cn } from "../cn.js";
-import { PinValueEditor, OpSelect } from "../components/Widgets.js";
+import { BoundsModeSelect, PinValueEditor, OpSelect } from "../components/Widgets.js";
 import { pinKey } from "../../../shared/identity.js";
 
 /**
@@ -26,10 +26,19 @@ export function NodeValueEditors({
   const outs = node.outputs.filter((p) => p.editable);
   const ins = node.inputs.filter((p) => p.editable && !results.connected[pinKey(id, p.id)]);
   const isCompare = node.type === "compare";
-  if (!isCompare && outs.length === 0 && ins.length === 0) return null;
+  const isBetween = node.type === "between";
+  if (!isCompare && !isBetween && outs.length === 0 && ins.length === 0) return null;
 
-  // For a generic pin, prefer the resolved type from the live value.
-  const typeOf = (pinId: string, fallback: string) => results.inputs[pinKey(id, pinId)]?.type ?? fallback;
+  // For a generic pin, prefer its live type, then a concrete type resolved elsewhere in its group.
+  const typeOf = (pinId: string, fallback: string) => {
+    const ownType = results.inputs[pinKey(id, pinId)]?.type;
+    if (ownType && ownType !== "any") return ownType;
+    for (const groupedPin of node.typeGroup ?? []) {
+      const groupedType = results.inputs[pinKey(id, groupedPin)]?.type;
+      if (groupedType && groupedType !== "any") return groupedType;
+    }
+    return fallback;
+  };
 
   return (
     <div className={cn("flex flex-col gap-[9px]", !inset && "mx-3 mt-[9px]")}>
@@ -37,6 +46,16 @@ export function NodeValueEditors({
         <div className="flex items-center gap-1.5">
           <span className="text-[10px] text-rw-faint w-12 shrink-0">operator</span>
           <OpSelect value={String(node.config?.op ?? "<")} type={typeOf("a", "any")} onChange={(v) => onConfig(id, { op: v })} />
+        </div>
+      )}
+      {isBetween && (
+        <div className="flex items-center gap-1.5">
+          <span className="text-[10px] text-rw-faint w-20 shrink-0">bounds mode</span>
+          <BoundsModeSelect
+            includeMin={node.config?.includeMin !== false}
+            includeMax={node.config?.includeMax === true}
+            onChange={(mode) => onConfig(id, mode)}
+          />
         </div>
       )}
       {outs.map((p) => (

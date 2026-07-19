@@ -89,7 +89,7 @@ export interface DeployerSnapshot {
 }
 
 export type EvaluationCause =
-  | { kind: "deploy" | "ha-full" | "ha-ready" }
+  | { kind: "deploy" | "ha-full" | "ha-ready" | "location" }
   | { kind: "entities"; entityIds: readonly string[] }
   | { kind: "fetch"; nodeId: string }
   | { kind: "clock" }
@@ -338,6 +338,7 @@ export class Deployer {
   private readonly poller: Poller;
   private readonly unsubscribeEntities: () => void;
   private readonly unsubscribeConnection: () => void;
+  private readonly unsubscribeLocation: () => void;
   private stopped = false;
   private lastResults: EvalResults | null = null;
   private lastRunAt: number | null = null;
@@ -362,6 +363,7 @@ export class Deployer {
   ) {
     this.unsubscribeEntities = ha.onEntities((update) => this.entitiesChanged(update));
     this.unsubscribeConnection = ha.onConnection((status) => this.connectionChanged(status));
+    this.unsubscribeLocation = ha.onLocation(() => this.run({ kind: "location" }));
     this.poller = new Poller(fetchFn, (nodeId) => this.run({ kind: "fetch", nodeId }));
   }
 
@@ -436,6 +438,7 @@ export class Deployer {
     this.generation += 1;
     this.unsubscribeEntities();
     this.unsubscribeConnection();
+    this.unsubscribeLocation();
     if (this.tick !== null) {
       clearInterval(this.tick);
       this.tick = null;
@@ -664,7 +667,7 @@ export class Deployer {
   }
 
   private dirtyRoots(cause: EvaluationCause): Iterable<string> | null {
-    if (!this.graph || cause.kind === "deploy" || cause.kind === "ha-full" || cause.kind === "ha-ready") return null;
+    if (!this.graph || cause.kind === "deploy" || cause.kind === "ha-full" || cause.kind === "ha-ready" || cause.kind === "location") return null;
     if (cause.kind === "clock") return this.graph.clockRoots;
     if (cause.kind === "fetch" || cause.kind === "sink-retry") return [cause.nodeId];
     if (cause.kind !== "entities") return [];
@@ -688,6 +691,7 @@ export class Deployer {
       this.mem,
       transactionNow,
       this.poller.sources(),
+      { homeLocation: this.ha.homeLocation() },
     );
     if (transaction.evaluatedNodeIds.length === 0) return;
     this.durable?.capture(this.graph.durableNodes, this.mem);

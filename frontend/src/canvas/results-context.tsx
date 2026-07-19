@@ -13,12 +13,15 @@ import type { NodeData } from "../../../shared/node-types.js";
 import type { RWValue } from "../../../shared/value.js";
 import { pinKey } from "../../../shared/identity.js";
 import { createRecord } from "../../../shared/record.js";
+import type { HomeLocation } from "../../../shared/home.js";
 
 export interface ResultsCtx {
   results: EvalResults;
   actuating: boolean;
   /** The live entity feed, used to read per-entity metadata such as device_class. */
   entities: EntityMap;
+  /** Authoritative Home Assistant civil-time location used for datetime display. */
+  homeLocation?: HomeLocation | null;
   onConfig: (id: string, patch: Record<string, unknown>) => void;
   onSetValue: (id: string, pin: string, value: unknown) => void;
 }
@@ -33,6 +36,7 @@ const EMPTY_CONTEXT: ResultsCtx = {
   results: emptyResults(),
   actuating: false,
   entities: {},
+  homeLocation: null,
   onConfig: () => {},
   onSetValue: () => {},
 };
@@ -122,6 +126,7 @@ function selectNode(source: ResultsCtx, nodeId: string, def: NodeData): NodeSele
     results,
     actuating: source.actuating,
     entities,
+    homeLocation: source.homeLocation,
     onConfig: source.onConfig,
     onSetValue: source.onSetValue,
     deviceClass: entity?.attributes?.device_class,
@@ -130,7 +135,7 @@ function selectNode(source: ResultsCtx, nodeId: string, def: NodeData): NodeSele
 
 function sameSelection(a: NodeSelection, b: NodeSelection, nodeId: string, def: NodeData): boolean {
   if (a.actuating !== b.actuating || a.onConfig !== b.onConfig || a.onSetValue !== b.onSetValue
-    || !Object.is(a.deviceClass, b.deviceClass) || a.results.health[nodeId] !== b.results.health[nodeId]
+    || a.homeLocation !== b.homeLocation || !Object.is(a.deviceClass, b.deviceClass) || a.results.health[nodeId] !== b.results.health[nodeId]
     || !sameAction(a.results.actions[nodeId], b.results.actions[nodeId])
     || !sameCall(a.results.sinks[nodeId], b.results.sinks[nodeId])) return false;
   for (const pin of def.inputs) {

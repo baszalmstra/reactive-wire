@@ -4,6 +4,7 @@ import type { EntityMap } from "../entities.js";
 import type { RWValue } from "../value.js";
 import type { ServiceCall } from "../results.js";
 import type { NodeMemory, SourceMap } from "./engine-support.js";
+import type { EvaluationEnvironment } from "../home.js";
 import { createRecord, setOwn } from "../record.js";
 
 /** A config field a node needs set when it's created (drives the on-drop popup). */
@@ -60,6 +61,8 @@ export interface EvalCtx<TType extends string = string> {
   entities: EntityMap;
   now: number;
   sources: SourceMap;
+  /** Authoritative site metadata sampled with this evaluation; absent for legacy/offline callers. */
+  environment: EvaluationEnvironment;
 }
 
 /** Everything a sink's evalSink needs to build its desired service call. */
