@@ -54,7 +54,6 @@ test.describe.serial("Mobile delete controls", () => {
 
     await page.getByRole("button", { name: "Delete" }).click();
     await expect(page.getByRole("dialog", { name: "Delete selection?" })).toContainText("1 node and 1 wire");
-    await page.screenshot({ path: "test-results/mobile-delete-confirmation.png" });
     await page.getByRole("dialog", { name: "Delete selection?" }).getByRole("button", { name: "Delete" }).click();
 
     await expect(nodes(page)).toHaveCount(1);

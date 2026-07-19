@@ -36,14 +36,6 @@ jobs:
         run: pixi run e2e
 
 
-      - name: Upload mobile delete screenshot
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: mobile-delete-screenshot
-          path: test-results/mobile-delete-confirmation.png
-          if-no-files-found: ignore
-
       - name: Upload Playwright artifacts
         if: failure()
         uses: actions/upload-artifact@v4
