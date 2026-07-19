@@ -585,7 +585,7 @@
   /* The right inspector becomes a bottom sheet. */
   .rw-inspector-wrap {
     position: fixed; left: 0; right: 0; bottom: calc(60px + env(safe-area-inset-bottom)); top: auto; z-index: 50;
-    height: 64vh; transform: translateY(102%); transition: transform .26s cubic-bezier(.3,.8,.3,1);
+    height: 64vh; transform: translateY(calc(102% + 60px + env(safe-area-inset-bottom))); transition: transform .26s cubic-bezier(.3,.8,.3,1);
     box-shadow: 0 -16px 50px -16px rgba(0,0,0,.5); border-radius: 16px 16px 0 0; overflow: hidden;
   }
   .rw-app-mobile.sheet-open .rw-inspector-wrap { transform: none; }
