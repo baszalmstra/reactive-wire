@@ -33,6 +33,7 @@ export function ModalDialog({
   describedBy,
   initialFocusRef,
   closeOnBackdrop = true,
+  fullScreen = false,
   className = "",
   children,
 }: {
@@ -42,6 +43,7 @@ export function ModalDialog({
   describedBy?: string;
   initialFocusRef?: RefObject<HTMLElement | null>;
   closeOnBackdrop?: boolean;
+  fullScreen?: boolean;
   className?: string;
   children: ReactNode;
 }) {
@@ -127,7 +129,7 @@ export function ModalDialog({
       aria-describedby={describedBy}
       aria-modal="true"
       tabIndex={-1}
-      className={`rw-modal m-auto border-0 bg-transparent p-0 text-rw-text ${className}`}
+      className={`rw-modal m-auto border-0 bg-transparent p-0 text-rw-text ${fullScreen ? "max-w-none max-h-none" : "max-w-[calc(100vw-2rem)] max-h-[calc(100vh-2rem)]"} ${className}`}
       onKeyDown={handleKeyDown}
       onMouseDown={handleMouseDown}
     >

@@ -205,6 +205,7 @@ export function MacroEditor({
       labelledBy={titleId}
       describedBy={descriptionId}
       closeOnBackdrop={false}
+      fullScreen
       className="fixed inset-0 m-0 w-screen h-screen overflow-hidden"
     >
       <div className="h-full flex flex-col bg-rw-bg text-rw-text text-[13px]" style={themeVars}>
