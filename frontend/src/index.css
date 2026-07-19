@@ -594,7 +594,7 @@
 
   /* Bottom action bar. */
   .rw-mobilebar {
-    display: flex; position: fixed; left: 0; right: 0; bottom: 0; z-index: 45; height: 60px;
+    display: flex; position: fixed; left: 0; right: 0; bottom: 0; z-index: 45; height: calc(60px + env(safe-area-inset-bottom));
     background: var(--rw-panel); border-top: 1px solid var(--rw-line);
     padding: 4px 4px calc(4px + env(safe-area-inset-bottom));
     justify-content: space-around; align-items: stretch;
@@ -618,9 +618,22 @@
   .rw-app-mobile.nav-open .rw-scrim, .rw-app-mobile.sheet-open .rw-scrim { display: block; }
 
   /* Leave room for the bottom bar and make touch targets generous without enlarging the knob. */
-  .rw-mobile-stage { padding-bottom: 60px; }
+  .rw-mobile-stage { padding-bottom: calc(60px + env(safe-area-inset-bottom)); }
+  .rw-problems-panel { bottom: calc(72px + env(safe-area-inset-bottom)); }
   .react-flow__handle.rw-port { width: 36px; height: 36px; }
   .rw-knob { width: 14px; height: 14px; }
+}
+
+@media (max-width: 560px) {
+  /* A single stack keeps each diagnostic readable and actionable on narrow phones. */
+  .rw-problems-content { flex-direction: column; }
+  .rw-problems-divider { display: none; }
+  .rw-problem-row { align-items: flex-start; }
+  .rw-problem-copy { flex-direction: column; align-items: stretch; gap: 2px; }
+  .rw-problem-title, .rw-problem-message {
+    max-width: none; overflow: visible; text-overflow: clip; white-space: normal; overflow-wrap: anywhere;
+  }
+  .rw-problem-focus { opacity: 1; align-self: center; }
 }
 
 @media (max-width: 460px) {
