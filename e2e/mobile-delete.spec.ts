@@ -22,6 +22,7 @@ async function usePhoneLayout(page: Page): Promise<void> {
   await page.goto("/");
   await expect(page.getByLabel("Home Assistant connected")).toBeAttached();
   await clearPhoneCanvas(page);
+  await closeInspector(page);
 }
 
 async function addMobileNode(page: Page, label: string) {
