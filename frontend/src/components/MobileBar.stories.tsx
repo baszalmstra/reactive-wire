@@ -25,6 +25,7 @@ const handlers = {
   onRedo: () => {},
   onProblems: () => {},
   onInspect: () => {},
+  onDelete: () => {},
 };
 
 export const Default: Story = {

@@ -267,6 +267,8 @@
 .rw-btn.sm { height: 28px; padding: 0 11px; font-size: 11.5px; }
 .rw-btn.primary { background: var(--rw-accent); color: var(--rw-accent-text); }
 .rw-btn.primary:hover:not(:disabled) { filter: brightness(1.08); }
+.rw-btn.danger { background: var(--rw-h-error); color: var(--rw-health-on); }
+.rw-btn.danger:hover { filter: brightness(1.08); }
 .rw-pinlist { display: flex; flex-direction: column; gap: 5px; }
 .rw-pinlist-h { font-size: 9.5px; color: var(--rw-faint); text-transform: uppercase; letter-spacing: .05em; margin: 4px 0 1px; }
 .rw-pinlist-row { display: flex; align-items: center; gap: 9px; font-size: 11.5px; color: var(--rw-dim); }
@@ -582,8 +584,8 @@
 
   /* The right inspector becomes a bottom sheet. */
   .rw-inspector-wrap {
-    position: fixed; left: 0; right: 0; bottom: 0; top: auto; z-index: 50;
-    height: 64vh; transform: translateY(102%); transition: transform .26s cubic-bezier(.3,.8,.3,1);
+    position: fixed; left: 0; right: 0; bottom: calc(60px + env(safe-area-inset-bottom)); top: auto; z-index: 50;
+    height: 64vh; transform: translateY(calc(102% + 60px + env(safe-area-inset-bottom))); transition: transform .26s cubic-bezier(.3,.8,.3,1);
     box-shadow: 0 -16px 50px -16px rgba(0,0,0,.5); border-radius: 16px 16px 0 0; overflow: hidden;
   }
   .rw-app-mobile.sheet-open .rw-inspector-wrap { transform: none; }
@@ -601,10 +603,11 @@
   }
   .rw-mbtn {
     position: relative; flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
-    gap: 3px; border: 0; background: transparent; color: var(--rw-dim); font: inherit; cursor: pointer; border-radius: 9px;
+    min-width: 44px; min-height: 44px; gap: 3px; border: 0; background: transparent; color: var(--rw-dim); font: inherit; cursor: pointer; border-radius: 9px;
   }
   .rw-mbtn:disabled { opacity: .38; }
   .rw-mbtn.active { color: var(--rw-accent); }
+  .rw-mbtn.danger:not(:disabled) { color: var(--rw-h-error-fg); }
   .rw-mbtn-ico { display: flex; }
   .rw-mbtn-ico svg { width: 21px; height: 21px; }
   .rw-mbtn-label { font-size: 9.5px; font-weight: 600; letter-spacing: .01em; }
@@ -638,6 +641,7 @@
 
 @media (max-width: 460px) {
   .rw-mbtn-label { display: none; }
+  .rw-mbtn.danger .rw-mbtn-label { display: block; font-size: 8px; }
   .rw-mbtn-ico svg { width: 23px; height: 23px; }
 }
 
