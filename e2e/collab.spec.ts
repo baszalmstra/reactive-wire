@@ -75,6 +75,25 @@ test.describe.serial("Reactive Wire collaboration between two clients", () => {
     await expect(inputB).toHaveValue("42", { timeout: 10_000 });
   });
 
+  test("lets a mobile client turn off shared auto-deploy", async ({ page, context }) => {
+    const desktopAutoDeploy = page.getByRole("checkbox", { name: "auto-deploy" });
+    await page.locator(".rw-autodeploy").click();
+    await expect(desktopAutoDeploy).toBeChecked();
+
+    const mobile = await context.newPage();
+    await mobile.setViewportSize({ width: 320, height: 568 });
+    await mobile.goto("/");
+    await expect(mobile.getByRole("button", { name: "Deploy enabled" })).toBeEnabled({ timeout: 10_000 });
+
+    const mobileAutoDeploy = mobile.getByRole("checkbox", { name: "auto-deploy" });
+    await expect(mobileAutoDeploy).toBeChecked({ timeout: 10_000 });
+    await expect(mobile.getByText("Shared · deploys live after edits")).toBeVisible();
+
+    await mobile.locator(".rw-mobile-autodeploy").click();
+    await expect(mobileAutoDeploy).not.toBeChecked();
+    await expect(desktopAutoDeploy).not.toBeChecked({ timeout: 10_000 });
+  });
+
   test("converges when both pages add a different node at the same time", async ({ page, context }) => {
     const second = await openSecondClient(page, context);
 

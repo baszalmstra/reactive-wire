@@ -924,6 +924,21 @@ export function App() {
       {isMobile && (
         <>
           <div className="rw-scrim" onPointerDown={() => { setNavOpen(false); setSheetOpen(false); }} />
+          <label className="rw-mobile-autodeploy" title="Shared setting: the server deploys enabled flows after graph edits">
+            <span className="rw-mobile-autodeploy-copy">
+              <span className="rw-mobile-autodeploy-label">Auto-deploy</span>
+              <span id="rw-mobile-autodeploy-note" className="rw-mobile-autodeploy-note">Shared · deploys live after edits</span>
+            </span>
+            <span className="rw-mobile-autodeploy-value">{autoDeploy ? "On" : "Off"}</span>
+            <input
+              type="checkbox"
+              aria-label="auto-deploy"
+              aria-describedby="rw-mobile-autodeploy-note"
+              checked={autoDeploy}
+              onChange={(e) => setAutoDeploy(e.target.checked)}
+            />
+            <span className="rw-mobile-switch" aria-hidden="true" />
+          </label>
           <MobileBar
             onNodes={() => setNavOpen(true)}
             onComment={addComment}
