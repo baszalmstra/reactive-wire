@@ -104,9 +104,26 @@ describe("FlowTabs", () => {
     const close = screen.getByRole("button", { name: "Close Climate" });
     close.focus();
     fireEvent.click(close);
+    const dialog = screen.getByRole("dialog", { name: "Close Climate?" });
+    expect(dialog.textContent).toContain("This cannot be undone");
+    expect(screen.getByRole("tab", { name: "Climate" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Close flow" }));
 
     const lighting = screen.getByRole("tab", { name: "Lighting" });
     await waitFor(() => expect(document.activeElement).toBe(lighting));
     expect(lighting.getAttribute("aria-selected")).toBe("true");
+  });
+
+  it("exposes touch-friendly rename and guarded close actions", () => {
+    render(<Harness />);
+    const rename = screen.getByRole("button", { name: "Rename Lighting" });
+    fireEvent.click(rename);
+    expect(screen.getByRole("textbox", { name: "Rename Lighting" })).toBeTruthy();
+
+    fireEvent.keyDown(screen.getByRole("textbox", { name: "Rename Lighting" }), { key: "Escape" });
+    fireEvent.click(screen.getByRole("button", { name: "Close Lighting" }));
+    expect(screen.getByRole("dialog", { name: "Close Lighting?" }).textContent).toContain(
+      "currently included in live deployment",
+    );
   });
 });

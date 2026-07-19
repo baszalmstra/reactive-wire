@@ -56,8 +56,45 @@ test.describe.serial("Reactive Wire workspace: flows and comments", () => {
     await expect(closeButtons(page)).toHaveCount(2);
 
     await page.getByRole("button", { name: "Close Flow 2" }).click();
+    const dialog = page.getByRole("dialog", { name: "Close Flow 2?" });
+    await expect(dialog).toBeVisible();
+    await dialog.getByRole("button", { name: "Close flow" }).click();
     await expect(tab(page, "Flow 2")).toHaveCount(0);
     await expect(closeButtons(page)).toHaveCount(0);
+  });
+
+  test("keeps flow actions visible and guarded on touch", async ({ page, context }) => {
+    await page.setViewportSize({ width: 320, height: 568 });
+    const cdp = await context.newCDPSession(page);
+    await cdp.send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 1 });
+    try {
+      expect(await page.evaluate(() => matchMedia("(pointer: coarse)").matches)).toBe(true);
+
+      await newFlow(page).click();
+      const rename = page.getByRole("button", { name: "Rename Flow 2" });
+      const close = page.getByRole("button", { name: "Close Flow 2" });
+      await expect(rename).toBeVisible();
+      await expect(close).toBeVisible();
+      await expect(rename).toHaveCSS("width", "44px");
+      await expect(rename).toHaveCSS("height", "44px");
+      await expect(close).toHaveCSS("width", "44px");
+      await expect(close).toHaveCSS("height", "44px");
+
+      await rename.click();
+      const editor = page.getByRole("textbox", { name: "Rename Flow 2" });
+      await editor.fill("Kitchen");
+      await editor.press("Enter");
+      await expect(tab(page, "Kitchen")).toBeVisible();
+
+      await page.getByRole("button", { name: "Close Kitchen" }).click();
+      const dialog = page.getByRole("dialog", { name: "Close Kitchen?" });
+      await expect(dialog).toContainText("This cannot be undone");
+      await dialog.getByRole("button", { name: "Cancel" }).click();
+      await expect(tab(page, "Kitchen")).toBeVisible();
+    } finally {
+      await cdp.send("Emulation.setTouchEmulationEnabled", { enabled: false });
+      await page.setViewportSize({ width: 1280, height: 720 });
+    }
   });
 
   test("restores the open flows after a reload", async ({ page }) => {

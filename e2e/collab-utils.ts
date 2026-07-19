@@ -27,6 +27,7 @@ export async function resetWorkspace(page: Page): Promise<void> {
   for (let guard = 0; guard < 64 && (await closeButtons.count()) > 0; guard++) {
     const before = await closeButtons.count();
     await closeButtons.first().click();
+    await page.getByRole("dialog").getByRole("button", { name: "Close flow" }).click();
     await expect.poll(() => closeButtons.count(), { timeout: 5_000 }).toBeLessThan(before);
   }
   // Normalize the surviving flow's name to the default so every spec starts from a canonical state

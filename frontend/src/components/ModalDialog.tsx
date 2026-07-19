@@ -127,7 +127,7 @@ export function ModalDialog({
       aria-describedby={describedBy}
       aria-modal="true"
       tabIndex={-1}
-      className={`rw-modal m-auto max-w-none max-h-none border-0 bg-transparent p-0 text-rw-text ${className}`}
+      className={`rw-modal m-auto border-0 bg-transparent p-0 text-rw-text ${className}`}
       onKeyDown={handleKeyDown}
       onMouseDown={handleMouseDown}
     >
