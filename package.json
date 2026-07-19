@@ -1,6 +1,6 @@
 {
   "name": "reactive-wire",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "description": "Node-based reactive automation system for Home Assistant",
   "type": "module",
   "private": true,
