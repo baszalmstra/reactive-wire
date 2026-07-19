@@ -1,18 +1,34 @@
 import { expect, test, type Page } from "@playwright/test";
-import { clearCanvas } from "./canvas-utils.js";
 import { addNode, connectUntilEdge, edges, inPin, moveNodeTo, nodes, outPin, selectWire } from "./wiring-utils.js";
+
+async function closeInspector(page: Page): Promise<void> {
+  const app = page.locator(".rw-app-mobile");
+  if (await app.evaluate((element) => element.classList.contains("sheet-open"))) {
+    await page.getByRole("button", { name: "Inspect" }).click();
+  }
+}
+
+async function clearPhoneCanvas(page: Page): Promise<void> {
+  for (let remaining = await nodes(page).count(); remaining > 0; remaining--) {
+    await closeInspector(page);
+    await nodes(page).first().locator(".rw-drag").click();
+    await page.keyboard.press("Delete");
+    await expect(nodes(page)).toHaveCount(remaining - 1);
+  }
+}
 
 async function usePhoneLayout(page: Page): Promise<void> {
   await page.setViewportSize({ width: 320, height: 568 });
   await page.goto("/");
   await expect(page.getByLabel("Home Assistant connected")).toBeAttached();
-  await clearCanvas(page);
+  await clearPhoneCanvas(page);
 }
 
 async function addMobileNode(page: Page, label: string) {
   await page.getByRole("button", { name: "Node palette" }).click();
   const node = await addNode(page, label);
   await page.locator(".rw-scrim").click({ position: { x: 300, y: 100 } });
+  await closeInspector(page);
   return node;
 }
 
