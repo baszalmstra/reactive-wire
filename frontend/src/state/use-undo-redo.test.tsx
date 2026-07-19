@@ -54,6 +54,25 @@ describe("useUndoRedo", () => {
     expect(result.current.nodes[0]!.id).toBe("a");
   });
 
+  it("keeps redo available for an immediately following action", () => {
+    const { result } = renderHook(() => useHarness());
+
+    act(() => {
+      result.current.ctrl.pushHistory();
+      result.current.setNodes([node("a")]);
+    });
+
+    // This mirrors a user pressing Ctrl+Y immediately after Ctrl+Z. The redo snapshot must be
+    // committed before undo returns rather than being enqueued from a later state updater.
+    act(() => {
+      result.current.ctrl.undo();
+      result.current.ctrl.redo();
+    });
+
+    expect(result.current.nodes).toHaveLength(1);
+    expect(result.current.nodes[0]!.id).toBe("a");
+  });
+
   it("restores nodes and edges together and clears the redo branch on a new checkpoint", () => {
     const { result } = renderHook(() => useHarness());
 

@@ -1,4 +1,4 @@
-import { useCallback, useState, type Dispatch, type MutableRefObject, type SetStateAction } from "react";
+import { useCallback, useRef, useState, type Dispatch, type MutableRefObject, type SetStateAction } from "react";
 import { flushSync } from "react-dom";
 import type { Edge } from "@xyflow/react";
 import type { EditorNode } from "../canvas/flows.js";
@@ -24,10 +24,38 @@ export function useUndoRedo(options: {
   setEdges: Dispatch<SetStateAction<Edge[]>>;
 }): UndoRedoControls {
   const { nodesRef, edgesRef, setNodes, setEdges } = options;
-  const [past, setPast] = useState<CanvasSnapshot[]>([]);
-  const [future, setFuture] = useState<CanvasSnapshot[]>([]);
+  const [past, setPastState] = useState<CanvasSnapshot[]>([]);
+  const [future, setFutureState] = useState<CanvasSnapshot[]>([]);
+  // History is also read from keyboard handlers. Keep the next entries in refs before React
+  // schedules a render so a Ctrl+Y immediately after Ctrl+Z cannot observe an empty redo branch.
+  const pastRef = useRef<CanvasSnapshot[]>([]);
+  const futureRef = useRef<CanvasSnapshot[]>([]);
   const canUndo = past.length > 0;
   const canRedo = future.length > 0;
+
+  const setPast = useCallback<Dispatch<SetStateAction<CanvasSnapshot[]>>>((next) => {
+    const value = typeof next === "function" ? next(pastRef.current) : next;
+    pastRef.current = value;
+    setPastState(value);
+  }, []);
+  const setFuture = useCallback<Dispatch<SetStateAction<CanvasSnapshot[]>>>((next) => {
+    const value = typeof next === "function" ? next(futureRef.current) : next;
+    futureRef.current = value;
+    setFutureState(value);
+  }, []);
+
+  const commitHistory = useCallback((nextPast: CanvasSnapshot[], nextFuture: CanvasSnapshot[], restore?: CanvasSnapshot) => {
+    pastRef.current = nextPast;
+    futureRef.current = nextFuture;
+    flushSync(() => {
+      setPastState(nextPast);
+      setFutureState(nextFuture);
+      if (restore) {
+        setNodes(restore.nodes);
+        setEdges(restore.edges);
+      }
+    });
+  }, [setNodes, setEdges]);
 
   // Read the live canvas into a standalone snapshot. Copies the arrays so the entry keeps the
   // membership it had at read time; the node/edge objects are treated as immutable elsewhere.
@@ -45,33 +73,20 @@ export function useUndoRedo(options: {
     // Commit the checkpoint before the mutating event continues. React Flow's onBeforeDelete may
     // remove nodes/edges immediately after this callback; without a synchronous commit, a very fast
     // Ctrl+Z can observe the pre-checkpoint history and undo the wrong edit.
-    flushSync(() => {
-      setPast((p) => [...p.slice(-40), before]);
-      setFuture([]);
-    });
-  }, [snapshot]);
+    commitHistory([...pastRef.current.slice(-40), before], []);
+  }, [commitHistory, snapshot]);
   const undo = useCallback(() => {
+    const previous = pastRef.current.at(-1);
+    if (!previous) return;
     const current = snapshot();
-    setPast((p) => {
-      if (!p.length) return p;
-      const prev = p[p.length - 1]!;
-      setFuture((f) => [current, ...f]);
-      setNodes(prev.nodes);
-      setEdges(prev.edges);
-      return p.slice(0, -1);
-    });
-  }, [snapshot, setNodes, setEdges]);
+    commitHistory(pastRef.current.slice(0, -1), [current, ...futureRef.current], previous);
+  }, [commitHistory, snapshot]);
   const redo = useCallback(() => {
+    const next = futureRef.current[0];
+    if (!next) return;
     const current = snapshot();
-    setFuture((f) => {
-      if (!f.length) return f;
-      const next = f[0]!;
-      setPast((p) => [...p, current]);
-      setNodes(next.nodes);
-      setEdges(next.edges);
-      return f.slice(1);
-    });
-  }, [snapshot, setNodes, setEdges]);
+    commitHistory([...pastRef.current, current], futureRef.current.slice(1), next);
+  }, [commitHistory, snapshot]);
 
   // React Flow's own Delete/Backspace handler removes selected nodes and edges by feeding "remove"
   // changes into the stores. Checkpoint the canvas here, before those changes land, so the deletion

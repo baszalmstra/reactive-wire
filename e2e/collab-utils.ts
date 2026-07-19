@@ -17,7 +17,7 @@ export async function resetWorkspace(page: Page): Promise<void> {
   // Auto-deploy is server-owned document state, so visual cleanup alone is insufficient. Always
   // return it to the safe manual policy before normalizing the enabled flow set.
   const autoDeploy = page.getByRole("checkbox", { name: "auto-deploy" });
-  if (await autoDeploy.isChecked()) await autoDeploy.click();
+  if (await autoDeploy.isChecked()) await page.locator(".rw-autodeploy").click();
   await expect(autoDeploy).not.toBeChecked();
 
   // Collapse to a single flow: the strip only renders a close control while more than one flow
