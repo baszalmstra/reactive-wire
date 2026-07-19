@@ -40,6 +40,7 @@ import { RWEdge, useRWEdgeData } from "./canvas/RWEdge.js";
 import { CommentCtx } from "./canvas/comments-context.js";
 import { type CommentNodeType } from "./canvas/comments.js";
 import { MobileBar } from "./components/MobileBar.js";
+import { DeleteSelectionDialog } from "./components/DeleteSelectionDialog.js";
 import { useIsMobile } from "./use-is-mobile.js";
 import { useReducedMotion } from "./use-reduced-motion.js";
 import { useMacros } from "./canvas/use-macros.js";
@@ -141,6 +142,7 @@ export function App() {
   const reducedMotion = useReducedMotion();
   const [navOpen, setNavOpen] = useState(false);
   const [sheetOpen, setSheetOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
 
   const clientId = useRef(globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2, 10));
   // Stateful-node memory is kept per flow so identical node ids in different flows never share state.
@@ -612,6 +614,34 @@ export function App() {
     [isMobile],
   );
 
+  // React Flow owns the selected flags. Include the explicit node selection too: nodes added from
+  // the palette are selected by the editor before React Flow has emitted a selection change.
+  const selectedNodes = useMemo(
+    () => nodes.filter((node) => node.selected || node.id === selected || selectedIds.includes(node.id)),
+    [nodes, selected, selectedIds],
+  );
+  const selectedEdges = useMemo(() => edges.filter((edge) => edge.selected), [edges]);
+  const selectedNodeIds = useMemo(() => new Set(selectedNodes.map((node) => node.id)), [selectedNodes]);
+  // Deleting a node also deletes every connected wire, so name those wires in the confirmation
+  // rather than implying that only explicitly selected edges are affected.
+  const deleteEdgeCount = useMemo(
+    () => new Set(
+      edges
+        .filter((edge) => edge.selected || selectedNodeIds.has(edge.source) || selectedNodeIds.has(edge.target))
+        .map((edge) => edge.id),
+    ).size,
+    [edges, selectedNodeIds],
+  );
+  const deleteSelection = useCallback(async () => {
+    const instance = rf.current;
+    if (!instance || (!selectedNodes.length && !selectedEdges.length)) return;
+    setDeleteOpen(false);
+    await instance.deleteElements({ nodes: selectedNodes, edges: selectedEdges });
+    setSelected(null);
+    setSelectedIds([]);
+    setSheetOpen(false);
+  }, [selectedNodes, selectedEdges]);
+
   // Pan to a node and select it — the Problems panel uses this to focus an offending node.
   const focusNode = useCallback((id: string) => {
     const node = nodesRef.current.find((n) => n.id === id);
@@ -642,7 +672,7 @@ export function App() {
     clientId,
   });
 
-  const modalOpen = deployOpen || pending !== null || editingMacro !== null;
+  const modalOpen = deployOpen || pending !== null || editingMacro !== null || deleteOpen;
 
   // Keyboard shortcuts: undo/redo and add-comment, ignored while typing or while a modal owns focus.
   useEffect(() => {
@@ -931,9 +961,10 @@ export function App() {
             onRedo={redo}
             onProblems={() => setProblemsOpen((o) => !o)}
             onInspect={() => setSheetOpen((o) => !o)}
+            onDelete={() => setDeleteOpen(true)}
             canUndo={canUndo}
             canRedo={canRedo}
-            hasSelection={!!selected}
+            hasSelection={selectedNodes.length > 0 || selectedEdges.length > 0}
             problemCount={errorCount > 0 ? errorCount : warnCount}
           />
         </>
@@ -957,6 +988,14 @@ export function App() {
         summary="This graph will derive and reconcile the live state of your home. Review the problems below before it takes control."
         onCancel={() => setDeployOpen(false)}
         onConfirm={deployNow}
+      />
+
+      <DeleteSelectionDialog
+        open={deleteOpen}
+        nodeCount={selectedNodes.length}
+        edgeCount={deleteEdgeCount}
+        onCancel={() => setDeleteOpen(false)}
+        onConfirm={() => void deleteSelection()}
       />
 
       <Toast toast={toast} />

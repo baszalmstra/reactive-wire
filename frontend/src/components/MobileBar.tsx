@@ -32,6 +32,11 @@ const icons: Record<string, ReactNode> = {
       <path d="M14 4v16" />
     </svg>
   ),
+  delete: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5M14 11v5" />
+    </svg>
+  ),
 };
 
 interface MBtn {
@@ -51,6 +56,7 @@ export function MobileBar({
   onRedo,
   onProblems,
   onInspect,
+  onDelete,
   canUndo,
   canRedo,
   hasSelection,
@@ -62,6 +68,7 @@ export function MobileBar({
   onRedo: () => void;
   onProblems: () => void;
   onInspect: () => void;
+  onDelete: () => void;
   canUndo: boolean;
   canRedo: boolean;
   hasSelection: boolean;
@@ -74,11 +81,12 @@ export function MobileBar({
     { key: "redo", label: "Redo", onClick: onRedo, disabled: !canRedo },
     { key: "problems", label: "Problems", onClick: onProblems, badge: problemCount > 0 ? problemCount : undefined },
     { key: "inspect", label: "Inspect", onClick: onInspect, active: hasSelection },
+    { key: "delete", label: "Delete", onClick: onDelete, disabled: !hasSelection },
   ];
   return (
-    <nav className="rw-mobilebar">
+    <nav className="rw-mobilebar" aria-label="Canvas actions">
       {buttons.map((b) => (
-        <button key={b.key} className={cn("rw-mbtn", b.active && "active")} onClick={b.onClick} disabled={b.disabled} aria-label={b.label}>
+        <button key={b.key} className={cn("rw-mbtn", b.active && "active", b.key === "delete" && "danger")} onClick={b.onClick} disabled={b.disabled} aria-label={b.label}>
           <span className="rw-mbtn-ico">{icons[b.key]}</span>
           <span className="rw-mbtn-label">{b.label}</span>
           {b.badge != null && <span className="rw-mbtn-badge">{b.badge}</span>}
