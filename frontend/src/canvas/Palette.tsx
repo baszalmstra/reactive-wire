@@ -11,10 +11,13 @@ import { PALETTE, describeNode, type NodeTemplate } from "./node-templates.js";
 export function Palette({
   onAdd,
   extra = [],
+  mobileSettings,
   children,
 }: {
   onAdd: (t: NodeTemplate) => void;
   extra?: NodeTemplate[];
+  /** Controls shown at the top of the mobile palette drawer. */
+  mobileSettings?: ReactNode;
   children?: ReactNode;
 }) {
   const [query, setQuery] = useState("");
@@ -41,6 +44,8 @@ export function Palette({
           className="flex-1 bg-transparent text-rw-text text-[12px] outline-none placeholder:text-rw-faint"
         />
       </div>
+
+      {mobileSettings}
 
       <div className="rw-palette-scroll flex-1 overflow-y-auto py-1 pb-5">
         {categories.map((cat) => (

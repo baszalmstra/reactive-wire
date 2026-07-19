@@ -85,6 +85,7 @@ test.describe.serial("Reactive Wire collaboration between two clients", () => {
     await mobile.goto("/");
     await expect(mobile.getByRole("button", { name: "Deploy enabled" })).toBeEnabled({ timeout: 10_000 });
 
+    await mobile.getByRole("button", { name: "Nodes" }).click();
     const mobileAutoDeploy = mobile.getByRole("checkbox", { name: "auto-deploy" });
     await expect(mobileAutoDeploy).toBeChecked({ timeout: 10_000 });
     await expect(mobile.getByText("Shared · deploys live after edits")).toBeVisible();

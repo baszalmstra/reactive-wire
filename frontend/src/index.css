@@ -601,11 +601,9 @@
     justify-content: space-around; align-items: stretch;
   }
   .rw-mobile-autodeploy {
-    position: fixed; left: 8px; right: 8px; bottom: 60px; z-index: 44; height: 52px;
-    display: flex; align-items: center; gap: 10px; padding: 0 12px;
-    border: 1px solid var(--rw-line); border-radius: 10px 10px 0 0;
-    background: var(--rw-panel); color: var(--rw-text); cursor: pointer;
-    box-shadow: 0 -10px 24px -20px rgba(0, 0, 0, .72);
+    display: flex; align-items: center; gap: 10px; margin: 4px 14px 7px; padding: 9px 10px;
+    border: 1px solid var(--rw-line); border-radius: 8px;
+    background: var(--rw-panel2); color: var(--rw-text); cursor: pointer;
   }
   .rw-mobile-autodeploy-copy { min-width: 0; display: flex; flex: 1; flex-direction: column; gap: 2px; }
   .rw-mobile-autodeploy-label { font-size: 12px; font-weight: 700; }
@@ -645,7 +643,7 @@
   .rw-app-mobile.nav-open .rw-scrim, .rw-app-mobile.sheet-open .rw-scrim { display: block; }
 
   /* Leave room for the bottom bar and make touch targets generous without enlarging the knob. */
-  .rw-mobile-stage { padding-bottom: 112px; }
+  .rw-mobile-stage { padding-bottom: 60px; }
   .react-flow__handle.rw-port { width: 36px; height: 36px; }
   .rw-knob { width: 14px; height: 14px; }
 }
