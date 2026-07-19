@@ -47,7 +47,7 @@ export function DeployGuard({
           </button>
         </div>
 
-        <div id={summaryId} className="px-4 pt-3 text-[12px] text-rw-dim">{summary}</div>
+        <div id={summaryId} className="px-4 pt-3 text-[12px] text-rw-dim [overflow-wrap:anywhere]">{summary}</div>
 
         <div className="px-4 pt-3">
           {blocked ? (
@@ -83,7 +83,7 @@ export function DeployGuard({
                 >
                   {p.severity === "error" ? "✕" : "△"}
                 </span>
-                <span className="min-w-0">
+                <span className="min-w-0 [overflow-wrap:anywhere]">
                   <b className="font-mono text-rw-text">{p.title}</b> <span className="text-rw-dim">{p.message}</span>
                 </span>
               </div>

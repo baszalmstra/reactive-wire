@@ -14,6 +14,14 @@ async function dismissModals(page: Page): Promise<void> {
   }
 }
 
+async function dismissMobileSheets(page: Page): Promise<void> {
+  const scrim = page.locator(".rw-scrim");
+  if (!(await scrim.isVisible())) return;
+  // Narrow viewports turn the inspector into a sheet whose scrim covers the canvas.
+  await scrim.click({ position: { x: 1, y: 1 } });
+  await expect(scrim).toBeHidden();
+}
+
 /**
  * Reset the canvas to empty: dismiss any lingering modal, then delete every node one at a time.
  * Runs from each spec's beforeEach so a spec starts clean regardless of what a previous spec left
@@ -21,14 +29,17 @@ async function dismissModals(page: Page): Promise<void> {
  */
 export async function clearCanvas(page: Page): Promise<void> {
   await dismissModals(page);
+  await dismissMobileSheets(page);
   const nodes = page.locator(".react-flow__node");
   let cleared = 0;
   for (let remaining = await nodes.count(); remaining > 0; remaining--) {
+    await dismissMobileSheets(page);
     await nodes.first().locator(".rw-drag").click();
     await page.keyboard.press("Delete");
     await expect(nodes).toHaveCount(remaining - 1);
     cleared++;
   }
+  await dismissMobileSheets(page);
   // Let the debounced local→server document flush carry the emptied canvas back to the shared doc.
   if (cleared > 0) await page.waitForTimeout(500);
 }
