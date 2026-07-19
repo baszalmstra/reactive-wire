@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.0 - 2026-07-19
+
+- Add Home Assistant location/timezone-aware Time of day and Twilight range sources.
+- Add a generic Between node for numbers, datetimes, and durations with configurable inclusive/exclusive bounds.
+- Show authoritative live sink state and bounded value history from the server.
+- Improve datetime presentation and add an accessible twilight angle visualization.
+
 ## 0.3.1 - 2026-07-18
 
 - Add optional, capability-aware transition durations to light sinks.
