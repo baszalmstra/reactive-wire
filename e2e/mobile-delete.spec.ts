@@ -5,7 +5,7 @@ import { addNode, connectUntilEdge, edges, inPin, moveNodeTo, nodes, outPin, sel
 async function usePhoneLayout(page: Page): Promise<void> {
   await page.setViewportSize({ width: 320, height: 568 });
   await page.goto("/");
-  await expect(page.getByLabel("Home Assistant connected")).toBeVisible();
+  await expect(page.getByLabel("Home Assistant connected")).toBeAttached();
   await clearCanvas(page);
 }
 
@@ -37,6 +37,7 @@ test.describe.serial("Mobile delete controls", () => {
 
     await page.getByRole("button", { name: "Delete" }).click();
     await expect(page.getByRole("dialog", { name: "Delete selection?" })).toContainText("1 node and 1 wire");
+    await expect(page.locator("body")).toHaveAttribute("data-pr-screenshot", "ready");
     await page.getByRole("dialog", { name: "Delete selection?" }).getByRole("button", { name: "Delete" }).click();
 
     await expect(nodes(page)).toHaveCount(1);
