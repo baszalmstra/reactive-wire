@@ -501,6 +501,7 @@ export function App() {
     (t: NodeTemplate) => {
       const off = (idc.current % 6) * 26;
       addNodeAt(t, { x: 160 + off, y: 120 + off });
+      setNavOpen(false);
     },
     [addNodeAt],
   );
@@ -516,10 +517,10 @@ export function App() {
     },
     [setNodes, pushHistory],
   );
-  const placeMacro = useCallback(
-    (def: MacroDef) => placeMacroAt(def, { x: 200 + (idc.current % 6) * 26, y: 140 + (idc.current % 6) * 26 }),
-    [placeMacroAt],
-  );
+  const placeMacro = useCallback((def: MacroDef) => {
+    placeMacroAt(def, { x: 200 + (idc.current % 6) * 26, y: 140 + (idc.current % 6) * 26 });
+    setNavOpen(false);
+  }, [placeMacroAt]);
 
   const onDragOver = useCallback((e: DragEvent) => {
     e.preventDefault();
