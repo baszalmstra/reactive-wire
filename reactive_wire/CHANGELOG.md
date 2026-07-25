@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.1 - 2026-07-25
+
+- Improve mobile controls for deleting graph items, managing flows, and configuring auto-deploy.
+- Fix dialogs and the Problems panel on small screens.
+- Close the mobile node palette after adding a node.
+- Fix immediate undo/redo reliability.
+
 ## 0.4.0 - 2026-07-19
 
 - Add Home Assistant location/timezone-aware Time of day and Twilight range sources.
