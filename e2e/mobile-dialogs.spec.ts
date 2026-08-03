@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
-import { clearCanvas } from "./canvas-utils.js";
+import { clearCanvas, dismissMobileSheets } from "./canvas-utils.js";
 
 const phoneViewports = [
   { name: "320x568", width: 320, height: 568 },
@@ -27,8 +27,6 @@ for (const viewport of phoneViewports) {
       await page.goto("/");
       await expect(page.getByLabel("Home Assistant connected")).toHaveClass(/online/);
       await clearCanvas(page);
-      const scrim = page.locator(".rw-scrim");
-      if (await scrim.isVisible()) await scrim.click({ position: { x: viewport.width - 1, y: 1 } });
     });
 
     test("keeps dialog content and actions inside the viewport", async ({ page }) => {
@@ -44,7 +42,7 @@ for (const viewport of phoneViewports) {
       await expectInsideViewport(page, entityDialog.getByRole("button", { name: "Add" }), 0);
       await entityDialog.getByRole("button", { name: "Add" }).click();
 
-      await page.locator(".rw-scrim").click({ position: { x: viewport.width - 1, y: 1 } });
+      await dismissMobileSheets(page);
       await page.getByRole("button", { name: "Deploy enabled" }).click();
       const deployDialog = page.getByRole("dialog", { name: "Deploy to your home" });
       await expect(deployDialog).toContainText(longEntityId);
