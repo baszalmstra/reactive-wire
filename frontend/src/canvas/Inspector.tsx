@@ -431,6 +431,16 @@ export function Inspector({
             </>
           )}
 
+          {node.type === "latch" && (
+            <label className="rw-cfg-field">
+              <span>when both inputs are high</span>
+              <select aria-label="Latch priority" className="rw-input" value={String(cfg.priority ?? "reset")} onChange={(e) => set({ priority: e.target.value })}>
+                <option value="reset">reset wins</option>
+                <option value="set">set wins</option>
+              </select>
+            </label>
+          )}
+
           {node.type === "duration" && (
             <label className="rw-cfg-row">
               <span>unit</span>

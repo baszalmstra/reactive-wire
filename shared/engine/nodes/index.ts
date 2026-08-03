@@ -14,6 +14,7 @@ import { sum } from "./sum.js";
 import { constNumber, constBool, constString, constColor, constDuration } from "./const.js";
 import { select } from "./select.js";
 import { toggle } from "./toggle.js";
+import { latch } from "./latch.js";
 import { edge, rising, falling } from "./edge.js";
 import { hold } from "./hold.js";
 import { fold, scan } from "./fold.js";
@@ -50,6 +51,7 @@ const PALETTE_DEFS: RegisteredNodeDef[] = [
   constDuration,
   select,
   toggle,
+  latch,
   edge,
   rising,
   falling,

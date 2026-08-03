@@ -6,8 +6,8 @@ export { durationSeconds } from "../duration.js";
 /**
  * Per-node internal state for stateful nodes. One map keyed by node id is shared by every
  * stateful node, so each slot carries the union of fields the node kinds need:
- * a boolean state (toggle), an accumulated value (fold/scan), a latched value (hold), and
- * the previous reading used to detect a change between recomputes (edge/rising/falling).
+ * a boolean state (toggle/latch), an accumulated value (fold/scan), a latched value (hold),
+ * and the previous reading used to detect a change between recomputes (edge/rising/falling).
  */
 export interface NodeMemory {
   /** Boolean state for toggle; accumulated value for fold/scan. */
