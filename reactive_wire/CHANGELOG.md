@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.2 - 2026-08-03
+
+- Comment frames now wrap every node in a multi-selection instead of only the first one.
+- Delete confirmation buttons now meet the 44 px touch target size on phones and tablets.
+
 ## 0.4.1 - 2026-07-25
 
 - Improve mobile controls for deleting graph items, managing flows, and configuring auto-deploy.
