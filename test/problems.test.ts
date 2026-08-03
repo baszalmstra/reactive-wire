@@ -93,6 +93,24 @@ describe("deriveProblems warning and error representation", () => {
     ]));
   });
 
+  it("stays quiet about an availability probe's own absent input", () => {
+    const probe = node({
+      id: "n1",
+      type: "available",
+      title: "Available",
+      inputs: [{ id: "in", label: "in", type: "any" }],
+      outputs: [{ id: "out", label: "available", type: "bool" }],
+    });
+    const problems = deriveProblems([probe], results({
+      inputs: { "n1:in": UN("bool") },
+      outputs: { "n1:out": V("bool", false) },
+      health: { n1: "ok" },
+    }), true);
+
+    // The probe consumes an absent input by design; the node producing it still reports its own.
+    expect(problems).toEqual([]);
+  });
+
   it("represents sink action hold/error states", () => {
     const n = node({ id: "sink", type: "sink-light", title: "Light", outputs: [], inputs: [{ id: "cmd", label: "command", type: "bool" }] });
     const hold = deriveProblems([n], results({ actions: { sink: { call: null, status: "unavailable", note: "command = unavailable — no call" } } }), true);

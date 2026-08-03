@@ -9,6 +9,7 @@ import { fetch } from "./fetch.js";
 import { compare } from "./compare.js";
 import { between } from "./between.js";
 import { and, or, not } from "./logic.js";
+import { available } from "./available.js";
 import { sum } from "./sum.js";
 import { constNumber, constBool, constString, constColor, constDuration } from "./const.js";
 import { select } from "./select.js";
@@ -40,6 +41,7 @@ const PALETTE_DEFS: RegisteredNodeDef[] = [
   and,
   or,
   not,
+  available,
   sum,
   constNumber,
   constBool,

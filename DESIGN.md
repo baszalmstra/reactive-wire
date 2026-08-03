@@ -391,10 +391,18 @@ all declared outputs and optional next memory, and (for sinks) an atomic `evalSi
 generic/variadic resolution, transactional memory threading) and dispatches to it.
 `frontend/src/canvas/node-templates.ts` re-exports the registry-derived `PALETTE`/`describeNode`
 plus editor-side variadic-pin helpers, so a node's presentation and behavior live in one place.
-Built-in nodes: `entity`, `const`, `compare`, `logic`, `sum`, `select`, `passthrough`, the
-stateful `edge`/`hold`/`fold`/`toggle`, the async `fetch`, the time nodes (`now`/`since`/
+Built-in nodes: `entity`, `const`, `compare`, `logic`, `available`, `sum`, `select`, `passthrough`,
+the stateful `edge`/`hold`/`fold`/`toggle`, the async `fetch`, the time nodes (`now`/`since`/
 `duration`/`datetimeSubtract`/`datetimeShift`, see `time.ts`), the macro `boundary` nodes, and
 the sinks `sink-light`/`sink-call`/`sink-climate`/`sink-cover`/`sink-input`/`sink-transient`.
+
+`available` is the deliberate exception to Kleene propagation (D18): every other node passes
+absence through, which is what keeps an offline sensor from actuating, but a probe that answered
+"unavailable" when asked "is this available?" could never be branched on. It is therefore total —
+it always answers with a boolean — and it reads absence as `false` on the same present/absent line
+the value model already draws, so an errored input is reported as unavailable rather than as a
+value. Consuming an absent input is its normal condition, so `deriveProblems` does not raise input
+problems for it; the node producing that value still reports its own.
 
 **Server — `src/server/`** (always-on source of truth, D9):
 - `index.ts` — boots `RealHA` (`HA_URL`/`HA_TOKEN`) or `MockHA` + `sim.ts`; reads config from
