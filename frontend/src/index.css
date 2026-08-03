@@ -269,6 +269,10 @@
 .rw-btn.primary:hover:not(:disabled) { filter: brightness(1.08); }
 .rw-btn.danger { background: var(--rw-h-error); color: var(--rw-health-on); }
 .rw-btn.danger:hover { filter: brightness(1.08); }
+.rw-dialog-actions { display: flex; justify-content: flex-end; gap: 8px; }
+@media (pointer: coarse) {
+  .rw-dialog-actions .rw-btn { min-width: 44px; min-height: 44px; }
+}
 .rw-pinlist { display: flex; flex-direction: column; gap: 5px; }
 .rw-pinlist-h { font-size: 9.5px; color: var(--rw-faint); text-transform: uppercase; letter-spacing: .05em; margin: 4px 0 1px; }
 .rw-pinlist-row { display: flex; align-items: center; gap: 9px; font-size: 11.5px; color: var(--rw-dim); }

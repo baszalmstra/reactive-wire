@@ -39,7 +39,7 @@ export function DeleteSelectionDialog({
         <p id={descriptionId} className="mt-2 text-[13px] leading-5 text-rw-dim">
           This will delete {targets}. You can undo this action afterwards.
         </p>
-        <div className="mt-5 flex justify-end gap-2">
+        <div className="rw-dialog-actions mt-5">
           <button type="button" className="rw-btn" data-dialog-initial onClick={onCancel}>Cancel</button>
           <button type="button" className="rw-btn danger" onClick={onConfirm}>Delete</button>
         </div>

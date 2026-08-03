@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 import { addNode, connectUntilEdge, edges, inPin, moveNodeTo, nodes, outPin, selectWire } from "./wiring-utils.js";
 
 async function closeInspector(page: Page): Promise<void> {
@@ -41,6 +41,58 @@ async function spreadNodesForPhone(page: Page, first: Awaited<ReturnType<typeof 
   await moveNodeTo(page, second, 120, 330);
   await page.getByRole("button", { name: "Inspect", exact: true }).click();
 }
+
+async function expectMinimumTarget(locator: Locator, minimum: number): Promise<void> {
+  const box = await locator.boundingBox();
+  expect(box?.width).toBeGreaterThanOrEqual(minimum);
+  expect(box?.height).toBeGreaterThanOrEqual(minimum);
+}
+
+const barDelete = (page: Page) => page.locator(".rw-mobilebar").getByRole("button", { name: "Delete" });
+const deleteDialog = (page: Page) => page.getByRole("dialog", { name: "Delete selection?" });
+
+/**
+ * The same delete flow driven by taps in a touch-enabled context, with no keyboard available. Sizes
+ * are asserted here rather than in the mouse specs because the 44 px targets are coarse-pointer only.
+ */
+test.describe.serial("Mobile delete controls on touch", () => {
+  test.use({ viewport: { width: 320, height: 568 }, hasTouch: true, isMobile: true });
+
+  test("taps through deleting a node", async ({ page }) => {
+    await usePhoneLayout(page);
+    expect(await page.evaluate(() => matchMedia("(pointer: coarse)").matches)).toBe(true);
+
+    const boolNode = await addMobileNode(page, "Boolean");
+    await boolNode.locator(".rw-drag").tap();
+    await closeInspector(page);
+
+    await expectMinimumTarget(barDelete(page), 44);
+    await barDelete(page).tap();
+
+    await expect(deleteDialog(page)).toContainText("1 node");
+    await expectMinimumTarget(deleteDialog(page).getByRole("button", { name: "Cancel" }), 44);
+    await expectMinimumTarget(deleteDialog(page).getByRole("button", { name: "Delete" }), 44);
+    await deleteDialog(page).getByRole("button", { name: "Delete" }).tap();
+
+    await expect(nodes(page)).toHaveCount(0);
+  });
+
+  test("taps through deleting a wire without removing its nodes", async ({ page }) => {
+    await usePhoneLayout(page);
+    const boolNode = await addMobileNode(page, "Boolean");
+    const notNode = await addMobileNode(page, "NOT");
+    await spreadNodesForPhone(page, boolNode, notNode);
+    await connectUntilEdge(page, outPin(boolNode, "out"), inPin(notNode, "in"));
+
+    await selectWire(page, outPin(boolNode, "out"), inPin(notNode, "in"));
+    await barDelete(page).tap();
+    await expect(deleteDialog(page)).toContainText("1 wire");
+    await deleteDialog(page).getByRole("button", { name: "Delete" }).tap();
+
+    await expect(edges(page)).toHaveCount(0);
+    await expect(nodes(page)).toHaveCount(2);
+  });
+});
 
 test.describe.serial("Mobile delete controls", () => {
   test("deletes a selected node after confirming its affected wire", async ({ page }) => {
