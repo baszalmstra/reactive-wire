@@ -1,12 +1,12 @@
 import { useCallback, useMemo, useRef, type Dispatch, type MutableRefObject, type SetStateAction } from "react";
 import type { Edge, ReactFlowInstance } from "@xyflow/react";
-import { nodeGeom } from "../../../shared/node-types.js";
 import { editorNodeWithInitialSize } from "./editor-document.js";
 import type { EditorNode } from "../canvas/flows.js";
 import type { RWNodeType } from "../canvas/validation.js";
 import type { CommentOps } from "../canvas/comments-context.js";
 import {
   COMMENT_COLOR_KEYS,
+  frameAroundNodes,
   nodeCenterInside,
   resizeFrame,
   type CommentColor,
@@ -32,12 +32,12 @@ export function useCommentFrames(options: {
   setNodes: Dispatch<SetStateAction<EditorNode[]>>;
   setSelected: Dispatch<SetStateAction<string | null>>;
   pushHistory: () => void;
-  selected: string | null;
+  selectedNodeIds: ReadonlySet<string>;
   showToast: (text: string, kind: ToastMessage["kind"]) => void;
   rf: MutableRefObject<ReactFlowInstance<EditorNode, Edge> | null>;
   clientId: MutableRefObject<string>;
 }): CommentFramesControls {
-  const { nodesRef, setNodes, setSelected, pushHistory, selected, showToast, rf, clientId } = options;
+  const { nodesRef, setNodes, setSelected, pushHistory, selectedNodeIds, showToast, rf, clientId } = options;
 
   const updateComment = useCallback(
     (id: string, patch: Partial<CommentData>) => {
@@ -92,21 +92,20 @@ export function useCommentFrames(options: {
     [updateComment, deleteComment, onResizeStart],
   );
 
-  // Add a frame around the selected node (if any), else at the centre of the current view.
+  // Add a frame spanning every selected graph node, else at the centre of the current view.
   const cmtc = useRef(0);
   const addComment = useCallback(() => {
     pushHistory();
     cmtc.current += 1;
     const id = `comment-${clientId.current}-${cmtc.current}`;
-    const sel = nodesRef.current.find((n) => n.id === selected && isRWNode(n)) as RWNodeType | undefined;
+    const framed = nodesRef.current.filter((n): n is RWNodeType => isRWNode(n) && selectedNodeIds.has(n.id));
     let position: { x: number; y: number };
     let data: CommentData;
     const color = COMMENT_COLOR_KEYS[cmtc.current % COMMENT_COLOR_KEYS.length] ?? "slate";
-    if (sel) {
-      const g = nodeGeom(sel.data.def);
-      const pad = 38;
-      position = { x: sel.position.x - pad, y: sel.position.y - pad - 8 };
-      data = { title: "Comment", color, w: g.w + pad * 2, h: g.h + pad * 2 + 8 };
+    const around = frameAroundNodes(framed);
+    if (around) {
+      position = { x: around.x, y: around.y };
+      data = { title: "Comment", color, w: around.w, h: around.h };
     } else {
       const center = rf.current?.screenToFlowPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 }) ?? { x: 0, y: 0 };
       position = { x: Math.round(center.x - 170), y: Math.round(center.y - 110) };
@@ -117,7 +116,7 @@ export function useCommentFrames(options: {
     setSelected(id);
     setNodes((ns) => ns.map((n) => ({ ...n, selected: n.id === id })));
     showToast("Comment added — drag its bar to move the group", "info");
-  }, [selected, setNodes, setSelected, showToast, pushHistory, nodesRef, rf, clientId]);
+  }, [selectedNodeIds, setNodes, setSelected, showToast, pushHistory, nodesRef, rf, clientId]);
 
   // Dragging a comment bar carries the nodes whose centre sits inside the frame at drag start.
   const dragCarry = useRef<{ id: string; sx: number; sy: number; members: { id: string; x: number; y: number }[] } | null>(null);

@@ -667,7 +667,7 @@ export function App() {
     setNodes,
     setSelected,
     pushHistory,
-    selected,
+    selectedNodeIds,
     showToast,
     rf,
     clientId,
@@ -898,7 +898,7 @@ export function App() {
           onDragOver={onDragOver}
         >
           <div className="rw-canvas-actions rw-hide-mobile" aria-label="Canvas actions">
-            <button className="rw-canvas-action" onClick={addComment} title="Add a comment box · wraps the selected node (C)">
+            <button className="rw-canvas-action" onClick={addComment} title="Add a comment box · wraps the selected nodes (C)">
               <span className="rw-tool-glyph">▢</span>
               Comment
             </button>
