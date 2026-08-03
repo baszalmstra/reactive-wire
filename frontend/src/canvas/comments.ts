@@ -35,6 +35,35 @@ export function nodeCenterInside(node: RWNodeType, frame: { x: number; y: number
   return cx >= frame.x && cx <= frame.x + frame.w && cy >= frame.y && cy <= frame.y + frame.h;
 }
 
+/** Gap a new frame leaves around the nodes it wraps, with extra room above for the title bar. */
+export const COMMENT_PAD = 38;
+export const COMMENT_TITLE_GAP = 8;
+
+/**
+ * The padded frame enclosing every given node. Returns null for an empty selection, which leaves the
+ * caller to place an unattached frame instead.
+ */
+export function frameAroundNodes(nodes: RWNodeType[]): { x: number; y: number; w: number; h: number } | null {
+  if (nodes.length === 0) return null;
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const node of nodes) {
+    const g = nodeGeom(node.data.def);
+    minX = Math.min(minX, node.position.x);
+    minY = Math.min(minY, node.position.y);
+    maxX = Math.max(maxX, node.position.x + g.w);
+    maxY = Math.max(maxY, node.position.y + g.h);
+  }
+  return {
+    x: minX - COMMENT_PAD,
+    y: minY - COMMENT_PAD - COMMENT_TITLE_GAP,
+    w: maxX - minX + COMMENT_PAD * 2,
+    h: maxY - minY + COMMENT_PAD * 2 + COMMENT_TITLE_GAP,
+  };
+}
+
 export type ResizeDir = "nw" | "n" | "ne" | "e" | "se" | "s" | "sw" | "w";
 export const RESIZE_DIRS: ResizeDir[] = ["nw", "n", "ne", "e", "se", "s", "sw", "w"];
 

@@ -1,5 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { addNumberNode, resetWorkspace } from "./collab-utils.js";
+import { selectNode } from "./macros-utils.js";
+import { addNode, moveNodeTo } from "./wiring-utils.js";
 
 /**
  * Workspace surface: the flow tab strip (create / rename / close, and flow-structure persistence
@@ -141,6 +143,31 @@ test.describe.serial("Reactive Wire workspace: flows and comments", () => {
     await page.reload();
     await expect(page.getByLabel("Home Assistant connected")).toBeVisible();
     await expect(page.locator(".rw-comment-title")).toHaveText("Persisted", { timeout: 10_000 });
+  });
+
+  // Regression: a comment added over a multi-selection used to frame only the first selected node.
+  test("wraps every node of a multi-selection in one comment frame", async ({ page }) => {
+    const first = await addNode(page, "Number");
+    const second = await addNode(page, "Boolean");
+    await moveNodeTo(page, first, 320, 220);
+    await moveNodeTo(page, second, 680, 430);
+
+    await selectNode(page, first);
+    await selectNode(page, second, { add: true });
+    await page.getByRole("button", { name: "Comment" }).click();
+
+    const frame = page.locator(".rw-comment");
+    await expect(frame).toHaveCount(1);
+    const frameBox = await frame.boundingBox();
+    expect(frameBox).not.toBeNull();
+    for (const node of [first, second]) {
+      const box = await node.boundingBox();
+      expect(box).not.toBeNull();
+      expect(box!.x).toBeGreaterThanOrEqual(frameBox!.x);
+      expect(box!.y).toBeGreaterThanOrEqual(frameBox!.y);
+      expect(box!.x + box!.width).toBeLessThanOrEqual(frameBox!.x + frameBox!.width);
+      expect(box!.y + box!.height).toBeLessThanOrEqual(frameBox!.y + frameBox!.height);
+    }
   });
 
   // Regression: creating the second flow must stash Flow 1 before React clears the live canvas.
