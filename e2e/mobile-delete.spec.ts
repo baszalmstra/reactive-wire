@@ -28,7 +28,8 @@ async function usePhoneLayout(page: Page): Promise<void> {
 async function addMobileNode(page: Page, label: string) {
   await page.getByRole("button", { name: "Node palette" }).click();
   const node = await addNode(page, label);
-  await page.locator(".rw-scrim").click({ position: { x: 300, y: 100 } });
+  // Placing a node closes the drawer, leaving only the inspector sheet able to cover the canvas.
+  await expect(page.locator("#rw-root")).not.toHaveClass(/nav-open/);
   await closeInspector(page);
   return node;
 }

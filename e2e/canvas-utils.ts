@@ -14,7 +14,11 @@ async function dismissModals(page: Page): Promise<void> {
   }
 }
 
-async function dismissMobileSheets(page: Page): Promise<void> {
+/**
+ * Close the mobile drawer or inspector sheet if either is open. The scrim only renders while one of
+ * them covers the canvas, so this is a no-op on a wide viewport or once the drawer has closed itself.
+ */
+export async function dismissMobileSheets(page: Page): Promise<void> {
   const scrim = page.locator(".rw-scrim");
   if (!(await scrim.isVisible())) return;
   // Narrow viewports turn the inspector into a sheet whose scrim covers the canvas.
