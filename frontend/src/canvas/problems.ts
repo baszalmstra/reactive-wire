@@ -88,7 +88,10 @@ export function deriveProblems(
   }
 
   for (const n of nodes) {
-    for (const p of n.inputs) {
+    // An availability probe exists to consume an absent input, so reporting one as a problem would
+    // fire constantly by design. The node producing that value still reports it on its own output.
+    const reportedInputs = n.type === "available" ? [] : n.inputs;
+    for (const p of reportedInputs) {
       const v = results.inputs[pinKey(n.id, p.id)];
       if (v && v.status === "error") {
         out.push({

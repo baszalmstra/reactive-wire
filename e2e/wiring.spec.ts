@@ -37,6 +37,23 @@ test.describe.serial("Graph building against the mock server", () => {
     await expect(notNode).not.toContainText("unavailable");
   });
 
+  test("an Available probe answers false when unwired and true once any value flows", async ({ page }) => {
+    const boolNode = await addNode(page, "Boolean");
+    await moveNodeTo(page, boolNode, LEFT.x, LEFT.y);
+    const probe = await addNode(page, "Available");
+    await moveNodeTo(page, probe, RIGHT.x, RIGHT.y);
+
+    // Unlike NOT, an unwired probe answers false rather than reading unavailable.
+    await expect(probe).toContainText("false");
+    await expect(probe).not.toContainText("unavailable");
+
+    await connectUntilEdge(page, outPin(boolNode, "out"), inPin(probe, "in"));
+
+    // The Boolean constant carries false, and a value being false still makes it available.
+    await expect(edges(page)).toHaveCount(1);
+    await expect(probe).toContainText("true");
+  });
+
   test("wiring a false source into an AND flips its output chip", async ({ page }) => {
     const boolNode = await addNode(page, "Boolean");
     await moveNodeTo(page, boolNode, LEFT.x, LEFT.y);
