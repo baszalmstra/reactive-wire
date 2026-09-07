@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.0 - 2026-09-07
+
+- Add an Available node so graphs can branch on whether an input currently carries a value.
+- Add a set/reset Latch node with configurable priority when both inputs are high.
+
 ## 0.4.2 - 2026-08-03
 
 - Comment frames now wrap every node in a multi-selection instead of only the first one.
