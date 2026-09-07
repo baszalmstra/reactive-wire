@@ -44,6 +44,7 @@ export interface NodeConfigByType {
   "sink-notify": { service: string };
   "sink-tts": { entity_id: string; service?: string };
   toggle: { initial?: boolean; persistence?: "seed-at-boot" | "durable" | "reseed-from-world"; entity_id?: string };
+  latch: { initial?: boolean; priority?: "set" | "reset"; persistence?: "seed-at-boot" | "durable" | "reseed-from-world"; entity_id?: string };
   hold: { initial?: unknown; persistence?: "seed-at-boot" | "durable" | "reseed-from-world"; entity_id?: string };
   fold: { initial?: number; op?: "sum" | "count" | "min" | "max"; persistence?: "seed-at-boot" | "durable" | "reseed-from-world" };
   scan: { initial?: number; op?: "sum" | "count" | "min" | "max"; persistence?: "seed-at-boot" | "durable" | "reseed-from-world" };
